@@ -478,20 +478,19 @@ async function exportAllCSV() {
     downloadCsv(`workers_${date}.csv`, makeCsv(workerRows));
     await new Promise(r => setTimeout(r, 400));
 
-    // 3. ref таблицы — запрашиваем свежие данные
+    // 3. ref таблицы — через Worker (как всё остальное)
     const refTables = [
       'ref_cars', 'ref_warehouses', 'ref_equipment',
       'ref_services', 'ref_payment_statuses',
       'ref_partners', 'ref_supplier_statuses',
     ];
     for (const table of refTables) {
-      const res = await fetch(
-        `${SUPABASE_URL}/rest/v1/${table}?limit=10000`,
-        { headers: sbHeaders }
-      );
-      if (!res.ok) { showToast(`Ошибка загрузки ${table}`, 'error'); continue; }
-      const rows = await res.json();
-      if (rows.length) downloadCsv(`${table}_${date}.csv`, makeCsv(rows));
+      try {
+        const rows = await sbFetchRef(table);
+        if (rows.length) downloadCsv(`${table}_${date}.csv`, makeCsv(rows));
+      } catch (e) {
+        showToast(`Ошибка загрузки ${table}`, 'error');
+      }
       await new Promise(r => setTimeout(r, 300));
     }
 
