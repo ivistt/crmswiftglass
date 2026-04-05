@@ -609,9 +609,9 @@ body {
 .order-id {
   font-size: 10px;
   font-weight: 700;
-  color: var(--text3);
+  color: var(--bg);
   font-family: 'JetBrains Mono', monospace;
-  background: var(--surface3);
+  background: var(--accent);
   padding: 2px 7px;
   border-radius: 5px;
 }
@@ -1083,7 +1083,7 @@ body {
   .back-btn { font-size: 12px; }
 
   .orders-tabs { gap: 6px; padding-bottom: 12px; }
-  .orders-tab { font-size: 11px; padding: 7px 12px; }
+  .orders-tab { font-size: 11px; padding: 7px 12px; display: flex;}
 
   .order-card { padding: 14px 16px; }
   .order-name { font-size: 14px; }
