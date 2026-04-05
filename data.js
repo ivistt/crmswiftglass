@@ -257,6 +257,8 @@ function rowToOrder(r) {
     time:            r.time,
     statusDone:      r.status_done || false,
     inWork:          r.in_work || false,
+    workerDone:      r.worker_done || false,
+    assistant:       r.assistant || '',
   };
 }
 
@@ -301,26 +303,94 @@ function orderToRow(o) {
     time:             o.time,
     status_done:      o.statusDone || false,
     in_work:          o.inWork     || false,
+    worker_done:      o.workerDone || false,
+    assistant:        o.assistant  || null,
   };
 }
 
 function rowToWorker(r) {
   return {
-    id:         r.id,
-    name:       r.name,
-    role:       r.role       || '',
-    systemRole: r.system_role || 'junior',
-    note:       r.note       || '',
+    id:            r.id,
+    name:          r.name,
+    role:          r.role          || '',
+    systemRole:    r.system_role   || 'junior',
+    note:          r.note          || '',
+    salaryFormula: r.salary_formula || '',
   };
 }
 
 function workerToRow(w) {
   return {
-    name:        w.name,
-    role:        w.role        || '',
-    system_role: w.systemRole  || 'junior',
-    note:        w.note        || '',
+    name:           w.name,
+    role:           w.role          || '',
+    system_role:    w.systemRole    || 'junior',
+    note:           w.note          || '',
+    salary_formula: w.salaryFormula || '',
   };
+}
+
+// ── WORKER FORMULA API ───────────────────────────────────────
+
+async function sbUpdateWorkerFormula(workerId, formula) {
+  const res = await fetch(`${WORKER_URL}/api/workers/${encodeURIComponent(workerId)}`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+    body: JSON.stringify({ salary_formula: formula }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const rows = await res.json();
+  return rows[0] ? rowToWorker(rows[0]) : null;
+}
+
+// ── ФОРМУЛЬНЫЙ ДВИЖОК ────────────────────────────────────────
+
+// Дефолтные формулы по системной роли
+const DEFAULT_SALARY_FORMULA = {
+  senior: 'percent * 0.20',
+  junior: 'percent * 0.10',
+};
+
+// Прибыль по конкретному заказу
+function calcOrderProfit(order) {
+  return (Number(order.total) || 0) - (Number(order.purchase) || 0);
+}
+
+// Безопасно вычисляет формулу. Переменная: percent (прибыль по заказу).
+function evalSalaryFormula(formula, profit) {
+  if (!formula || !formula.trim()) return null;
+  try {
+    const safe = formula.replace(/percent/g, String(profit));
+    if (/[a-zA-Z_$]/.test(safe)) return null;
+    // eslint-disable-next-line no-new-func
+    const result = Function('"use strict"; return (' + safe + ')')();
+    if (typeof result !== 'number' || !isFinite(result)) return null;
+    return Math.round(result);
+  } catch {
+    return null;
+  }
+}
+
+// Возвращает формулу работника (или дефолтную по роли)
+function getWorkerFormula(workerName) {
+  const w = workers.find(x => x.name === workerName);
+  if (!w) return '';
+  if (w.salaryFormula && w.salaryFormula.trim()) return w.salaryFormula;
+  return DEFAULT_SALARY_FORMULA[w.systemRole] || '';
+}
+
+// ЗП за конкретный заказ для конкретного сотрудника
+function calcOrderSalary(workerName, order) {
+  const formula = getWorkerFormula(workerName);
+  const profit  = calcOrderProfit(order);
+  const result  = evalSalaryFormula(formula, profit);
+  return result != null ? result : 0;
+}
+
+// Итоговая зп за день (используется в profile для совместимости)
+function calcDaySalary(workerName, date) {
+  return orders
+    .filter(o => o.workerDone && o.date === date && (o.responsible === workerName || o.assistant === workerName))
+    .reduce((sum, o) => sum + calcOrderSalary(workerName, o), 0);
 }
 
 // ── GLOBAL STATE ─────────────────────────────────────────────
@@ -367,6 +437,7 @@ function canViewClients()  { return currentRole === 'owner' || currentRole === '
 function canViewWorkers()  { return currentRole === 'owner'; }
 function canDeleteOrder()  { return currentRole === 'owner'; }
 function canViewFinance()  { return currentRole === 'owner'; }
+function canMarkWorkerDone() { return currentRole === 'senior' || currentRole === 'junior'; }
 
 function getClients() {
   const map = {};

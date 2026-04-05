@@ -195,15 +195,36 @@ function renderSalaryRowsCompact(ym) {
     if (!byWorker[s.worker_name]) byWorker[s.worker_name] = 0;
     byWorker[s.worker_name] += Number(s.amount);
   }
-  return Object.entries(byWorker).map(([name, total]) => `
-    <div class="fin-salary-row">
-      <div class="fin-salary-worker">
-        <div class="worker-avatar" style="width:28px;height:28px;font-size:11px;border-radius:8px;">${getInitials(name)}</div>
-        <span style="font-size:13px;">${name}</span>
+  return Object.entries(byWorker).map(([name, total]) => {
+    const w = workers.find(x => x.name === name);
+    const showFormula = w && (w.systemRole === 'senior' || w.systemRole === 'junior');
+    const formula     = w ? (w.salaryFormula || DEFAULT_SALARY_FORMULA[w.systemRole] || '') : '';
+    const wid         = w ? w.id : null;
+
+    const formulaBadge = showFormula && wid ? `
+      <div style="display:flex;align-items:center;gap:5px;margin-top:3px;flex-wrap:wrap;">
+        <span style="font-size:11px;color:var(--text3);">Формула:</span>
+        <code id="ff-display-${wid}" style="font-size:11px;color:var(--accent);background:var(--surface2);padding:1px 6px;border-radius:4px;">${escapeHtml(formula) || '—'}</code>
+        <button id="ff-edit-${wid}" class="icon-btn" title="Изменить формулу" style="width:20px;height:20px;border-radius:5px;padding:0;"
+          onclick="openFormulaModal('${wid}', '${escapeAttr(name)}', '${escapeAttr(formula)}')">
+          <i data-lucide="pencil" style="width:9px;height:9px;"></i>
+        </button>
       </div>
-      <span style="font-weight:700;color:var(--yellow);font-size:14px;">${total.toLocaleString('ru')} ₴</span>
-    </div>
-  `).join('');
+    ` : '';
+
+    return `
+      <div class="fin-salary-row" style="flex-wrap:wrap;align-items:flex-start;gap:4px;">
+        <div class="fin-salary-worker" style="flex:1;min-width:0;">
+          <div class="worker-avatar" style="width:28px;height:28px;font-size:11px;border-radius:8px;flex-shrink:0;">${getInitials(name)}</div>
+          <div style="min-width:0;">
+            <div style="font-size:13px;">${name}</div>
+            ${formulaBadge}
+          </div>
+        </div>
+        <span style="font-weight:700;color:var(--yellow);font-size:14px;align-self:center;">${total.toLocaleString('ru')} ₴</span>
+      </div>
+    `;
+  }).join('');
 }
 
 // ============================================================
@@ -299,7 +320,7 @@ function renderSalaryScreen() {
     }).join('') || '<div style="color:var(--text3);padding:16px 0;">Нет записей</div>';
 
   } else if (state.worker && state.year && state.month) {
-    // Уровень 4: дни с редактированием
+    // Уровень 4: дни → заказы
     const MONTH_NAMES = ['Январь','Февраль','Март','Апрель','Май','Июнь',
       'Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
     const ym = `${state.year}-${state.month}`;
@@ -309,36 +330,48 @@ function renderSalaryScreen() {
       .sort((a, b) => b.date.localeCompare(a.date));
     const total = rows.reduce((sum, s) => sum + Number(s.amount), 0);
 
+    // Группируем по дням
+    const byDay = {};
+    for (const s of rows) {
+      if (!byDay[s.date]) byDay[s.date] = [];
+      byDay[s.date].push(s);
+    }
+    const sortedDays = Object.keys(byDay).sort((a, b) => b.localeCompare(a));
+
+    const daysHtml = sortedDays.map(date => {
+      const entries = byDay[date];
+      const daySum  = entries.reduce((s, e) => s + Number(e.amount), 0);
+      const ordersHtml = entries.map(e => {
+        const order = orders.find(o => o.id === e.order_id);
+        const label = order
+          ? `${order.id} · ${order.car || order.client || '—'}`
+          : (e.order_id || 'Начисление');
+        return `<div style="display:flex;justify-content:space-between;align-items:center;
+          padding:5px 0 5px 12px;border-left:2px solid var(--border);">
+          <div style="font-size:12px;color:var(--text3);">${label}</div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:13px;font-weight:700;color:var(--yellow);">${Number(e.amount).toLocaleString('ru')} ₴</span>
+            <button class="icon-btn" title="Удалить" onclick="deleteSalaryEntry('${e.id}', '${ym}')"
+              style="width:24px;height:24px;border-radius:6px;">
+              <i data-lucide="trash-2" style="width:10px;height:10px;"></i>
+            </button>
+          </div>
+        </div>`;
+      }).join('');
+      return `<div style="padding:10px 0;border-bottom:1px solid var(--border);">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <div style="font-size:14px;font-weight:600;color:var(--text2);">${formatDate(date)}</div>
+          <div style="font-weight:800;color:var(--yellow);">${daySum.toLocaleString('ru')} ₴</div>
+        </div>
+        ${ordersHtml}
+      </div>`;
+    }).join('');
+
     container.innerHTML = `
       <div style="font-size:13px;color:var(--text3);margin-bottom:12px;">
         Итого за месяц: <span style="font-weight:800;color:var(--yellow);font-size:15px;">${total.toLocaleString('ru')} ₴</span>
       </div>
-      ${rows.map(s => `
-        <div class="sal-day-row" id="sal-row-${s.id}">
-          <div style="font-size:14px;color:var(--text2);font-weight:600;">${formatDate(s.date)}</div>
-          <div style="display:flex;align-items:center;gap:8px;">
-            <div class="sal-amount-display" id="sal-display-${s.id}" style="font-weight:700;color:var(--yellow);font-size:15px;">${Number(s.amount).toLocaleString('ru')} ₴</div>
-            <input class="form-input sal-amount-input" id="sal-input-${s.id}"
-              type="number" value="${s.amount}"
-              style="display:none;width:90px;height:32px;font-size:14px;padding:4px 8px;">
-            <button class="icon-btn" title="Редактировать" id="sal-edit-btn-${s.id}"
-              onclick="startEditSalary('${s.id}', ${s.amount})"
-              style="width:28px;height:28px;border-radius:8px;">
-              <i data-lucide="pencil" style="width:12px;height:12px;"></i>
-            </button>
-            <button class="icon-btn" title="Сохранить" id="sal-save-btn-${s.id}"
-              onclick="saveEditSalary('${s.id}', '${ym}')"
-              style="display:none;width:28px;height:28px;border-radius:8px;background:var(--accent);color:#000;">
-              <i data-lucide="check" style="width:12px;height:12px;"></i>
-            </button>
-            <button class="icon-btn" title="Удалить" id="sal-del-btn-${s.id}"
-              onclick="deleteSalaryEntry('${s.id}', '${ym}')"
-              style="width:28px;height:28px;border-radius:8px;">
-              <i data-lucide="trash-2" style="width:12px;height:12px;"></i>
-            </button>
-          </div>
-        </div>
-      `).join('') || '<div style="color:var(--text3);padding:16px 0;">Нет записей</div>'}
+      ${daysHtml || '<div style="color:var(--text3);padding:16px 0;">Нет записей</div>'}
     `;
   }
 

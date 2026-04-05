@@ -5,30 +5,7 @@
 let editingOrderId = null; // null = новый, иначе id редактируемого
 let currentOrderTab = 'inwork'; // 'inwork' | 'all' — только для owner
 
-function setOrderTab(tab) {
-  currentOrderTab = tab;
-  document.querySelectorAll('.orders-tab').forEach(b => b.classList.remove('active'));
-  const el = document.getElementById('tab-' + tab);
-  if (el) el.classList.add('active');
-  if (currentMonthFilter) {
-    renderOrdersForMonth(currentMonthFilter);
-  } else {
-    renderOrders();
-  }
-}
 
-function initOrderTabs() {
-  const tabsEl = document.getElementById('orders-tabs');
-  if (currentRole === 'owner' || currentRole === 'manager') {
-    // Показываем табы, по умолчанию "В работе"
-    if (tabsEl) tabsEl.style.display = 'flex';
-    setOrderTab('inwork');
-  } else {
-    // Работники — табов нет, всегда inWork
-    if (tabsEl) tabsEl.style.display = 'none';
-    currentOrderTab = 'inwork';
-  }
-}
 
 // ---------- КНОПКА ДОБАВИТЬ ----------
 function setupOrderActions() {
@@ -93,15 +70,23 @@ function renderOrders() {
         <div style="display:flex;gap:8px;align-items:center;">
           ${statusBadge(o.paymentStatus)}
           ${mountBadge(o.mount)}
+          ${o.workerDone && !o.statusDone && currentRole === 'owner' ? '<span class="mount-badge review-badge">⏳ На проверке</span>' : ''}
         </div>
       </div>
       <div class="order-card-meta">
         <span class="order-meta-item">👤 ${o.client || '—'}</span>
         <span class="order-meta-item">☎️ ${o.phone || '—'}</span>
         <span class="order-meta-item">🗓️ ${formatDate(o.date)}</span>
-        <span class="order-meta-item">🚧 ${o.responsible || '—'}</span>
+        <span class="order-meta-item">🚧 ${o.responsible || '—'}${o.assistant ? ' + ' + o.assistant : ''}</span>
         ${o.total ? `<span class="order-meta-item" style="font-weight:700;color:var(--accent);">💰 ${Number(o.total).toLocaleString('ru')} ₴</span>` : ''}
       </div>
+      ${canMarkWorkerDone() && !o.statusDone && o.responsible === currentWorkerName ? `
+        <div class="worker-done-row" onclick="event.stopPropagation()">
+          <button class="btn-worker-done ${o.workerDone ? 'active' : ''}" onclick="toggleWorkerDone('${o.id}')">
+            ${o.workerDone ? '✓ Выполнено — отменить' : 'Отметить выполненным'}
+          </button>
+        </div>
+      ` : ''}
     </div>
   `).join('');
 }
@@ -291,6 +276,14 @@ function populateRefSelects() {
       workers.map(w => `<option value="${w.name}">${w.name}</option>`).join('');
     if (cur) authorSel.value = cur;
   }
+
+  const assistantSel = document.getElementById('f-assistant');
+  if (assistantSel) {
+    const cur = assistantSel.value;
+    assistantSel.innerHTML = '<option value="">— нет —</option>' +
+      workers.map(w => `<option value="${w.name}">${w.name}</option>`).join('');
+    if (cur) assistantSel.value = cur;
+  }
 }
 
 // Список вариантов менеджера (из скриншота)
@@ -418,6 +411,15 @@ function openOrderModal(id) {
     }
   });
 
+  // Авторасчёт total из полей работ
+  ['f-mount','f-glass','f-molding','f-extra-work','f-tatu','f-toning','f-delivery'].forEach(fid => {
+    const el = document.getElementById(fid);
+    if (!el) return;
+    const newEl = el.cloneNode(true);
+    el.parentNode.replaceChild(newEl, el);
+    newEl.addEventListener('input', recalcTotal);
+  });
+
   // Автопересчёт финансов
   const totalEl = document.getElementById('f-total');
   const newTotal = totalEl.cloneNode(true);
@@ -482,6 +484,8 @@ function fillOrderForm(o) {
   if (sdEl) sdEl.checked = !!o.statusDone;
   const iwEl = document.getElementById('f-in-work');
   if (iwEl) iwEl.checked = !!o.inWork;
+  const asEl = document.getElementById('f-assistant');
+  if (asEl) asEl.value = o.assistant || '';
   // перерисовать чекбоксы менеджера с текущим значением
   populateAuthorCheckboxes();
 }
@@ -499,7 +503,7 @@ function clearOrderForm() {
   const sdEl = document.getElementById('f-status-done');
   if (sdEl) sdEl.checked = false;
   const iwEl = document.getElementById('f-in-work');
-  if (iwEl) iwEl.checked = false;
+  if (iwEl) iwEl.checked = true;
 }
 
 function setPriceFieldsLocked(locked) {
@@ -529,6 +533,13 @@ function recalcRemainder() {
   const income   = Number(document.getElementById('f-income').value) || 0;
   const purchase = Number(document.getElementById('f-purchase').value) || 0;
   document.getElementById('f-remainder').value = income - purchase;
+}
+
+function recalcTotal() {
+  const sum = ['f-mount','f-glass','f-molding','f-extra-work','f-tatu','f-toning','f-delivery']
+    .reduce((s, id) => s + (Number(document.getElementById(id)?.value) || 0), 0);
+  const totalEl = document.getElementById('f-total');
+  if (totalEl) { totalEl.value = sum; recalcPercents(); }
 }
 
 // ---------- СОХРАНЕНИЕ ----------
@@ -577,6 +588,8 @@ async function saveOrder() {
     warehouseDelta:  get('f-warehouse-delta'),
     statusDone:      document.getElementById('f-status-done')?.checked || false,
     inWork:          document.getElementById('f-in-work')?.checked || false,
+    workerDone:      isNew ? false : (orders.find(x => x.id === editingOrderId)?.workerDone || false),
+    assistant:       document.getElementById('f-assistant')?.value || '',
     priceLocked:     true,
   };
 
@@ -648,7 +661,10 @@ function formatDate(d) {
 }
 
 function todayStr() {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  return d.getFullYear() + '-'
+    + String(d.getMonth() + 1).padStart(2, '0') + '-'
+    + String(d.getDate()).padStart(2, '0');
 }
 
 // ---------- ЭКРАН МЕСЯЦЕВ ----------
@@ -765,15 +781,184 @@ function renderOrdersForMonth(ym) {
         <div style="display:flex;gap:8px;align-items:center;">
           ${statusBadge(o.paymentStatus)}
           ${mountBadge(o.mount)}
+          ${o.workerDone && !o.statusDone && currentRole === 'owner' ? '<span class="mount-badge review-badge">⏳ На проверке</span>' : ''}
         </div>
       </div>
       <div class="order-card-meta">
         <span class="order-meta-item">👤 ${o.client || '—'}</span>
         <span class="order-meta-item">☎️ ${o.phone || '—'}</span>
         <span class="order-meta-item">🗓️ ${formatDate(o.date)}</span>
-        <span class="order-meta-item">🚧 ${o.responsible || '—'}</span>
+        <span class="order-meta-item">🚧 ${o.responsible || '—'}${o.assistant ? ' + ' + o.assistant : ''}</span>
         ${o.total ? `<span class="order-meta-item" style="font-weight:700;color:var(--accent);">💰 ${Number(o.total).toLocaleString('ru')} ₴</span>` : ''}
+      </div>
+      ${canMarkWorkerDone() && !o.statusDone && o.responsible === currentWorkerName ? `
+        <div class="worker-done-row" onclick="event.stopPropagation()">
+          <button class="btn-worker-done ${o.workerDone ? 'active' : ''}" onclick="toggleWorkerDone('${o.id}')">
+            ${o.workerDone ? '✓ Выполнено — отменить' : 'Отметить выполненным'}
+          </button>
+        </div>
+      ` : ''}
+    </div>
+  `).join('');
+}
+
+// ---------- WORKER DONE — СПЕЦИАЛИСТ ОТМЕЧАЕТ ВЫПОЛНЕНИЕ ----------
+
+async function toggleWorkerDone(orderId) {
+  const o = orders.find(x => x.id === orderId);
+  if (!o) return;
+  o.workerDone = !o.workerDone;
+  try {
+    await sbUpdateOrder(o);
+    await _upsertOrderSalaries(o);
+    updateReviewBadge();
+    currentMonthFilter ? renderOrdersForMonth(currentMonthFilter) : renderOrders();
+    showToast(o.workerDone ? '✓ Выполнено — ЗП начислена' : 'Отметка снята');
+    if (document.getElementById('screen-profile')?.classList.contains('active')) {
+      await loadWorkerSalaries();
+      renderProfile();
+    }
+  } catch (e) {
+    o.workerDone = !o.workerDone;
+    showToast('Ошибка: ' + e.message, 'error');
+  }
+}
+
+// Начислить / удалить записи ЗП для responsible + assistant по конкретному заказу
+async function _upsertOrderSalaries(order) {
+  const _d = new Date();
+  const today = _d.getFullYear() + '-'
+    + String(_d.getMonth() + 1).padStart(2, '0') + '-'
+    + String(_d.getDate()).padStart(2, '0');
+  const participants = [order.responsible, order.assistant].filter(Boolean);
+
+  for (const workerName of participants) {
+    const salArr = typeof workerSalaries !== 'undefined' ? workerSalaries : [];
+    const allArr = typeof allSalaries   !== 'undefined' ? allSalaries   : [];
+    const existingEntry =
+      salArr.find(s => s && s.order_id === order.id && s.worker_name === workerName) ||
+      allArr.find(s => s && s.order_id === order.id && s.worker_name === workerName);
+
+    if (order.workerDone) {
+      const amount = calcOrderSalary(workerName, order);
+      if (amount < 0) continue;
+      if (!existingEntry) {
+        const saved = await sbInsertWorkerSalary({ worker_name: workerName, date: today, amount, order_id: order.id });
+        const entry = saved || { worker_name: workerName, date: today, amount, order_id: order.id, id: null };
+        if (typeof workerSalaries !== 'undefined' && workerName === currentWorkerName) workerSalaries.push(entry);
+        if (typeof allSalaries   !== 'undefined') allSalaries.push(entry);
+      } else {
+        await sbUpdateWorkerSalary(existingEntry.id, amount);
+        existingEntry.amount = amount;
+      }
+    } else {
+      if (existingEntry) {
+        await sbDeleteWorkerSalary(existingEntry.id);
+        if (typeof workerSalaries !== 'undefined') {
+          // eslint-disable-next-line no-undef
+          workerSalaries = workerSalaries.filter(s => s.id !== existingEntry.id);
+        }
+        if (typeof allSalaries !== 'undefined') {
+          // eslint-disable-next-line no-undef
+          allSalaries = allSalaries.filter(s => s.id !== existingEntry.id);
+        }
+      }
+    }
+  }
+}
+
+// ---------- OWNER — ЭКРАН "НА ПРОВЕРКЕ" ----------
+
+function initOrderTabs() {
+  const tabsEl = document.getElementById('orders-tabs');
+  if (currentRole === 'owner' || currentRole === 'manager') {
+    if (tabsEl) tabsEl.style.display = 'flex';
+    if (currentRole === 'owner') {
+      if (!document.getElementById('tab-review')) {
+        const reviewBtn = document.createElement('button');
+        reviewBtn.className = 'orders-tab';
+        reviewBtn.id = 'tab-review';
+        reviewBtn.onclick = () => setOrderTab('review');
+        reviewBtn.innerHTML = '<span class="ico" style="margin-right:5px;"><i data-lucide="clock" style="width:13px;height:13px;"></i></span> На проверке <span class="review-count-badge" id="review-count-badge"></span>';
+        tabsEl.appendChild(reviewBtn);
+        initIcons();
+      }
+      updateReviewBadge();
+    }
+    setOrderTab('inwork');
+  } else {
+    if (tabsEl) tabsEl.style.display = 'none';
+    currentOrderTab = 'inwork';
+  }
+}
+
+function setOrderTab(tab) {
+  currentOrderTab = tab;
+  document.querySelectorAll('.orders-tab').forEach(b => b.classList.remove('active'));
+  const el = document.getElementById('tab-' + tab);
+  if (el) el.classList.add('active');
+  if (tab === 'review') { renderReviewOrders(); return; }
+  if (currentMonthFilter) {
+    renderOrdersForMonth(currentMonthFilter);
+  } else {
+    renderOrders();
+  }
+}
+
+function updateReviewBadge() {
+  const count = orders.filter(o => o.workerDone && !o.statusDone).length;
+  const badge = document.getElementById('review-count-badge');
+  if (badge) badge.textContent = count > 0 ? count : '';
+}
+
+function renderReviewOrders() {
+  const list = orders.filter(o => o.workerDone && !o.statusDone);
+  const container = document.getElementById('orders-list');
+  if (!list.length) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state-icon">✅</div>
+        <h3>Нет заказов на проверке</h3>
+        <p>Специалисты ещё не отметили выполненные работы</p>
+      </div>`;
+    return;
+  }
+  container.innerHTML = list.map(o => `
+    <div class="order-card">
+      <div class="order-card-top" onclick="openOrderDetail('${o.id}')">
+        <div class="order-card-left">
+          <span class="order-id">${o.id}</span>
+          <span class="order-name">${o.car || '—'}</span>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          ${statusBadge(o.paymentStatus)}
+          <span class="mount-badge review-badge">⏳ На проверке</span>
+        </div>
+      </div>
+      <div class="order-card-meta">
+        <span class="order-meta-item">👤 ${o.client || '—'}</span>
+        <span class="order-meta-item">🚧 ${o.responsible || '—'}${o.assistant ? ' + ' + o.assistant : ''}</span>
+        <span class="order-meta-item">🗓️ ${formatDate(o.date)}</span>
+        ${o.total ? `<span class="order-meta-item" style="font-weight:700;color:var(--accent);">💰 ${Number(o.total).toLocaleString('ru')} ₴</span>` : ''}
+      </div>
+      <div class="worker-done-row" onclick="event.stopPropagation()">
+        <button class="btn-confirm-done" onclick="confirmOrderDone('${o.id}')">✓ Подтвердить и закрыть</button>
       </div>
     </div>
   `).join('');
+}
+
+async function confirmOrderDone(orderId) {
+  const o = orders.find(x => x.id === orderId);
+  if (!o) return;
+  o.statusDone = true;
+  try {
+    await sbUpdateOrder(o);
+    renderReviewOrders();
+    updateReviewBadge();
+    showToast('Заказ закрыт ✓');
+  } catch (e) {
+    o.statusDone = false;
+    showToast('Ошибка: ' + e.message, 'error');
+  }
 }
