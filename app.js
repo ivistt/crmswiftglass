@@ -38,6 +38,12 @@ function updateNavbarVisibility() {
     if (navHome)   navHome.style.display   = '';
     if (navProfile) navProfile.style.display = 'none';
     document.getElementById('app')?.classList.remove('no-navbar');
+  } else if (currentRole === 'manager') {
+    // Менеджер: Записи + Клиенты + Профиль
+    if (bottomNav) bottomNav.style.display = '';
+    if (navHome)   navHome.style.display   = 'none';
+    if (navProfile) navProfile.style.display = '';
+    document.getElementById('app')?.classList.remove('no-navbar');
   } else {
     // Специалисты видят навбар с кнопками: Записи + Профиль
     if (bottomNav) bottomNav.style.display = '';
@@ -63,7 +69,7 @@ function navTo(section) {
 }
 
 function openFinanceScreen() {
-  if (currentRole !== 'owner') return;
+  if (!canViewFinance()) return;
   renderFinance();
   showScreen('finance');
 }
@@ -178,7 +184,7 @@ function renderHome() {
     `;
   }
 
-  if (currentRole === 'owner') {
+  if (canViewFinance()) {
     const totalSum = orders.reduce((s, o) => s + (Number(o.total) || 0), 0);
     container.innerHTML += `
       <div class="home-card" onclick="openFinanceScreen()">

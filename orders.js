@@ -19,7 +19,7 @@ function setOrderTab(tab) {
 
 function initOrderTabs() {
   const tabsEl = document.getElementById('orders-tabs');
-  if (currentRole === 'owner') {
+  if (currentRole === 'owner' || currentRole === 'manager') {
     // Показываем табы, по умолчанию "В работе"
     if (tabsEl) tabsEl.style.display = 'flex';
     setOrderTab('inwork');
@@ -49,8 +49,8 @@ function renderOrders() {
 
   let list = [...orders];
 
-  // Работники всегда видят только inWork. Owner фильтрует по табу.
-  if (currentRole !== 'owner' || currentOrderTab === 'inwork') {
+  // Работники всегда видят только inWork. Owner и Manager фильтруют по табу.
+  if (currentRole !== 'owner' && currentRole !== 'manager' || currentOrderTab === 'inwork') {
     list = list.filter(o => o.inWork);
   } else if (currentOrderTab === 'notinwork') {
     list = list.filter(o => !o.inWork);
@@ -113,7 +113,7 @@ function openOrderDetail(id) {
 
   const el = document.getElementById('order-detail-content');
 
-  const canEdit   = currentRole === 'owner' || currentRole === 'senior';
+  const canEdit   = currentRole === 'owner' || currentRole === 'senior' || currentRole === 'manager';
   const canDelete = canDeleteOrder();
 
   // Кнопки в топ-баре рядом с "назад"
@@ -171,7 +171,7 @@ function openOrderDetail(id) {
       </div>
     </div>
 
-    ${currentRole === 'owner' ? `
+    ${canViewFinance() ? `
     <div class="detail-section">
       <div class="detail-section-title">💸 Фінанси</div>
       <div class="detail-grid">
@@ -694,11 +694,11 @@ function renderMonths() {
     const [year, month] = ym.split('-');
     const monthName = MONTH_NAMES_RU[parseInt(month) - 1];
     const list = map[ym];
-    const displayList = currentRole === 'owner' ? list : list.filter(o => o.inWork);
+    const displayList = (currentRole === 'owner' || currentRole === 'manager') ? list : list.filter(o => o.inWork);
     const totalSum = list.reduce((s, o) => s + (Number(o.total) || 0), 0);
     return `
       <div class="home-card" style="display:flex;flex-direction:column;min-height:110px;" onclick="openMonthOrders('${ym}')">
-        <div style="font-size:12px;color:var(--text3);font-weight:600;letter-spacing:0.04em;">${displayList.length} зап.${currentRole === 'owner' ? ` &middot; ${totalSum.toLocaleString('ru')} &#x20B4;` : ''}</div>
+        <div style="font-size:12px;color:var(--text3);font-weight:600;letter-spacing:0.04em;">${displayList.length} зап.${canViewFinance() ? ` &middot; ${totalSum.toLocaleString('ru')} &#x20B4;` : ''}</div>
         <div style="margin-top:auto;padding-top:12px;">
           <div style="font-size:26px;font-weight:800;line-height:1.1;">${monthName}</div>
           <div style="font-size:13px;color:var(--text3);margin-top:3px;">${year}</div>
@@ -726,8 +726,8 @@ function renderOrdersForMonth(ym) {
 
   let list = orders.filter(o => o.date && o.date.slice(0, 7) === ym);
 
-  // Работники всегда видят только inWork. Owner фильтрует по табу.
-  if (currentRole !== 'owner' || currentOrderTab === 'inwork') {
+  // Работники всегда видят только inWork. Owner и Manager фильтруют по табу.
+  if (currentRole !== 'owner' && currentRole !== 'manager' || currentOrderTab === 'inwork') {
     list = list.filter(o => o.inWork);
   } else if (currentOrderTab === 'notinwork') {
     list = list.filter(o => !o.inWork);

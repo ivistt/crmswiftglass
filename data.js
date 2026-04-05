@@ -290,9 +290,10 @@ function workerToRow(w) {
 // ── GLOBAL STATE ─────────────────────────────────────────────
 
 const ROLE_LABELS = {
-  owner:  '👑 Maks',
-  senior: '🔧 Старший специалист',
-  junior: '👤 Младший специалист',
+  owner:   '👑 Maks',
+  manager: '📋 Менеджер',
+  senior:  '🔧 Старший специалист',
+  junior:  '👤 Младший специалист',
 };
 
 let currentRole = null;
@@ -319,15 +320,17 @@ function generateOrderId() {
   return 'SG-' + String(next).padStart(4, '0');
 }
 
-function canCreateOrder()    { return currentRole === 'owner' || currentRole === 'senior'; }
+function canCreateOrder()    { return currentRole === 'owner' || currentRole === 'senior' || currentRole === 'manager'; }
 function canEditPrice(order) {
   if (currentRole === 'owner') return true;
   if (currentRole === 'senior') return !order.priceLocked;
+  if (currentRole === 'manager') return !order.priceLocked;
   return false;
 }
-function canViewClients() { return currentRole === 'owner'; }
-function canViewWorkers() { return currentRole === 'owner'; }
-function canDeleteOrder() { return currentRole === 'owner'; }
+function canViewClients()  { return currentRole === 'owner' || currentRole === 'manager'; }
+function canViewWorkers()  { return currentRole === 'owner'; }
+function canDeleteOrder()  { return currentRole === 'owner'; }
+function canViewFinance()  { return currentRole === 'owner'; }
 
 function getClients() {
   const map = {};
