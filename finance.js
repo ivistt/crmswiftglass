@@ -73,11 +73,11 @@ async function renderFinance() {
 
   container.innerHTML = `
     <!-- Инструменты архивации -->
-    <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
-      <button class="btn-secondary" style="display:flex;align-items:center;gap:6px;" onclick="exportAllCSV()">
-        <i data-lucide="download" style="width:14px;height:14px;"></i> Скачать все таблицы
+    <div style="display:flex;gap:10px;margin-bottom:16px;">
+      <button class="btn-secondary" style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;" onclick="exportAllCSV()">
+        <i data-lucide="download" style="width:14px;height:14px;"></i> Скачать
       </button>
-      <button class="btn-danger" style="display:flex;align-items:center;gap:6px;" onclick="deleteDoneOrders()">
+      <button class="btn-danger" style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;" onclick="deleteDoneOrders()">
         <i data-lucide="trash-2" style="width:14px;height:14px;"></i> Удалить выполненные
       </button>
     </div>
@@ -453,60 +453,64 @@ let _problemYm = null;
 function openAddProblemModal(ym) {
   _problemYm = ym;
   const partnerOptions = workers
-    .map(w => `<option value="${w.name}">${w.name}</option>`)
+    .map(w => '<option value="' + w.name + '">' + w.name + '</option>')
     .join('');
 
-  const modal = document.createElement('div');
-  modal.id = 'problem-modal';
-  modal.className = 'modal active';
-  modal.innerHTML = `
-    <div class="modal-content">
-      <div class="modal-header">
-        <div class="modal-title">⚠️ Добавить проблему</div>
-        <button class="modal-close" onclick="document.getElementById('problem-modal').remove()">✕</button>
-      </div>
-      <div class="modal-body" style="display:flex;flex-direction:column;gap:12px;">
-        <div class="form-group">
-          <label class="form-label">Сотрудник</label>
-          <select class="form-select" id="pm-worker">
-            <option value="">— выбрать —</option>
-            ${partnerOptions}
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Сумма (₴)</label>
-          <input class="form-input" type="number" id="pm-amount" placeholder="0">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Описание</label>
-          <input class="form-input" type="text" id="pm-desc" placeholder="Напр. разбитое стекло">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Заказ (необязательно)</label>
-          <input class="form-input" type="text" id="pm-order" placeholder="SG-XXXX">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Напарник (необязательно)</label>
-          <select class="form-select" id="pm-partner">
-            <option value="">— нет —</option>
-            ${partnerOptions}
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Дата</label>
-          <input class="form-input" type="date" id="pm-date" value="${new Date().toISOString().slice(0,10)}">
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn-secondary" onclick="document.getElementById('problem-modal').remove()">Отмена</button>
-        <button class="btn-primary" id="pm-save-btn" style="background:var(--red,#DC2626);" onclick="saveNewProblem()">
-          <i data-lucide="save" style="width:14px;height:14px;"></i> Сохранить
-        </button>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(modal);
+  let modal = document.getElementById('problem-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'problem-modal';
+    modal.className = 'modal-overlay';
+    modal.innerHTML = ''
+      + '<div class="modal">'
+      + '<div class="modal-header">'
+      + '<div class="modal-title">⚠️ Добавить проблему</div>'
+      + '<button class="modal-close" onclick="closeAddProblemModal()">✕</button>'
+      + '</div>'
+      + '<div class="modal-body" style="display:flex;flex-direction:column;gap:12px;">'
+      + '<div class="form-group"><label class="form-label">Сотрудник</label>'
+      + '<select class="form-select" id="pm-worker"><option value="">— выбрать —</option>' + partnerOptions + '</select></div>'
+      + '<div class="form-group"><label class="form-label">Сумма (₴)</label>'
+      + '<input class="form-input" type="number" id="pm-amount" placeholder="0"></div>'
+      + '<div class="form-group"><label class="form-label">Описание</label>'
+      + '<input class="form-input" type="text" id="pm-desc" placeholder="Напр. разбитое стекло"></div>'
+      + '<div class="form-group"><label class="form-label">Заказ (необязательно)</label>'
+      + '<input class="form-input" type="text" id="pm-order" placeholder="SG-XXXX"></div>'
+      + '<div class="form-group"><label class="form-label">Напарник (необязательно)</label>'
+      + '<select class="form-select" id="pm-partner"><option value="">— нет —</option>' + partnerOptions + '</select></div>'
+      + '<div class="form-group"><label class="form-label">Дата</label>'
+      + '<input class="form-input" type="date" id="pm-date"></div>'
+      + '</div>'
+      + '<div class="modal-footer">'
+      + '<button class="btn-secondary" onclick="closeAddProblemModal()">Отмена</button>'
+      + '<button class="btn-primary" id="pm-save-btn" style="background:var(--red,#DC2626);" onclick="saveNewProblem()">'
+      + '<i data-lucide="save" style="width:14px;height:14px;"></i> Сохранить</button>'
+      + '</div>'
+      + '</div>';
+    document.body.appendChild(modal);
+  }
+
+  // Сброс полей
+  const pmWorker = document.getElementById('pm-worker');
+  const pmAmount = document.getElementById('pm-amount');
+  const pmDesc   = document.getElementById('pm-desc');
+  const pmOrder  = document.getElementById('pm-order');
+  const pmPartner= document.getElementById('pm-partner');
+  const pmDate   = document.getElementById('pm-date');
+  if (pmWorker)  pmWorker.value  = '';
+  if (pmAmount)  pmAmount.value  = '';
+  if (pmDesc)    pmDesc.value    = '';
+  if (pmOrder)   pmOrder.value   = '';
+  if (pmPartner) pmPartner.value = '';
+  if (pmDate)    pmDate.value    = new Date().toISOString().slice(0, 10);
+
+  modal.classList.add('active');
   initIcons();
+}
+
+function closeAddProblemModal() {
+  const modal = document.getElementById('problem-modal');
+  if (modal) modal.classList.remove('active');
 }
 
 async function saveNewProblem() {
@@ -534,7 +538,7 @@ async function saveNewProblem() {
       order_id: orderId || null,
     });
     allProblems.unshift(saved);
-    document.getElementById('problem-modal')?.remove();
+    closeAddProblemModal();
     const el = document.getElementById('fin-problems-' + _problemYm);
     if (el) { el.innerHTML = renderProblemRowsCompact(_problemYm); initIcons(); }
     showToast('Проблема добавлена ✓');
