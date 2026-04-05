@@ -2,10 +2,31 @@
 // FINANCE.JS — экран финансов (только для owner)
 // ============================================================
 
-// Хранилище зарплат: { 'YYYY-MM': { 'workerName': amount } }
-let salaryData = {};
+// Зарплаты из БД: массив { id, worker_name, date, amount }
+let allSalaries = [];
 
-function renderFinance() {
+async function loadAllSalaries() {
+  try {
+    allSalaries = await sbFetchAllSalaries();
+  } catch (e) {
+    showToast('Ошибка загрузки зарплат: ' + e.message, 'error');
+  }
+}
+
+// Строим salaryData из allSalaries для совместимости с renderFinanceMonth
+function buildSalaryData() {
+  const map = {};
+  for (const s of allSalaries) {
+    const ym = s.date.slice(0, 7);
+    if (!map[ym]) map[ym] = {};
+    // Суммируем если несколько записей за разные дни одного месяца
+    map[ym][s.worker_name] = (map[ym][s.worker_name] || 0) + Number(s.amount);
+  }
+  return map;
+}
+
+async function renderFinance() {
+  await loadAllSalaries();
   const container = document.getElementById('finance-content');
 
   // Группируем заказы по месяцам
@@ -76,15 +97,9 @@ function renderFinance() {
 
 function calcTotalSalaries(ym) {
   // ym — опционально, если не указан — все месяцы
-  let total = 0;
-  const months = ym ? [ym] : Object.keys(salaryData);
-  for (const m of months) {
-    if (!salaryData[m]) continue;
-    for (const name of Object.keys(salaryData[m])) {
-      total += Number(salaryData[m][name]) || 0;
-    }
-  }
-  return total;
+  return allSalaries
+    .filter(s => !ym || s.date.startsWith(ym))
+    .reduce((sum, s) => sum + Number(s.amount), 0);
 }
 
 function renderFinanceMonth(ym, monthOrders) {
@@ -133,15 +148,15 @@ function renderFinanceMonth(ym, monthOrders) {
           ${finMetric('Прибыль за вычетом зарплат', profitAfterSal, profitAfterSal >= 0 ? 'var(--accent)' : 'var(--red)')}
         </div>
 
-        <!-- Зарплаты -->
-        <div class="fin-section-title" style="margin-top:16px;">
-          💰 Зарплаты
-          <button class="fin-add-salary-btn" onclick="openSalaryModal('${ym}')">
-            <i data-lucide="plus" style="width:12px;height:12px;"></i> Добавить
+        <!-- Зарплаты сотрудников (из профилей) -->
+        <div class="fin-section-title" style="margin-top:16px;display:flex;align-items:center;justify-content:space-between;">
+          <span>💰 Зарплаты сотрудников</span>
+          <button class="fin-add-salary-btn" onclick="openSalaryDetail()">
+            <i data-lucide="external-link" style="width:12px;height:12px;"></i> Подробнее
           </button>
         </div>
         <div id="fin-salaries-${ym}">
-          ${renderSalaryRows(ym)}
+          ${renderSalaryRowsCompact(ym)}
         </div>
 
       </div>
@@ -149,30 +164,211 @@ function renderFinanceMonth(ym, monthOrders) {
   `;
 }
 
-function renderSalaryRows(ym) {
-  const data = salaryData[ym] || {};
-  const names = Object.keys(data);
-
-  if (!names.length) {
-    return `<div style="font-size:13px;color:var(--text3);padding:10px 0;">
-      Зарплаты не добавлены
-    </div>`;
+// Компактный вид зарплат внутри месяца финансов
+function renderSalaryRowsCompact(ym) {
+  const rows = allSalaries.filter(s => s.date.startsWith(ym));
+  if (!rows.length) {
+    return `<div style="font-size:13px;color:var(--text3);padding:8px 0;">Зарплаты не внесены</div>`;
   }
-
-  return names.map(name => `
+  const byWorker = {};
+  for (const s of rows) {
+    if (!byWorker[s.worker_name]) byWorker[s.worker_name] = 0;
+    byWorker[s.worker_name] += Number(s.amount);
+  }
+  return Object.entries(byWorker).map(([name, total]) => `
     <div class="fin-salary-row">
       <div class="fin-salary-worker">
-        <div class="worker-avatar" style="width:32px;height:32px;font-size:12px;border-radius:10px;">${getInitials(name)}</div>
-        <span>${name}</span>
+        <div class="worker-avatar" style="width:28px;height:28px;font-size:11px;border-radius:8px;">${getInitials(name)}</div>
+        <span style="font-size:13px;">${name}</span>
       </div>
-      <div style="display:flex;align-items:center;gap:10px;">
-        <span style="font-weight:700;color:var(--yellow);">${Number(data[name]).toLocaleString('ru')} ₴</span>
-        <button class="icon-btn" style="width:28px;height:28px;border-radius:7px;" onclick="deleteSalary('${ym}','${name}')">
-          <i data-lucide="trash-2" style="width:12px;height:12px;"></i>
-        </button>
-      </div>
+      <span style="font-weight:700;color:var(--yellow);font-size:14px;">${total.toLocaleString('ru')} ₴</span>
     </div>
   `).join('');
+}
+
+// ============================================================
+// ДЕТАЛЬНЫЙ ЭКРАН ЗАРПЛАТ
+// ============================================================
+
+// Стек навигации: 'workers' | { worker: name } | { worker, year } | { worker, year, month }
+let salaryNavStack = [];
+
+function openSalaryDetail() {
+  salaryNavStack = [];
+  renderSalaryScreen();
+  document.getElementById('salary-detail-modal').classList.add('active');
+  initIcons();
+}
+
+function closeSalaryDetail() {
+  document.getElementById('salary-detail-modal').classList.remove('active');
+}
+
+function renderSalaryScreen() {
+  const state = salaryNavStack[salaryNavStack.length - 1] || null;
+  const container = document.getElementById('salary-detail-body');
+  const title     = document.getElementById('salary-detail-title');
+  const backBtn   = document.getElementById('salary-detail-back');
+
+  if (backBtn) backBtn.style.display = salaryNavStack.length > 0 ? 'flex' : 'none';
+
+  if (!state) {
+    // Уровень 1: все сотрудники
+    title.textContent = 'Зарплаты сотрудников';
+    const workerNames = [...new Set(allSalaries.map(s => s.worker_name))].sort();
+    if (!workerNames.length) {
+      container.innerHTML = `<div class="empty-state"><div class="empty-state-icon">💰</div><h3>Данных нет</h3></div>`;
+      return;
+    }
+    container.innerHTML = workerNames.map(name => {
+      const total = allSalaries.filter(s => s.worker_name === name).reduce((sum, s) => sum + Number(s.amount), 0);
+      return `
+        <div class="sal-nav-row" onclick="salaryNavPush({worker:'${name}'})">
+          <div style="display:flex;align-items:center;gap:12px;">
+            <div class="worker-avatar" style="width:40px;height:40px;font-size:14px;border-radius:12px;">${getInitials(name)}</div>
+            <div>
+              <div style="font-weight:700;font-size:15px;">${name}</div>
+              <div style="font-size:12px;color:var(--text3);">За всё время</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span style="font-weight:800;font-size:16px;color:var(--yellow);">${total.toLocaleString('ru')} ₴</span>
+            <i data-lucide="chevron-right" style="width:16px;height:16px;color:var(--text3);"></i>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+  } else if (state.worker && !state.year) {
+    // Уровень 2: года сотрудника
+    title.textContent = state.worker;
+    const rows = allSalaries.filter(s => s.worker_name === state.worker);
+    const years = [...new Set(rows.map(s => s.date.slice(0, 4)))].sort((a, b) => b - a);
+    container.innerHTML = years.map(year => {
+      const total = rows.filter(s => s.date.startsWith(year)).reduce((sum, s) => sum + Number(s.amount), 0);
+      return `
+        <div class="sal-nav-row" onclick="salaryNavPush({worker:'${state.worker}',year:'${year}'})">
+          <div style="font-weight:700;font-size:15px;">${year}</div>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span style="font-weight:800;font-size:16px;color:var(--yellow);">${total.toLocaleString('ru')} ₴</span>
+            <i data-lucide="chevron-right" style="width:16px;height:16px;color:var(--text3);"></i>
+          </div>
+        </div>
+      `;
+    }).join('') || '<div style="color:var(--text3);padding:16px 0;">Нет записей</div>';
+
+  } else if (state.worker && state.year && !state.month) {
+    // Уровень 3: месяцы
+    const MONTH_NAMES = ['Январь','Февраль','Март','Апрель','Май','Июнь',
+      'Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+    title.textContent = state.year;
+    const rows = allSalaries.filter(s => s.worker_name === state.worker && s.date.startsWith(state.year));
+    const months = [...new Set(rows.map(s => s.date.slice(5, 7)))].sort((a, b) => b - a);
+    container.innerHTML = months.map(m => {
+      const ym = `${state.year}-${m}`;
+      const total = rows.filter(s => s.date.startsWith(ym)).reduce((sum, s) => sum + Number(s.amount), 0);
+      return `
+        <div class="sal-nav-row" onclick="salaryNavPush({worker:'${state.worker}',year:'${state.year}',month:'${m}'})">
+          <div style="font-weight:700;font-size:15px;">${MONTH_NAMES[parseInt(m)-1]}</div>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span style="font-weight:800;font-size:16px;color:var(--yellow);">${total.toLocaleString('ru')} ₴</span>
+            <i data-lucide="chevron-right" style="width:16px;height:16px;color:var(--text3);"></i>
+          </div>
+        </div>
+      `;
+    }).join('') || '<div style="color:var(--text3);padding:16px 0;">Нет записей</div>';
+
+  } else if (state.worker && state.year && state.month) {
+    // Уровень 4: дни с редактированием
+    const MONTH_NAMES = ['Январь','Февраль','Март','Апрель','Май','Июнь',
+      'Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+    const ym = `${state.year}-${state.month}`;
+    title.textContent = `${MONTH_NAMES[parseInt(state.month)-1]} ${state.year}`;
+    const rows = allSalaries
+      .filter(s => s.worker_name === state.worker && s.date.startsWith(ym))
+      .sort((a, b) => b.date.localeCompare(a.date));
+    const total = rows.reduce((sum, s) => sum + Number(s.amount), 0);
+
+    container.innerHTML = `
+      <div style="font-size:13px;color:var(--text3);margin-bottom:12px;">
+        Итого за месяц: <span style="font-weight:800;color:var(--yellow);font-size:15px;">${total.toLocaleString('ru')} ₴</span>
+      </div>
+      ${rows.map(s => `
+        <div class="sal-day-row" id="sal-row-${s.id}">
+          <div style="font-size:14px;color:var(--text2);font-weight:600;">${formatDate(s.date)}</div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <div class="sal-amount-display" id="sal-display-${s.id}" style="font-weight:700;color:var(--yellow);font-size:15px;">${Number(s.amount).toLocaleString('ru')} ₴</div>
+            <input class="form-input sal-amount-input" id="sal-input-${s.id}"
+              type="number" value="${s.amount}"
+              style="display:none;width:90px;height:32px;font-size:14px;padding:4px 8px;">
+            <button class="icon-btn" title="Редактировать" id="sal-edit-btn-${s.id}"
+              onclick="startEditSalary('${s.id}', ${s.amount})"
+              style="width:28px;height:28px;border-radius:8px;">
+              <i data-lucide="pencil" style="width:12px;height:12px;"></i>
+            </button>
+            <button class="icon-btn" title="Сохранить" id="sal-save-btn-${s.id}"
+              onclick="saveEditSalary('${s.id}', '${ym}')"
+              style="display:none;width:28px;height:28px;border-radius:8px;background:var(--accent);color:#000;">
+              <i data-lucide="check" style="width:12px;height:12px;"></i>
+            </button>
+            <button class="icon-btn" title="Удалить" id="sal-del-btn-${s.id}"
+              onclick="deleteSalaryEntry('${s.id}', '${ym}')"
+              style="width:28px;height:28px;border-radius:8px;">
+              <i data-lucide="trash-2" style="width:12px;height:12px;"></i>
+            </button>
+          </div>
+        </div>
+      `).join('') || '<div style="color:var(--text3);padding:16px 0;">Нет записей</div>'}
+    `;
+  }
+
+  initIcons();
+}
+
+function salaryNavPush(state) {
+  salaryNavStack.push(state);
+  renderSalaryScreen();
+}
+
+function salaryNavBack() {
+  salaryNavStack.pop();
+  renderSalaryScreen();
+}
+
+function startEditSalary(id, currentAmount) {
+  document.getElementById('sal-display-' + id).style.display = 'none';
+  document.getElementById('sal-edit-btn-' + id).style.display = 'none';
+  document.getElementById('sal-input-' + id).style.display = '';
+  document.getElementById('sal-save-btn-' + id).style.display = '';
+  const input = document.getElementById('sal-input-' + id);
+  input.focus();
+  input.select();
+}
+
+async function saveEditSalary(id, ym) {
+  const input = document.getElementById('sal-input-' + id);
+  const amount = Number(input.value);
+  if (isNaN(amount) || amount < 0) { showToast('Введите корректную сумму', 'error'); return; }
+
+  const saveBtn = document.getElementById('sal-save-btn-' + id);
+  if (saveBtn) saveBtn.disabled = true;
+
+  try {
+    const updated = await sbUpdateWorkerSalary(id, amount);
+    const idx = allSalaries.findIndex(s => s.id === id);
+    if (idx !== -1) allSalaries[idx].amount = amount;
+
+    // Обновляем отображение без перерисовки всего экрана
+    document.getElementById('sal-display-' + id).textContent = amount.toLocaleString('ru') + ' ₴';
+    document.getElementById('sal-display-' + id).style.display = '';
+    document.getElementById('sal-edit-btn-' + id).style.display = '';
+    input.style.display = 'none';
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.style.display = 'none'; }
+    showToast('Сохранено ✓');
+  } catch(e) {
+    showToast('Ошибка: ' + e.message, 'error');
+    if (saveBtn) saveBtn.disabled = false;
+  }
 }
 
 function toggleFinMonth(ym) {
@@ -203,56 +399,19 @@ function finMetric(label, value, color) {
   `;
 }
 
-// ============================================================
-// МОДАЛ ЗАРПЛАТ
-// ============================================================
+// Зарплаты добавляются сотрудниками самостоятельно через экран профиля
 
-let _salaryModalYm = null;
-
-function openSalaryModal(ym) {
-  _salaryModalYm = ym;
-  const sel = document.getElementById('salary-worker-select');
-  if (sel) {
-    sel.innerHTML = '<option value="">— выбрать сотрудника —</option>' +
-      workers.map(w => `<option value="${w.name}">${w.name}</option>`).join('');
+async function deleteSalaryEntry(id, ym) {
+  if (!confirm('Удалить запись о зарплате?')) return;
+  try {
+    await sbDeleteWorkerSalary(id);
+    allSalaries = allSalaries.filter(s => s.id !== id);
+    const salEl = document.getElementById('fin-salaries-' + ym);
+    if (salEl) { salEl.innerHTML = renderSalaryRows(ym); initIcons(); }
+    showToast('Удалено');
+  } catch(e) {
+    showToast('Ошибка: ' + e.message, 'error');
   }
-  if (document.getElementById('salary-amount')) {
-    document.getElementById('salary-amount').value = '';
-  }
-  document.getElementById('salary-modal').classList.add('active');
-  initIcons();
-}
-
-function closeSalaryModal() {
-  document.getElementById('salary-modal').classList.remove('active');
-}
-
-function saveSalary() {
-  const ym     = _salaryModalYm;
-  const worker = document.getElementById('salary-worker-select').value;
-  const amount = Number(document.getElementById('salary-amount').value);
-
-  if (!worker) { alert('Выберите сотрудника'); return; }
-  if (!amount) { alert('Введите сумму'); return; }
-
-  if (!salaryData[ym]) salaryData[ym] = {};
-  salaryData[ym][worker] = (salaryData[ym][worker] || 0) + amount;
-
-  closeSalaryModal();
-  // Перерисовываем строки зарплат и итог
-  const salEl = document.getElementById('fin-salaries-' + ym);
-  if (salEl) salEl.innerHTML = renderSalaryRows(ym);
-  showToast('Зарплата добавлена ✓');
-  initIcons();
-}
-
-function deleteSalary(ym, workerName) {
-  if (!salaryData[ym]) return;
-  delete salaryData[ym][workerName];
-  const salEl = document.getElementById('fin-salaries-' + ym);
-  if (salEl) salEl.innerHTML = renderSalaryRows(ym);
-  showToast('Удалено');
-  initIcons();
 }
 
 // ============================================================

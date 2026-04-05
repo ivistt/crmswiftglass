@@ -138,6 +138,73 @@ export default {
       return Response.json({ ok: true }, { headers: cors });
     }
 
+
+    // ── /api/salaries ─────────────────────────────────────────────
+    if (url.pathname.startsWith('/api/salaries')) {
+      // GET /api/salaries/all — все зарплаты (только owner)
+      if (url.pathname === '/api/salaries/all' && request.method === 'GET') {
+        if (authedRole !== 'owner') return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
+        const res  = await fetch(
+          `${sb}/rest/v1/worker_salaries?order=date.desc&limit=10000`,
+          { headers: sbHeaders }
+        );
+        const data = await res.json();
+        return Response.json(data, { headers: cors });
+      }
+
+      // GET /api/salaries?worker=Name — зарплаты одного сотрудника
+      if (url.pathname === '/api/salaries' && request.method === 'GET') {
+        const workerName = url.searchParams.get('worker');
+        if (!workerName) return Response.json({ error: 'worker required' }, { status: 400, headers: cors });
+        if (authedRole !== 'owner' && session.workerName !== workerName) {
+          return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
+        }
+        const res  = await fetch(
+          `${sb}/rest/v1/worker_salaries?worker_name=eq.${encodeURIComponent(workerName)}&order=date.desc&limit=1000`,
+          { headers: sbHeaders }
+        );
+        const data = await res.json();
+        return Response.json(data, { headers: cors });
+      }
+
+      // POST /api/salaries — добавить запись (сам сотрудник)
+      if (url.pathname === '/api/salaries' && request.method === 'POST') {
+        if (authedRole === 'owner') return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
+        const body = await request.json();
+        body.worker_name = session.workerName;
+        const res  = await fetch(`${sb}/rest/v1/worker_salaries`, {
+          method: 'POST',
+          headers: sbHeaders,
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        return Response.json(data, { headers: cors });
+      }
+
+      // PATCH /api/salaries/:id — редактировать (только owner)
+      if (url.pathname.startsWith('/api/salaries/') && url.pathname !== '/api/salaries/all' && request.method === 'PATCH') {
+        if (authedRole !== 'owner') return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
+        const id   = url.pathname.split('/').pop();
+        const body = await request.json();
+        const res  = await fetch(
+          `${sb}/rest/v1/worker_salaries?id=eq.${encodeURIComponent(id)}`,
+          { method: 'PATCH', headers: sbHeaders, body: JSON.stringify(body) }
+        );
+        const data = await res.json();
+        return Response.json(data, { headers: cors });
+      }
+
+      // DELETE /api/salaries/:id — удалить (только owner)
+      if (url.pathname.startsWith('/api/salaries/') && url.pathname !== '/api/salaries/all' && request.method === 'DELETE') {
+        if (authedRole !== 'owner') return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
+        const id = url.pathname.split('/').pop();
+        await fetch(`${sb}/rest/v1/worker_salaries?id=eq.${encodeURIComponent(id)}`, {
+          method: 'DELETE', headers: sbHeaders,
+        });
+        return Response.json({ ok: true }, { headers: cors });
+      }
+    }
+
     // ── /api/ref/:table ──────────────────────────────────────
     if (url.pathname.startsWith('/api/ref/')) {
       const table   = url.pathname.split('/').pop();
@@ -160,21 +227,32 @@ async function sha256(message) {
 }
 
 async function makeToken(role, workerName, secret) {
-  // Токен: "role.hash" — только ASCII в заголовке
-  // workerName хранится на клиенте в localStorage отдельно
-  const hash = await sha256(role + '.' + secret);
-  return role + '.' + hash;
+  // Токен: "role.workerNameBase64.hash"
+  const nameB64 = btoa(unescape(encodeURIComponent(workerName || '')));
+  const hash = await sha256(role + '.' + nameB64 + '.' + secret);
+  return role + '.' + nameB64 + '.' + hash;
 }
 
 async function verifyToken(token, secret) {
   if (!token) return null;
-  const dotIdx = token.indexOf('.');
-  if (dotIdx === -1) return null;
-  const role = token.slice(0, dotIdx);
-  const hash = token.slice(dotIdx + 1);
-  const validRoles = ['owner', 'senior', 'junior'];
-  if (!validRoles.includes(role)) return null;
-  const expected = await sha256(role + '.' + secret);
-  if (hash !== expected) return null;
-  return { role };
+  const parts = token.split('.');
+  // Поддержка старого формата (2 части) и нового (3 части)
+  if (parts.length === 2) {
+    const [role, hash] = parts;
+    const validRoles = ['owner', 'senior', 'junior'];
+    if (!validRoles.includes(role)) return null;
+    const expected = await sha256(role + '.' + secret);
+    if (hash !== expected) return null;
+    return { role, workerName: '' };
+  }
+  if (parts.length === 3) {
+    const [role, nameB64, hash] = parts;
+    const validRoles = ['owner', 'senior', 'junior'];
+    if (!validRoles.includes(role)) return null;
+    const expected = await sha256(role + '.' + nameB64 + '.' + secret);
+    if (hash !== expected) return null;
+    const workerName = decodeURIComponent(escape(atob(nameB64)));
+    return { role, workerName };
+  }
+  return null;
 }

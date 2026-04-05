@@ -99,6 +99,53 @@ async function sbSetWorkerPin(workerId, pin) {
   if (!res.ok) throw new Error(await res.text());
 }
 
+// ── WORKER SALARIES ──────────────────────────────────────────
+
+async function sbFetchWorkerSalaries(workerName) {
+  const res = await fetch(
+    `${WORKER_URL}/api/salaries?worker=${encodeURIComponent(workerName)}`,
+    { headers: getHeaders() }
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+async function sbFetchAllSalaries() {
+  const res = await fetch(`${WORKER_URL}/api/salaries/all`, { headers: getHeaders() });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+async function sbInsertWorkerSalary(entry) {
+  const res = await fetch(`${WORKER_URL}/api/salaries`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(entry),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const rows = await res.json();
+  return rows[0];
+}
+
+async function sbUpdateWorkerSalary(id, amount) {
+  const res = await fetch(`${WORKER_URL}/api/salaries/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+    body: JSON.stringify({ amount }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const rows = await res.json();
+  return rows[0];
+}
+
+async function sbDeleteWorkerSalary(id) {
+  const res = await fetch(`${WORKER_URL}/api/salaries/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers: getHeaders(),
+  });
+  if (!res.ok) throw new Error(await res.text());
+}
+
 // ── REF DATA ─────────────────────────────────────────────────
 
 async function sbFetchRef(table) {
@@ -305,7 +352,7 @@ function showToast(msg, type = 'success') {
     toast = document.createElement('div');
     toast.id = 'app-toast';
     toast.style.cssText = `
-      position:fixed; bottom:28px; left:50%; transform:translateX(-50%);
+      position:fixed; bottom:96px; left:50%; transform:translateX(-50%);
       padding:12px 22px; border-radius:12px; font-size:14px; font-weight:600;
       color:#fff; z-index:9999; opacity:0; transition:opacity 0.2s;
       white-space:nowrap; box-shadow:0 4px 16px rgba(0,0,0,0.25);

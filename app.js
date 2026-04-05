@@ -6,7 +6,7 @@ let currentMonthFilter = null;
 
 async function initApp() {
   const minDelay = new Promise(r => setTimeout(r, 2000));
-  await Promise.all([loadOrders(), loadWorkers(), loadRefData(), minDelay]);
+  await Promise.all([loadOrders(), loadWorkers(), loadRefData(), loadWorkerSalaries(), minDelay]);
   updateNavbarVisibility();
   if (currentRole === 'owner') {
     renderHome();
@@ -31,19 +31,25 @@ function updateNavbarVisibility() {
   if (navClients) navClients.style.display = canViewClients() ? '' : 'none';
   if (navWorkers) navWorkers.style.display = canViewWorkers() ? '' : 'none';
 
-  if (currentRole !== 'owner') {
-    if (bottomNav) bottomNav.style.display = 'none';
-    document.getElementById('app')?.classList.add('no-navbar');
-  } else {
+  const navProfile = document.getElementById('nav-profile');
+
+  if (currentRole === 'owner') {
     if (bottomNav) bottomNav.style.display = '';
     if (navHome)   navHome.style.display   = '';
+    if (navProfile) navProfile.style.display = 'none';
+    document.getElementById('app')?.classList.remove('no-navbar');
+  } else {
+    // Специалисты видят навбар с кнопками: Записи + Профиль
+    if (bottomNav) bottomNav.style.display = '';
+    if (navHome)   navHome.style.display   = 'none';
+    if (navProfile) navProfile.style.display = '';
     document.getElementById('app')?.classList.remove('no-navbar');
   }
 }
 
 function setActiveNav(name) {
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-  const map = { home: 'nav-home', months: 'nav-orders', orders: 'nav-orders', clients: 'nav-clients', workers: 'nav-workers' };
+  const map = { home: 'nav-home', months: 'nav-orders', orders: 'nav-orders', clients: 'nav-clients', workers: 'nav-workers', profile: 'nav-profile' };
   const id = map[name];
   if (id) { const el = document.getElementById(id); if (el) el.classList.add('active'); }
 }
@@ -53,6 +59,7 @@ function navTo(section) {
   else if (section === 'orders') { openOrdersScreen(); }
   else if (section === 'clients') { openClientsScreen(); }
   else if (section === 'workers') { openWorkersScreen(); }
+  else if (section === 'profile') { openProfileScreen(); }
 }
 
 function openFinanceScreen() {
@@ -94,6 +101,7 @@ function showScreen(name) {
     clients: 'Клиенты',
     workers: 'Сотрудники',
     finance: 'Финансы',
+    profile: null,
     'order-detail': 'Детали заказа',
     'client-detail': 'Детали клиента',
   };
