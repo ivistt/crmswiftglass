@@ -99,6 +99,42 @@ async function sbSetWorkerPin(workerId, pin) {
   if (!res.ok) throw new Error(await res.text());
 }
 
+// ── WORKER PROBLEMS ──────────────────────────────────────────
+
+async function sbFetchWorkerProblems(workerName) {
+  const res = await fetch(
+    `${WORKER_URL}/api/problems?worker=${encodeURIComponent(workerName)}`,
+    { headers: getHeaders() }
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+async function sbFetchAllProblems() {
+  const res = await fetch(`${WORKER_URL}/api/problems/all`, { headers: getHeaders() });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+async function sbInsertWorkerProblem(entry) {
+  const res = await fetch(`${WORKER_URL}/api/problems`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(entry),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const rows = await res.json();
+  return rows[0];
+}
+
+async function sbDeleteWorkerProblem(id) {
+  const res = await fetch(`${WORKER_URL}/api/problems/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers: getHeaders(),
+  });
+  if (!res.ok) throw new Error(await res.text());
+}
+
 // ── WORKER SALARIES ──────────────────────────────────────────
 
 async function sbFetchWorkerSalaries(workerName) {
