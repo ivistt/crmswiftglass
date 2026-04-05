@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SwiftGlass CRM</title>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="apple-touch-icon" href="images/logo-a.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="SwiftGlass">
+  <script src="lucide.min.js"></script>
+  <style>
+    .ico { display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; }
+    .ico svg { display:block; }
+    .page-title-icon { color: var(--accent); }
+    .btn-primary .ico svg, .btn-primary .ico svg * { stroke: #0a0a0f; }
+    #app.no-navbar .main-content { padding-bottom: 16px; }
+    #app-loading {
+      position:fixed;inset:0;background:var(--bg, #0a0a0a);z-index:9998;
+      display:flex;align-items:center;justify-content:center;
+      flex-direction:column;gap:28px;
+      transition:opacity 0.4s ease;
+    }
+    #app-loading.hiding { opacity:0; pointer-events:none; }
+    .loader-ring { width:64px;height:64px;position:relative; }
+    .loader-ring svg { width:64px;height:64px;transform:rotate(-90deg); }
+    .loader-ring-track { fill:none;stroke:rgba(0,229,160,0.12);stroke-width:4; }
+    .loader-ring-arc {
+      fill:none;stroke:#00e5a0;stroke-width:4;stroke-linecap:round;
+      stroke-dasharray:120;stroke-dashoffset:120;
+      animation:loader-spin 1.2s cubic-bezier(0.4,0,0.2,1) infinite;
+    }
+    @keyframes loader-spin {
+      0%   { stroke-dashoffset:120;opacity:1; }
+      60%  { stroke-dashoffset:10; opacity:1; }
+      100% { stroke-dashoffset:120;opacity:0.3; }
+    }
+    .loader-glow {
+      position:absolute;inset:0;border-radius:50%;
+      background:radial-gradient(circle,rgba(0,229,160,0.15) 0%,transparent 70%);
+      animation:loader-pulse 1.2s ease-in-out infinite;
+    }
+    @keyframes loader-pulse {
+      0%,100%{transform:scale(0.8);opacity:0.4;}
+      50%{transform:scale(1.2);opacity:1;}
+    }
+    .loader-greeting {
+      font-family:'Manrope',sans-serif;font-size:20px;font-weight:700;
+      color:#fff;letter-spacing:0.01em;
+      animation:loader-fade 0.5s ease forwards;
+    }
+    .loader-greeting span { color:#00e5a0; }
+    .loader-sub {
+      font-family:'Manrope',sans-serif;font-size:13px;
+      color:rgba(255,255,255,0.35);margin-top:-18px;
+      animation:loader-fade 0.5s 0.1s ease both;
+    }
+    @keyframes loader-fade {
+      from{opacity:0;transform:translateY(6px);}
+      to{opacity:1;transform:translateY(0);}
+    }
+  </style>
+</head>
+<body>
+
+<!-- ==================== AUTH SCREEN ==================== -->
+<div id="auth-screen">
+  <div class="auth-card">
+    <div class="auth-logo">
+      <img src="images/logo.svg" alt="SwiftGlass" style="height:64px;width:auto;">
+    </div>
+    <div class="auth-title">Вход в систему</div>
+    <div class="auth-subtitle">Введите пароль для входа</div>
+    <div class="auth-input-wrap" style="position:relative;">
+      <span class="ico" style="position:absolute;left:14px;top:50%;transform:translateY(-50%);opacity:0.35;pointer-events:none;">
+        <i data-lucide="lock" style="width:16px;height:16px;"></i>
+      </span>
+      <input class="auth-input" type="password" id="auth-password"
+        placeholder="Введите пароль..."
+        autocomplete="off"
+        style="padding-left:42px;"
+        onkeydown="if(event.key==='Enter') doLogin()">
+    </div>
+    <button class="auth-btn" id="auth-login-btn" onclick="doLogin()">Войти</button>
+    <div class="auth-error" id="auth-error">Неверный пароль</div>
+  </div>
+</div>
+
+<!-- ==================== APP ==================== -->
+<div id="app" style="display:none;">
+  <div id="app-loading">
+    <div class="loader-ring">
+      <div class="loader-glow"></div>
+      <svg viewBox="0 0 64 64"><circle class="loader-ring-track" cx="32" cy="32" r="28"/><circle class="loader-ring-arc" cx="32" cy="32" r="28"/></svg>
+    </div>
+    <div class="loader-greeting">Привет, <span id="loader-name">...</span>!</div>
+    <div class="loader-sub">Загружаем данные</div>
+  </div>
+
+  <!-- TOP BAR -->
+  <div class="topbar">
+    <div style="display:flex;align-items:center;gap:16px;">
+      <div class="topbar-logo" onclick="goHome()">
+        <img src="images/logo.svg" alt="SwiftGlass" style="height:28px;width:auto;">
+      </div>
+      <div class="topbar-breadcrumb" id="breadcrumb" style="display:none;">
+        <span class="breadcrumb-sep ico"><i data-lucide="chevron-right" style="width:14px;height:14px;"></i></span>
+        <span class="breadcrumb-current" id="breadcrumb-text"></span>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <button class="refresh-btn" id="refresh-btn" onclick="refreshOrders()" title="Обновить">
+        <i data-lucide="refresh-cw" style="width:15px;height:15px;"></i>
+      </button>
+      <span class="role-badge" id="role-badge"></span>
+      <button class="logout-btn" style="display:flex;align-items:center;gap:5px;" onclick="doLogout()">
+        <i data-lucide="log-out" style="width:13px;height:13px;"></i>
+        Выйти
+      </button>
+    </div>
+  </div>
+
+  <!-- BOTTOM NAVBAR ISLAND -->
+  <nav class="bottom-navbar" id="bottom-navbar">
+    <button class="nav-item active" id="nav-home" onclick="navTo('home')">
+      <span class="nav-icon ico"><i data-lucide="home" style="width:20px;height:20px;"></i></span>
+      <span class="nav-label">Главная</span>
+    </button>
+    <button class="nav-item" id="nav-orders" onclick="navTo('orders')">
+      <span class="nav-icon ico"><i data-lucide="clipboard-list" style="width:20px;height:20px;"></i></span>
+      <span class="nav-label">Записи</span>
+    </button>
+    <button class="nav-item" id="nav-clients" onclick="navTo('clients')">
+      <span class="nav-icon ico"><i data-lucide="users" style="width:20px;height:20px;"></i></span>
+      <span class="nav-label">Клиенты</span>
+    </button>
+    <button class="nav-item" id="nav-workers" onclick="navTo('workers')">
+      <span class="nav-icon ico"><i data-lucide="hard-hat" style="width:20px;height:20px;"></i></span>
+      <span class="nav-label">Команда</span>
+    </button>
+  </nav>
+
+  <div class="main-content">
+
+    <!-- HOME -->
+    <div class="screen" id="screen-home">
+      <div class="home-header">
+        <h1 id="home-greeting">Добро пожаловать</h1>
+        <p>Система управления заказами — SwiftGlass</p>
+      </div>
+      <div class="home-cards" id="home-cards"></div>
+    </div>
+
+    <!-- MONTHS LIST -->
+    <div class="screen" id="screen-months">
+      <div class="page-header">
+        <div class="page-title">
+          Записи по месяцам
+        </div>
+        <div id="months-actions"></div>
+      </div>
+      <div class="filters-bar">
+        <div style="display:flex;gap:8px;width:100%;">
+          <div style="position:relative;flex:7;min-width:0;">
+            <span class="ico" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);opacity:0.35;pointer-events:none;">
+              <i data-lucide="search" style="width:15px;height:15px;"></i>
+            </span>
+            <input class="filter-input" type="text" id="filter-month-search"
+              placeholder="Поиск..." oninput="renderMonths()" style="padding-left:38px;">
+          </div>
+          <input class="filter-input" type="month" id="filter-month"
+            oninput="renderMonths()" style="flex:3;min-width:0;max-width:30%;">
+        </div>
+      </div>
+      <div class="home-cards" id="months-list"></div>
+    </div>
+
+    <!-- ORDERS LIST -->
+    <div class="screen" id="screen-orders">
+      <div class="page-header">
+        <div class="page-title" style="display:flex;align-items:center;gap:10px;">
+          <span class="ico page-title-icon"><i data-lucide="clipboard-list" style="width:22px;height:22px;"></i></span>
+          Записи
+        </div>
+        <div id="orders-actions"></div>
+      </div>
+      <div id="orders-tabs" class="orders-tabs">
+        <button class="orders-tab active" id="tab-inwork" onclick="setOrderTab('inwork')">
+          <span class="ico" style="margin-right:5px;"><i data-lucide="hammer" style="width:13px;height:13px;"></i></span>
+          В работе
+        </button>
+        <button class="orders-tab" id="tab-notinwork" onclick="setOrderTab('notinwork')">
+          <span class="ico" style="margin-right:5px;"><i data-lucide="archive" style="width:13px;height:13px;"></i></span>
+          Не в работе
+        </button>
+        <button class="orders-tab" id="tab-all" onclick="setOrderTab('all')">
+          <span class="ico" style="margin-right:5px;"><i data-lucide="list" style="width:13px;height:13px;"></i></span>
+          Все записи
+        </button>
+      </div>
+      <div class="filters-bar">
+        <div style="position:relative;">
+          <span class="ico" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);opacity:0.35;pointer-events:none;">
+            <i data-lucide="search" style="width:15px;height:15px;"></i>
+          </span>
+          <input class="filter-input" type="text" id="filter-search"
+            placeholder="Поиск по клиенту, авто..." oninput="renderOrders()" style="width:100%;padding-left:38px;">
+        </div>
+        <div style="display:flex;gap:8px;width:100%;">
+          <select class="filter-select" id="filter-status" onchange="renderOrders()">
+            <option value="">Все статусы</option>
+            <option>Оплачено</option>
+            <option>Частично</option>
+            <option>Не оплачено</option>
+            <option>Долг</option>
+          </select>
+          <input class="filter-input" type="date" id="filter-date"
+            oninput="renderOrders()" style="width:100%;">
+        </div>
+        <select class="filter-select" id="filter-sort" onchange="renderOrders()" style="width:100%;">
+          <option value="desc">Сначала новые</option>
+          <option value="asc">Сначала старые</option>
+        </select>
+      </div>
+      <div class="orders-grid" id="orders-list"></div>
+    </div>
+
+    <!-- CLIENTS LIST -->
+    <div class="screen" id="screen-clients">
+      <div class="page-header">
+        <div class="page-title" style="display:flex;align-items:center;gap:10px;">
+          <span class="ico page-title-icon"><i data-lucide="users" style="width:22px;height:22px;"></i></span>
+          Клиенты
+        </div>
+        <button class="btn-primary" style="display:flex;align-items:center;gap:6px;" onclick="openClientModal()">
+          <i data-lucide="user-plus" style="width:14px;height:14px;"></i>
+          Добавить
+        </button>
+      </div>
+      <div class="filters-bar">
+        <div style="position:relative;">
+          <span class="ico" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);opacity:0.35;pointer-events:none;">
+            <i data-lucide="search" style="width:15px;height:15px;"></i>
+          </span>
+          <input class="filter-input" type="text" id="filter-client-search"
+            placeholder="Поиск по имени, телефону..." oninput="renderClients()" style="padding-left:38px;">
+        </div>
+      </div>
+      <div class="clients-grid" id="clients-list"></div>
+    </div>
+
+    <!-- WORKERS -->
+    <div class="screen" id="screen-workers">
+      <div class="page-header">
+        <div class="page-title" style="display:flex;align-items:center;gap:10px;">
+          <span class="ico page-title-icon"><i data-lucide="hard-hat" style="width:22px;height:22px;"></i></span>
+          Сотрудники
+        </div>
+        <button class="btn-primary" style="display:flex;align-items:center;gap:6px;" onclick="openWorkerModal()">
+          <i data-lucide="user-plus" style="width:14px;height:14px;"></i>
+          Добавить
+        </button>
+      </div>
+      <div class="workers-grid" id="workers-list"></div>
+    </div>
+
+    <!-- ORDER DETAIL -->
+    <div class="screen" id="screen-order-detail">
+      <div class="detail-topbar">
+        <button class="back-btn" id="order-back-btn" onclick="goBackFromOrder()" style="display:flex;align-items:center;gap:6px;">
+          <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
+          Назад
+        </button>
+        <div class="detail-topbar-actions" id="order-detail-actions"></div>
+      </div>
+      <div id="order-detail-content"></div>
+    </div>
+
+    <!-- FINANCE -->
+    <div class="screen" id="screen-finance">
+      <div class="page-header">
+        <div class="page-title">Финансы</div>
+      </div>
+      <div id="finance-content"></div>
+    </div>
+
+    <!-- CLIENT DETAIL -->
+    <div class="screen" id="screen-client-detail">
+      <button class="back-btn" style="display:flex;align-items:center;gap:6px;" onclick="showScreen('clients')">
+        <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
+        Назад
+      </button>
+      <div id="client-detail-content"></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ==================== ORDER MODAL ==================== -->
+<div class="modal-overlay" id="order-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="order-modal-title">Новая запись</div>
+      <button class="modal-close" onclick="closeOrderModal()">
+        <i data-lucide="x" style="width:16px;height:16px;"></i>
+      </button>
+    </div>
+    <div class="modal-body">
+
+      <div class="form-section">
+        <div class="form-section-title">📋 Основная информация</div>
+        <div class="form-grid">
+          <div class="form-group span-2" style="display:flex;gap:24px;align-items:center;padding:8px 0;">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;font-size:14px;">
+              <input type="checkbox" id="f-status-done" style="width:18px;height:18px;accent-color:#00e5a0;">
+              ✅ Выполнен
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;font-size:14px;">
+              <input type="checkbox" id="f-in-work" style="width:18px;height:18px;accent-color:#ffd166;">
+              🔨 В работу <span style="font-weight:400;font-size:12px;color:var(--text3);">(видно работникам)</span>
+            </label>
+          </div>
+          <div class="form-group">
+            <label class="form-label">🗓️ Дата</label>
+            <input class="form-input" type="date" id="f-date">
+          </div>
+          <div class="form-group">
+            <label class="form-label">🕐 Время</label>
+            <input class="form-input" type="time" id="f-time">
+          </div>
+          <div class="form-group">
+            <label class="form-label">🚧 Ответственный</label>
+            <select class="form-select" id="f-responsible"></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">👤 Клиент</label>
+            <input class="form-input" type="text" id="f-client" placeholder="Имя клиента">
+          </div>
+          <div class="form-group">
+            <label class="form-label">☎️ Телефон</label>
+            <input class="form-input" type="text" id="f-phone" placeholder="+380...">
+          </div>
+          <div class="form-group">
+            <label class="form-label">🚗 Автомобиль</label>
+            <input class="form-input" type="text" id="f-car" placeholder="Марка, модель">
+          </div>
+          <div class="form-group">
+            <label class="form-label">🔢 Код</label>
+            <input class="form-input" type="text" id="f-code" placeholder="—">
+          </div>
+          <div class="form-group">
+            <label class="form-label">💻 Кодирование</label>
+            <input class="form-input" type="text" id="f-coding" placeholder="—">
+          </div>
+          <div class="form-group">
+            <label class="form-label">🏭 Склад</label>
+            <select class="form-select" id="f-warehouse">
+              <option value="">— выбрать —</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">🔧 Оборудование</label>
+            <select class="form-select" id="f-equipment">
+              <option value="">— выбрать —</option>
+            </select>
+          </div>
+          <div class="form-group span-2">
+            <label class="form-label">📝 Заметки</label>
+            <input class="form-input" type="text" id="f-notes" placeholder="—">
+          </div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <div class="form-section-title">🔧 Работы</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label class="form-label">🔩 Монтаж</label>
+            <input class="form-input" type="number" id="f-mount" placeholder="0">
+          </div>
+          <div class="form-group">
+            <label class="form-label">🛠️ Тип услуги</label>
+            <select class="form-select" id="f-service-type">
+              <option value="">— выбрать —</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">🔘 Скло (вартість)</label>
+            <input class="form-input" type="number" id="f-glass" placeholder="0">
+          </div>
+          <div class="form-group">
+            <label class="form-label">*️⃣ Молдинг (Резинка)</label>
+            <input class="form-input" type="number" id="f-molding" placeholder="0">
+          </div>
+          <div class="form-group">
+            <label class="form-label">⚙️ Доп. работы</label>
+            <input class="form-input" type="number" id="f-extra-work" placeholder="0">
+          </div>
+          <div class="form-group">
+            <label class="form-label">*️⃣ Тату ⚫</label>
+            <input class="form-input" type="number" id="f-tatu" placeholder="0">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Тонировка</label>
+            <input class="form-input" type="number" id="f-toning" placeholder="0">
+          </div>
+          <div class="form-group">
+            <label class="form-label">🚛 Доставка</label>
+            <input class="form-input" type="number" id="f-delivery" placeholder="0">
+          </div>
+          <div class="form-group span-2">
+            <label class="form-label">👥 Менеджер</label>
+            <div id="f-author-checkboxes" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;"></div>
+            <input type="hidden" id="f-author">
+          </div>
+          <div class="form-group">
+            <label class="form-label">С Подбора</label>
+            <input class="form-input" type="text" id="f-selection" placeholder="—">
+          </div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <div class="form-section-title">💸 Фінанси</div>
+        <div class="form-grid col-3">
+          <div class="form-group">
+            <label class="form-label">💸 Статус розрахунку</label>
+            <select class="form-select" id="f-payment-status">
+              <option value="">—</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Сверка</label>
+            <input class="form-input" type="number" id="f-check" placeholder="0">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Расчёт долга</label>
+            <input class="form-input" type="number" id="f-debt" placeholder="0">
+          </div>
+          <div class="form-group">
+            <label class="form-label">📌 Загальна сума</label>
+            <input class="form-input" type="number" id="f-total" placeholder="0">
+          </div>
+          <div class="form-group">
+            <label class="form-label">📍 10%</label>
+            <input class="form-input" type="number" id="f-percent10" placeholder="0" readonly>
+          </div>
+          <div class="form-group">
+            <label class="form-label">📍 20%</label>
+            <input class="form-input" type="number" id="f-percent20" placeholder="0" readonly>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Молдинг Автор (Підгонка)</label>
+            <input class="form-input" type="text" id="f-molding-author" placeholder="—">
+          </div>
+          <div class="form-group">
+            <label class="form-label">🤝 Партнер (постачальник)</label>
+            <select class="form-select" id="f-partner">
+              <option value="">— выбрать —</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">📦 Статус оплати постачальнику</label>
+            <select class="form-select" id="f-supplier-status">
+              <option value="">—</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">➖ Закупка</label>
+            <input class="form-input" type="number" id="f-purchase" placeholder="0">
+          </div>
+          <div class="form-group">
+            <label class="form-label">➕ Приход</label>
+            <input class="form-input" type="number" id="f-income" placeholder="0">
+          </div>
+          <div class="form-group">
+            <label class="form-label">🟰 Остаток</label>
+            <input class="form-input" type="number" id="f-remainder" placeholder="0" readonly>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Оплата 📦</label>
+            <input class="form-input" type="text" id="f-payment-method" placeholder="Наличные / Перевод">
+          </div>
+          <div class="form-group">
+            <label class="form-label">∆ Склад</label>
+            <input class="form-input" type="text" id="f-warehouse-delta" placeholder="—">
+          </div>
+        </div>
+      </div>
+
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeOrderModal()">Отмена</button>
+      <button class="btn-primary" id="order-save-btn" style="display:flex;align-items:center;gap:6px;" onclick="saveOrder()">
+        <i data-lucide="save" style="width:14px;height:14px;"></i>
+        Сохранить
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== WORKER MODAL ==================== -->
+<div class="modal-overlay" id="worker-modal">
+  <div class="modal" style="max-width:440px;">
+    <div class="modal-header">
+      <div class="modal-title">Новый сотрудник</div>
+      <button class="modal-close" onclick="closeWorkerModal()">
+        <i data-lucide="x" style="width:16px;height:16px;"></i>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid col-1">
+        <div class="form-group">
+          <label class="form-label">Имя</label>
+          <input class="form-input" type="text" id="w-name" placeholder="Имя сотрудника">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Должность (отображается в карточке)</label>
+          <select class="form-select" id="w-role">
+            <option value="Старший специалист">Старший специалист</option>
+            <option value="Младший специалист">Младший специалист</option>
+            <option value="Монтажник">Монтажник</option>
+            <option value="Менеджер">Менеджер</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Роль в системе (права доступа)</label>
+          <select class="form-select" id="w-system-role">
+            <option value="senior">Старший — создаёт и редактирует записи</option>
+            <option value="junior">Младший — только просмотр записей</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Заметка</label>
+          <input class="form-input" type="text" id="w-note" placeholder="Дополнительно">
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeWorkerModal()">Отмена</button>
+      <button class="btn-primary" style="display:flex;align-items:center;gap:6px;" onclick="saveWorker()">
+        <i data-lucide="save" style="width:14px;height:14px;"></i>
+        Сохранить
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== PIN MODAL ==================== -->
+<div class="modal-overlay" id="pin-modal">
+  <div class="modal" style="max-width:400px;">
+    <div class="modal-header">
+      <div class="modal-title">Установить PIN</div>
+      <button class="modal-close" onclick="closePinModal()">
+        <i data-lucide="x" style="width:16px;height:16px;"></i>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div style="font-size:13px;color:var(--text3);margin-bottom:16px;">
+        Сотрудник: <strong id="pin-worker-label" style="color:var(--text);"></strong>
+      </div>
+      <div class="form-grid col-1">
+        <div class="form-group">
+          <label class="form-label">Новый PIN</label>
+          <input class="form-input" type="password" id="pin-input"
+            placeholder="Минимум 4 символа"
+            autocomplete="new-password"
+            onkeydown="if(event.key==='Enter') document.getElementById('pin-confirm').focus()">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Повторите PIN</label>
+          <input class="form-input" type="password" id="pin-confirm"
+            placeholder="Повторите PIN"
+            autocomplete="new-password"
+            onkeydown="if(event.key==='Enter') savePin()">
+        </div>
+        <div id="pin-error" style="display:none;font-size:13px;color:var(--red);margin-top:-8px;"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closePinModal()">Отмена</button>
+      <button class="btn-primary" id="pin-save-btn" style="display:flex;align-items:center;gap:6px;" onclick="savePin()">
+        <i data-lucide="key-round" style="width:14px;height:14px;"></i>
+        Сохранить PIN
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== CLIENT MODAL ==================== -->
+<div class="modal-overlay" id="client-modal">
+  <div class="modal" style="max-width:440px;">
+    <div class="modal-header">
+      <div class="modal-title">Новый клиент</div>
+      <button class="modal-close" onclick="closeClientModal()">
+        <i data-lucide="x" style="width:16px;height:16px;"></i>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid col-1">
+        <div class="form-group">
+          <label class="form-label">Имя клиента *</label>
+          <input class="form-input" type="text" id="c-name" placeholder="Имя и фамилия">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Телефон</label>
+          <input class="form-input" type="text" id="c-phone" placeholder="+380...">
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeClientModal()">Отмена</button>
+      <button class="btn-primary" id="client-save-btn" style="display:flex;align-items:center;gap:6px;" onclick="saveClient()">
+        <i data-lucide="save" style="width:14px;height:14px;"></i>
+        Сохранить
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SALARY MODAL ==================== -->
+<div class="modal-overlay" id="salary-modal">
+  <div class="modal" style="max-width:420px;">
+    <div class="modal-header">
+      <div class="modal-title">Добавить зарплату</div>
+      <button class="modal-close" onclick="closeSalaryModal()">
+        <i data-lucide="x" style="width:16px;height:16px;"></i>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid col-1">
+        <div class="form-group">
+          <label class="form-label">Сотрудник</label>
+          <select class="form-select" id="salary-worker-select">
+            <option value="">— выбрать —</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Сумма (₴)</label>
+          <input class="form-input" type="number" id="salary-amount" placeholder="0">
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeSalaryModal()">Отмена</button>
+      <button class="btn-primary" onclick="saveSalary()">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<script src="data.js"></script>
+<script src="auth.js"></script>
+<script src="workers.js"></script>
+<script src="orders.js"></script>
+<script src="clients.js"></script>
+<script src="finance.js"></script>
+<script src="app.js"></script>
+<script>
+  function initIcons() { if (window.lucide) lucide.createIcons(); }
+  document.addEventListener('DOMContentLoaded', initIcons);
+  autoLogin();
+</script>
+</body>
+</html>
