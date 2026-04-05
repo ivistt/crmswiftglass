@@ -135,10 +135,12 @@ function goHome() {
 
 // --- ГЛАВНЫЙ ЭКРАН ---
 function renderHome() {
+  const name = currentWorkerName || '';
   const greetings = {
-    owner:  'Добро пожаловать, Владелец',
-    senior: 'Добро пожаловать, Специалист',
-    junior: 'Добро пожаловать',
+    owner:   'Добро пожаловать, ' + (name || 'Владелец'),
+    manager: 'Добро пожаловать, ' + (name || 'Менеджер'),
+    senior:  'Добро пожаловать, ' + (name || 'Специалист'),
+    junior:  'Добро пожаловать' + (name ? ', ' + name : ''),
   };
   document.getElementById('home-greeting').textContent = greetings[currentRole] || 'Добро пожаловать';
 

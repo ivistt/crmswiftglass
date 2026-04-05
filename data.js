@@ -290,7 +290,7 @@ function workerToRow(w) {
 // ── GLOBAL STATE ─────────────────────────────────────────────
 
 const ROLE_LABELS = {
-  owner:   '👑 Maks',
+  owner:   '👑 Владелец',
   manager: '📋 Менеджер',
   senior:  '🔧 Старший специалист',
   junior:  '👤 Младший специалист',
