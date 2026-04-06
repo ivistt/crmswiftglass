@@ -1,5 +1,5 @@
 // ============================================================
-// WORKERS.JS — экран сотрудников, модал добавления, управление PIN
+// WORKERS.JS — экран сотрудников, модал редактирования
 // ============================================================
 
 async function loadWorkers() {
@@ -24,81 +24,33 @@ function renderWorkers() {
   }
 
   container.innerHTML = workers.map(w => {
-    const showFormula = w.systemRole === 'senior' || w.systemRole === 'junior';
-    const formula     = w.salaryFormula || DEFAULT_SALARY_FORMULA[w.systemRole] || '';
-
-    const formulaBlock = showFormula ? `
-      <div style="margin-top:6px;">
-        <div id="wf-display-${w.id}" style="display:flex;align-items:center;gap:6px;">
-          <span style="font-size:11px;color:var(--text3);">Формула зп:</span>
-          <code style="font-size:11px;font-weight:700;color:var(--accent);background:var(--surface2);padding:2px 7px;border-radius:5px;">${escapeHtml(formula) || '<span style="color:var(--text3);font-style:italic;">не задана</span>'}</code>
-          <button class="icon-btn" title="Изменить формулу" style="width:22px;height:22px;border-radius:6px;"
-            onclick="openFormulaModal('${w.id}', '${escapeAttr(w.name)}', '${escapeAttr(formula)}')">
-            <i data-lucide="pencil" style="width:10px;height:10px;"></i>
-          </button>
-        </div>
-      </div>
-    ` : '';
-
-    const wProblems = (typeof allProblems !== 'undefined' ? allProblems : [])
-      .filter(p => p.worker_name === w.name)
-      .sort((a, b) => b.date.localeCompare(a.date));
-
-    const problemsHtml = wProblems.length
-      ? wProblems.map(p =>
-          '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;' +
-          'padding:7px 10px;background:var(--surface2);border-radius:8px;margin-bottom:4px;' +
-          'border-left:2px solid var(--red,#DC2626);">' +
-            '<div style="min-width:0;">' +
-              '<div style="font-size:12px;font-weight:600;color:var(--text);">' + p.description + '</div>' +
-              '<div style="font-size:11px;color:var(--text3);margin-top:1px;">' +
-                formatDate(p.date) + (p.order_id ? ' · ' + p.order_id : '') + (p.partner ? ' · с ' + p.partner : '') +
-              '</div>' +
-            '</div>' +
-            '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">' +
-              '<span style="font-size:13px;font-weight:700;color:var(--red,#DC2626);">' + Number(p.amount).toLocaleString('ru') + ' ₴</span>' +
-              '<button class="icon-btn" onclick="deleteWorkerProblem(\'' + p.id + '\', \'' + w.id + '\')" style="width:22px;height:22px;border-radius:6px;">' +
-                '<i data-lucide="trash-2" style="width:10px;height:10px;"></i>' +
-              '</button>' +
-            '</div>' +
-          '</div>'
-        ).join('')
-      : '<div style="font-size:12px;color:var(--text3);padding:4px 0;">Проблем не зафиксировано</div>';
+    // Считаем количество заказов где сотрудник участвует
+    const orderCount = orders.filter(o =>
+      o.responsible === w.name || o.assistant === w.name
+    ).length;
 
     return `
-      <div class="worker-card" style="flex-direction:column;gap:0;">
-        <div style="display:flex;align-items:center;gap:12px;">
-          <div class="worker-avatar">${getInitials(w.name)}</div>
-          <div class="worker-info" style="flex:1;min-width:0;">
-            <div class="worker-name">${w.name}</div>
-            <div class="worker-role">${w.role}</div>
-            ${w.note ? `<div style="font-size:12px;color:var(--text3);margin-top:2px;">${w.note}</div>` : ''}
-            ${formulaBlock}
-          </div>
-          <div class="worker-actions" style="display:flex;gap:6px;flex-shrink:0;">
-            <button class="icon-btn" title="Установить PIN" onclick="openPinModal('${w.id}', '${escapeAttr(w.name)}')">
-              <i data-lucide="key-round" style="width:14px;height:14px;"></i>
-            </button>
-            <button class="icon-btn" title="Удалить" onclick="deleteWorker('${w.id}')">
-              <i data-lucide="trash-2" style="width:14px;height:14px;"></i>
-            </button>
-          </div>
+      <div class="worker-card worker-card-simple">
+        <div class="worker-avatar">${getInitials(w.name)}</div>
+        <div class="worker-card-info">
+          <div class="worker-name">${w.name}</div>
+          <div class="worker-role">${w.role}</div>
+          <div class="worker-order-count">📋 ${orderCount} заказов</div>
         </div>
-        <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-            <div style="font-size:11px;font-weight:700;color:var(--text3);letter-spacing:0.04em;">ПРОБЛЕМЫ</div>
-            <button class="fin-add-salary-btn" onclick="openAddProblemModal('${escapeAttr(w.name)}')">
-              <i data-lucide="plus" style="width:11px;height:11px;"></i> Добавить
-            </button>
-          </div>
-          <div id="worker-problems-${w.id}">${problemsHtml}</div>
-        </div>
+        ${currentRole === 'owner' ? `
+          <button class="btn-edit-worker" onclick="openWorkerEditModal('${w.id}')" title="Редактировать">
+            <i data-lucide="pencil" style="width:14px;height:14px;"></i>
+            <span>Edit</span>
+          </button>
+        ` : ''}
       </div>
     `;
   }).join('');
 
   initIcons();
 }
+
+// ── УТИЛИТЫ ──────────────────────────────────────────────────
 
 function escapeAttr(str) {
   return (str || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
@@ -108,278 +60,249 @@ function escapeHtml(str) {
   return (str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-// ── МОДАЛ ФОРМУЛЫ ЗАРПЛАТЫ ───────────────────────────────────
+// ── МОДАЛ РЕДАКТИРОВАНИЯ СОТРУДНИКА ──────────────────────────
 
-let _formulaWorkerId   = null;
-let _formulaWorkerName = null;
+let _editWorkerId = null;
 
-function openFormulaModal(workerId, workerName, currentFormula) {
-  _formulaWorkerId   = workerId;
-  _formulaWorkerName = workerName;
+function openWorkerEditModal(workerId) {
+  if (currentRole !== 'owner') return;
 
-  let modal = document.getElementById('formula-modal');
+  _editWorkerId = workerId;
+  const w = workers.find(x => x.id === workerId);
+  if (!w) return;
+
+  let modal = document.getElementById('worker-edit-modal');
   if (!modal) {
     modal = document.createElement('div');
-    modal.id = 'formula-modal';
+    modal.id = 'worker-edit-modal';
     modal.className = 'modal-overlay';
     modal.innerHTML = `
-      <div class="modal">
+      <div class="modal" style="max-height:90vh;overflow-y:auto;">
         <div class="modal-header">
-          <div class="modal-title">📐 Формула зарплаты</div>
-          <button class="modal-close" onclick="closeFormulaModal()">✕</button>
+          <div class="modal-title">✏️ Редактировать сотрудника</div>
+          <button class="modal-close" onclick="closeWorkerEditModal()">✕</button>
         </div>
-        <div class="modal-body" style="display:flex;flex-direction:column;gap:14px;">
-          <div id="formula-worker-label" style="font-weight:700;font-size:15px;"></div>
+        <div class="modal-body" style="display:flex;flex-direction:column;gap:16px;">
 
+          <div id="worker-edit-name-display" style="font-weight:800;font-size:17px;"></div>
+
+          <!-- Пароль -->
           <div class="form-group">
-            <label class="form-label">Формула</label>
-            <input class="form-input" type="text" id="formula-input"
+            <label class="form-label">🔑 Новый пароль</label>
+            <input class="form-input" type="text" id="we-password" placeholder="Оставьте пустым — без изменений" autocomplete="new-password">
+          </div>
+
+          <!-- Роль -->
+          <div class="form-group">
+            <label class="form-label">👤 Роль (системная)</label>
+            <select class="form-select" id="we-role">
+              <option value="senior">senior — Старший специалист</option>
+              <option value="junior">junior — Младший специалист</option>
+              <option value="manager">manager — Менеджер</option>
+            </select>
+          </div>
+
+          <!-- Формула ЗП -->
+          <div class="form-group" id="we-formula-group">
+            <label class="form-label">📐 Формула зарплаты</label>
+            <input class="form-input" id="we-formula" type="text"
               placeholder="напр. percent * 0.20"
               style="font-family:monospace;font-size:14px;">
-            <div style="font-size:11px;color:var(--text3);margin-top:5px;line-height:1.5;">
-              Переменная: <code style="color:var(--accent);">percent</code> — прибыль за день (выручка − закупка по выполненным заказам)<br>
-              Примеры:<br>
+            <div style="font-size:11px;color:var(--text3);margin-top:5px;line-height:1.6;">
+              Переменная: <code style="color:var(--accent);">percent</code> — прибыль за день<br>
               <code style="color:var(--accent);">percent * 0.20</code> — 20% от прибыли<br>
-              <code style="color:var(--accent);">500 + percent * 0.15</code> — ставка 500 + 15%<br>
+              <code style="color:var(--accent);">500 + percent * 0.15</code> — ставка + %<br>
               <code style="color:var(--accent);">1200</code> — фиксированная ставка
             </div>
           </div>
 
-          <div id="formula-preview" style="display:none;padding:10px 12px;background:var(--surface2);border-radius:10px;font-size:13px;">
-            <span style="color:var(--text3);">Результат за сегодня: </span>
-            <span id="formula-preview-value" style="font-weight:800;color:var(--accent);"></span>
+          <!-- Проблемы -->
+          <div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+              <div style="font-size:11px;font-weight:700;color:var(--text3);letter-spacing:0.04em;">⚠️ ПРОБЛЕМЫ</div>
+              <button class="fin-add-salary-btn" onclick="openAddProblemModalFromEdit()">
+                <i data-lucide="plus" style="width:11px;height:11px;"></i> Добавить
+              </button>
+            </div>
+            <div id="we-problems-list"></div>
           </div>
 
-          <div id="formula-error" style="display:none;color:var(--red,#DC2626);font-size:12px;"></div>
+          <div id="we-error" style="display:none;color:var(--red,#DC2626);font-size:12px;"></div>
         </div>
-        <div class="modal-footer">
-          <button class="btn-secondary" onclick="closeFormulaModal()">Отмена</button>
-          <button class="btn-primary" id="formula-save-btn" onclick="saveFormula()">
-            <i data-lucide="save" style="width:14px;height:14px;"></i> Сохранить
+
+        <div class="modal-footer" style="justify-content:space-between;">
+          <button class="btn-secondary" style="color:var(--red,#DC2626);border-color:var(--red,#DC2626);"
+            onclick="deleteWorkerFromModal()">
+            <i data-lucide="trash-2" style="width:13px;height:13px;"></i> Удалить
           </button>
+          <div style="display:flex;gap:8px;">
+            <button class="btn-secondary" onclick="closeWorkerEditModal()">Отмена</button>
+            <button class="btn-primary" id="we-save-btn" onclick="saveWorkerEdit()">
+              <i data-lucide="save" style="width:14px;height:14px;"></i> Сохранить
+            </button>
+          </div>
         </div>
       </div>
     `;
     document.body.appendChild(modal);
   }
 
-  document.getElementById('formula-worker-label').textContent = workerName;
-  const input = document.getElementById('formula-input');
-  input.value = currentFormula || '';
-  document.getElementById('formula-error').style.display   = 'none';
-  document.getElementById('formula-preview').style.display = 'none';
+  // Заполняем поля
+  document.getElementById('worker-edit-name-display').textContent = w.name;
+  document.getElementById('we-password').value = '';
+  document.getElementById('we-role').value = w.systemRole || 'senior';
+  document.getElementById('we-formula').value = w.salaryFormula || DEFAULT_SALARY_FORMULA?.[w.systemRole] || '';
+  document.getElementById('we-error').style.display = 'none';
 
-  // Живой предпросмотр при вводе
-  input.oninput = () => _updateFormulaPreview(input.value);
+  // Показываем/скрываем формулу в зависимости от роли
+  _updateWeFormulaVisibility();
+  document.getElementById('we-role').onchange = _updateWeFormulaVisibility;
+
+  // Проблемы
+  _renderWeProblems(w);
 
   modal.classList.add('active');
   initIcons();
-  setTimeout(() => input.focus(), 100);
-  _updateFormulaPreview(input.value);
 }
 
-function _updateFormulaPreview(formula) {
-  const previewEl = document.getElementById('formula-preview');
-  const valueEl   = document.getElementById('formula-preview-value');
-  const errEl     = document.getElementById('formula-error');
-  if (!formula.trim()) { previewEl.style.display = 'none'; errEl.style.display = 'none'; return; }
-
-  const today  = new Date().toISOString().slice(0, 10);
-  const result = evalSalaryFormula(formula, _formulaWorkerName, today);
-  errEl.style.display = 'none';
-  if (result === null) {
-    previewEl.style.display = 'none';
-    errEl.textContent = 'Ошибка в формуле — проверьте синтаксис';
-    errEl.style.display = 'block';
-  } else {
-    previewEl.style.display = 'block';
-    valueEl.textContent = result.toLocaleString('ru') + ' ₴';
-  }
+function _updateWeFormulaVisibility() {
+  const role = document.getElementById('we-role')?.value;
+  const group = document.getElementById('we-formula-group');
+  if (group) group.style.display = (role === 'manager') ? 'none' : '';
 }
 
-function closeFormulaModal() {
-  const modal = document.getElementById('formula-modal');
-  if (modal) modal.classList.remove('active');
-}
+function _renderWeProblems(w) {
+  const container = document.getElementById('we-problems-list');
+  if (!container) return;
 
-async function saveFormula() {
-  const formula = (document.getElementById('formula-input')?.value || '').trim();
-  const errEl   = document.getElementById('formula-error');
-  errEl.style.display = 'none';
+  const wProblems = (typeof allProblems !== 'undefined' ? allProblems : [])
+    .filter(p => p.worker_name === w.name)
+    .sort((a, b) => b.date.localeCompare(a.date));
 
-  // Валидация
-  if (formula) {
-    const today = new Date().toISOString().slice(0, 10);
-    const test  = evalSalaryFormula(formula, _formulaWorkerName, today);
-    if (test === null) {
-      errEl.textContent = 'Ошибка в формуле — проверьте синтаксис';
-      errEl.style.display = 'block';
-      return;
-    }
-  }
-
-  const btn = document.getElementById('formula-save-btn');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
-
-  try {
-    await sbUpdateWorkerFormula(_formulaWorkerId, formula);
-
-    // Обновляем локальный массив
-    const w = workers.find(x => x.id === _formulaWorkerId);
-    if (w) w.salaryFormula = formula;
-
-    // Пересчитываем зп за сегодня для этого сотрудника
-    if (w) await _recalcTodaySalaryForWorker(w.name);
-
-    closeFormulaModal();
-    renderWorkers();
-    showToast('Формула сохранена ✓');
-  } catch (e) {
-    errEl.textContent = 'Ошибка сохранения: ' + e.message;
-    errEl.style.display = 'block';
-  } finally {
-    if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="save" style="width:14px;height:14px;"></i> Сохранить'; initIcons(); }
-  }
-}
-
-// Пересчитывает зп за сегодня для конкретного сотрудника
-// Используется когда владелец меняет формулу
-async function _recalcTodaySalaryForWorker(workerName) {
-  const today  = new Date().toISOString().slice(0, 10);
-  const amount = calcDaySalary(workerName, today);
-  // Ищем запись за сегодня в allSalaries (если финансы уже загружены)
-  if (typeof allSalaries !== 'undefined') {
-    const existing = allSalaries.find(s => s.worker_name === workerName && s.date === today);
-    try {
-      if (existing) {
-        await sbUpdateWorkerSalary(existing.id, amount);
-        existing.amount = amount;
-      } else if (amount > 0) {
-        const saved = await sbInsertWorkerSalary({ worker_name: workerName, date: today, amount });
-        allSalaries.push(saved);
-      }
-    } catch (e) {
-      console.error('Recalc salary error:', e);
-    }
-  }
-}
-
-// ── ДОБАВЛЕНИЕ СОТРУДНИКА ────────────────────────────────────
-
-function openWorkerModal() {
-  document.getElementById('w-name').value = '';
-  document.getElementById('w-role').value = 'Старший специалист';
-  document.getElementById('w-system-role').value = 'senior';
-  document.getElementById('w-note').value = '';
-  document.getElementById('worker-modal').classList.add('active');
-  setTimeout(() => document.getElementById('w-name').focus(), 100);
-}
-
-function closeWorkerModal() {
-  document.getElementById('worker-modal').classList.remove('active');
-}
-
-async function saveWorker() {
-  const name       = document.getElementById('w-name').value.trim();
-  const role       = document.getElementById('w-role').value;
-  const systemRole = document.getElementById('w-system-role').value;
-  const note       = document.getElementById('w-note').value.trim();
-
-  if (!name) {
-    alert('Введите имя сотрудника');
-    document.getElementById('w-name').focus();
+  if (!wProblems.length) {
+    container.innerHTML = '<div style="font-size:12px;color:var(--text3);padding:4px 0;">Проблем не зафиксировано</div>';
     return;
   }
 
-  const saveBtn = document.querySelector('#worker-modal .btn-primary');
-  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '⏳'; }
+  container.innerHTML = wProblems.map(p =>
+    '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;' +
+    'padding:7px 10px;background:var(--surface2);border-radius:8px;margin-bottom:4px;' +
+    'border-left:2px solid var(--red,#DC2626);">' +
+      '<div style="min-width:0;">' +
+        '<div style="font-size:12px;font-weight:600;color:var(--text);">' + p.description + '</div>' +
+        '<div style="font-size:11px;color:var(--text3);margin-top:1px;">' +
+          formatDate(p.date) + (p.order_id ? ' · ' + p.order_id : '') + (p.partner ? ' · с ' + p.partner : '') +
+        '</div>' +
+      '</div>' +
+      '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">' +
+        '<span style="font-size:13px;font-weight:700;color:var(--red,#DC2626);">' + Number(p.amount).toLocaleString('ru') + ' ₴</span>' +
+        '<button class="icon-btn" onclick="deleteWorkerProblemFromModal(\'' + p.id + '\')" style="width:22px;height:22px;border-radius:6px;">' +
+          '<i data-lucide="trash-2" style="width:10px;height:10px;"></i>' +
+        '</button>' +
+      '</div>' +
+    '</div>'
+  ).join('');
+  initIcons();
+}
+
+function closeWorkerEditModal() {
+  const modal = document.getElementById('worker-edit-modal');
+  if (modal) modal.classList.remove('active');
+  _editWorkerId = null;
+}
+
+async function saveWorkerEdit() {
+  if (!_editWorkerId) return;
+  const w = workers.find(x => x.id === _editWorkerId);
+  if (!w) return;
+
+  const password = document.getElementById('we-password').value.trim();
+  const role     = document.getElementById('we-role').value;
+  const formula  = document.getElementById('we-formula').value.trim();
+
+  const btn = document.getElementById('we-save-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
 
   try {
-    const saved = await sbInsertWorker({ name, role, systemRole, note });
-    workers.push(saved);
-    closeWorkerModal();
+    const updates = {
+      systemRole: role,
+      salaryFormula: formula || null,
+    };
+    if (password) updates.password = password;
+
+    await sbUpdateWorker(_editWorkerId, updates);
+
+    // Обновляем локально
+    Object.assign(w, updates);
+    w.systemRole = role;
+    w.salaryFormula = formula || null;
+
+    closeWorkerEditModal();
     renderWorkers();
-    renderHome();
-    showToast('Сотрудник добавлен ✓');
+    showToast('Сотрудник обновлён ✓');
   } catch (e) {
-    showToast('Ошибка сохранения: ' + e.message, 'error');
+    const errEl = document.getElementById('we-error');
+    if (errEl) { errEl.textContent = 'Ошибка: ' + e.message; errEl.style.display = 'block'; }
   } finally {
-    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 Сохранить'; }
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i data-lucide="save" style="width:14px;height:14px;"></i> Сохранить';
+      initIcons();
+    }
   }
 }
 
-async function deleteWorker(id) {
-  if (!confirm('Удалить этого сотрудника?')) return;
+async function deleteWorkerFromModal() {
+  if (!_editWorkerId) return;
+  const w = workers.find(x => x.id === _editWorkerId);
+  if (!w) return;
+  if (!confirm(`Удалить сотрудника «${w.name}»? Это действие нельзя отменить.`)) return;
+
   try {
-    await sbDeleteWorker(id);
-    workers = workers.filter(w => w.id !== id);
+    await sbDeleteWorker(_editWorkerId);
+    workers = workers.filter(x => x.id !== _editWorkerId);
+    closeWorkerEditModal();
     renderWorkers();
-    renderHome();
     showToast('Сотрудник удалён');
   } catch (e) {
     showToast('Ошибка удаления: ' + e.message, 'error');
   }
 }
 
-// ── PIN MODAL ────────────────────────────────────────────────
-
-let _pinWorkerId   = null;
-let _pinWorkerName = null;
-
-function openPinModal(workerId, workerName) {
-  _pinWorkerId   = workerId;
-  _pinWorkerName = workerName;
-  document.getElementById('pin-worker-label').textContent = workerName;
-  document.getElementById('pin-input').value = '';
-  document.getElementById('pin-confirm').value = '';
-  document.getElementById('pin-error').style.display = 'none';
-  document.getElementById('pin-modal').classList.add('active');
-  setTimeout(() => document.getElementById('pin-input').focus(), 100);
+// Открытие модала "добавить проблему" из окна редактирования сотрудника
+function openAddProblemModalFromEdit() {
+  const w = workers.find(x => x.id === _editWorkerId);
+  if (!w) return;
+  // Закрываем редактор временно, откроем снова после добавления
+  openAddProblemModal(w.name, () => {
+    // callback после сохранения: перерисуем проблемы в модале
+    _renderWeProblems(w);
+  });
 }
 
-function closePinModal() {
-  document.getElementById('pin-modal').classList.remove('active');
-}
-
-async function savePin() {
-  const pin     = document.getElementById('pin-input').value.trim();
-  const confirm = document.getElementById('pin-confirm').value.trim();
-  const errEl   = document.getElementById('pin-error');
-
-  errEl.style.display = 'none';
-
-  if (!pin) { errEl.textContent = 'Введите PIN'; errEl.style.display = 'block'; return; }
-  if (pin.length < 4) { errEl.textContent = 'PIN — минимум 4 символа'; errEl.style.display = 'block'; return; }
-  if (pin !== confirm) { errEl.textContent = 'PIN-коды не совпадают'; errEl.style.display = 'block'; return; }
-
-  const saveBtn = document.getElementById('pin-save-btn');
-  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '⏳'; }
-
+async function deleteWorkerProblemFromModal(problemId) {
+  if (!confirm('Удалить запись о проблеме?')) return;
   try {
-    await sbSetWorkerPin(_pinWorkerId, pin);
-    closePinModal();
-    showToast(`PIN для ${_pinWorkerName} обновлён ✓`);
+    await sbDeleteWorkerProblem(problemId);
+    if (typeof allProblems !== 'undefined') {
+      allProblems = allProblems.filter(p => p.id !== problemId);
+    }
+    const w = workers.find(x => x.id === _editWorkerId);
+    if (w) _renderWeProblems(w);
+    showToast('Удалено');
   } catch (e) {
-    errEl.textContent = 'Ошибка: ' + e.message;
-    errEl.style.display = 'block';
-  } finally {
-    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '🔑 Сохранить PIN'; }
+    showToast('Ошибка: ' + e.message, 'error');
   }
 }
 
-
-
-
-
-
-
-
-// ── ПРОБЛЕМЫ СОТРУДНИКОВ ─────────────────────────────────────
+// ── МОДАЛ ДОБАВЛЕНИЯ ПРОБЛЕМЫ ────────────────────────────────
 
 let _problemWorkerName = null;
+let _problemCallback   = null;
 
-function openAddProblemModal(workerName) {
+function openAddProblemModal(workerName, callback) {
   _problemWorkerName = workerName;
+  _problemCallback   = callback || null;
 
   let modal = document.getElementById('problem-modal');
   if (!modal) {
@@ -477,42 +400,16 @@ async function saveNewProblem() {
     }
 
     closeAddProblemModal();
-
-    // Обновляем карточку конкретного сотрудника
-    const w = workers.find(x => x.name === _problemWorkerName);
-    if (w) {
-      const el = document.getElementById('worker-problems-' + w.id);
-      if (el) {
-        const probs = (typeof allProblems !== 'undefined' ? allProblems : [])
-          .filter(p => p.worker_name === w.name)
-          .sort((a, b) => b.date.localeCompare(a.date));
-        el.innerHTML = probs.map(p =>
-          '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;' +
-          'padding:7px 10px;background:var(--surface2);border-radius:8px;margin-bottom:4px;' +
-          'border-left:2px solid var(--red,#DC2626);">' +
-            '<div style="min-width:0;">' +
-              '<div style="font-size:12px;font-weight:600;color:var(--text);">' + p.description + '</div>' +
-              '<div style="font-size:11px;color:var(--text3);margin-top:1px;">' +
-                formatDate(p.date) + (p.order_id ? ' · ' + p.order_id : '') + (p.partner ? ' · с ' + p.partner : '') +
-              '</div>' +
-            '</div>' +
-            '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">' +
-              '<span style="font-size:13px;font-weight:700;color:var(--red,#DC2626);">' + Number(p.amount).toLocaleString('ru') + ' ₴</span>' +
-              '<button class="icon-btn" onclick="deleteWorkerProblem(\'' + p.id + '\', \'' + w.id + '\')" style="width:22px;height:22px;border-radius:6px;">' +
-                '<i data-lucide="trash-2" style="width:10px;height:10px;"></i>' +
-              '</button>' +
-            '</div>' +
-          '</div>'
-        ).join('') || '<div style="font-size:12px;color:var(--text3);padding:4px 0;">Проблем не зафиксировано</div>';
-        initIcons();
-      }
-    }
-
+    if (typeof _problemCallback === 'function') _problemCallback();
     showToast('Проблема добавлена ✓');
   } catch (e) {
     showToast('Ошибка: ' + e.message, 'error');
   } finally {
-    if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="save" style="width:14px;height:14px;"></i> Сохранить'; initIcons(); }
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i data-lucide="save" style="width:14px;height:14px;"></i> Сохранить';
+      initIcons();
+    }
   }
 }
 
@@ -522,33 +419,6 @@ async function deleteWorkerProblem(problemId, workerId) {
     await sbDeleteWorkerProblem(problemId);
     if (typeof allProblems !== 'undefined') {
       allProblems = allProblems.filter(p => p.id !== problemId);
-    }
-    // Перерисовываем список проблем в карточке
-    const w = workers.find(x => x.id === workerId);
-    const el = document.getElementById('worker-problems-' + workerId);
-    if (el && w) {
-      const probs = (typeof allProblems !== 'undefined' ? allProblems : [])
-        .filter(p => p.worker_name === w.name)
-        .sort((a, b) => b.date.localeCompare(a.date));
-      el.innerHTML = probs.map(p =>
-        '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;' +
-        'padding:7px 10px;background:var(--surface2);border-radius:8px;margin-bottom:4px;' +
-        'border-left:2px solid var(--red,#DC2626);">' +
-          '<div style="min-width:0;">' +
-            '<div style="font-size:12px;font-weight:600;color:var(--text);">' + p.description + '</div>' +
-            '<div style="font-size:11px;color:var(--text3);margin-top:1px;">' +
-              formatDate(p.date) + (p.order_id ? ' · ' + p.order_id : '') + (p.partner ? ' · с ' + p.partner : '') +
-            '</div>' +
-          '</div>' +
-          '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">' +
-            '<span style="font-size:13px;font-weight:700;color:var(--red,#DC2626);">' + Number(p.amount).toLocaleString('ru') + ' ₴</span>' +
-            '<button class="icon-btn" onclick="deleteWorkerProblem(\'' + p.id + '\', \'' + workerId + '\')" style="width:22px;height:22px;border-radius:6px;">' +
-              '<i data-lucide="trash-2" style="width:10px;height:10px;"></i>' +
-            '</button>' +
-          '</div>' +
-        '</div>'
-      ).join('') || '<div style="font-size:12px;color:var(--text3);padding:4px 0;">Проблем не зафиксировано</div>';
-      initIcons();
     }
     showToast('Удалено');
   } catch (e) {

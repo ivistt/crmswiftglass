@@ -2,8 +2,9 @@
 // ORDERS.JS — список заказов, детали, модал создания/редактирования
 // ============================================================
 
-let editingOrderId = null; // null = новый, иначе id редактируемого
-let currentOrderTab = 'inwork'; // 'inwork' | 'all' — только для owner
+let editingOrderId  = null;      // null = новый, иначе id редактируемого
+let currentOrderTab = 'inwork';  // 'inwork' | 'notinwork' | 'all' — для owner/manager
+let currentWorkerTab = 'relevant'; // 'relevant' | 'all' — для специалистов
 
 
 
@@ -17,6 +18,44 @@ function setupOrderActions() {
   }
 }
 
+// ---------- РЕНДЕР КАРТОЧКИ ЗАКАЗА ----------
+function renderOrderCard(o) {
+  const canMark = canMarkWorkerDone() && !o.statusDone &&
+    (o.responsible === currentWorkerName || o.assistant === currentWorkerName);
+  return `
+    <div class="order-card" onclick="openOrderDetail('${o.id}')">
+      <div class="order-card-top">
+        <div class="order-card-left">
+          <span class="order-id">${o.id}</span>
+          <span class="order-name">${o.car || '—'}</span>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          ${statusBadge(o.paymentStatus)}
+          ${mountBadge(o.mount)}
+          ${canMark ? `
+            <button
+              class="btn-check-done ${o.workerDone ? 'done' : ''}"
+              onclick="event.stopPropagation(); toggleWorkerDone('${o.id}')"
+              title="${o.workerDone ? 'Отменить выполнение' : 'Отметить выполненным'}"
+            >
+              <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <polyline points="2,7 5.5,10.5 12,3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+          ` : ''}
+        </div>
+      </div>
+      <div class="order-card-meta">
+        <span class="order-meta-item">👤 ${o.client || '—'}</span>
+        <span class="order-meta-item">☎️ ${o.phone || '—'}</span>
+        <span class="order-meta-item">🗓️ ${formatDate(o.date)}</span>
+        <span class="order-meta-item">🚧 ${o.responsible || '—'}${o.assistant ? ' + ' + o.assistant : ''}</span>
+        ${o.total ? `<span class="order-meta-item" style="font-weight:700;color:var(--accent);">💰 ${Number(o.total).toLocaleString('ru')} ₴</span>` : ''}
+      </div>
+    </div>
+  `;
+}
+
 // ---------- РЕНДЕР СПИСКА ----------
 function renderOrders() {
   const search = (document.getElementById('filter-search')?.value || '').toLowerCase();
@@ -26,13 +65,24 @@ function renderOrders() {
 
   let list = [...orders];
 
-  // Работники всегда видят только inWork. Owner и Manager фильтруют по табу.
-  if (currentRole !== 'owner' && currentRole !== 'manager' || currentOrderTab === 'inwork') {
-    list = list.filter(o => o.inWork);
-  } else if (currentOrderTab === 'notinwork') {
-    list = list.filter(o => !o.inWork);
+  if (currentRole === 'owner' || currentRole === 'manager') {
+    if (currentOrderTab === 'inwork') {
+      list = list.filter(o => o.inWork);
+    } else if (currentOrderTab === 'notinwork') {
+      list = list.filter(o => !o.inWork);
+    }
+    // 'all' — без фильтра
+  } else {
+    // Специалисты: только свои заказы
+    list = list.filter(o =>
+      o.responsible === currentWorkerName || o.assistant === currentWorkerName
+    );
+    if (currentWorkerTab === 'relevant') {
+      // Актуальные = inWork и ещё не отмечены выполненными
+      list = list.filter(o => o.inWork && !o.workerDone);
+    }
+    // 'all' — все свои без фильтра
   }
-  // currentOrderTab === 'all' — без фильтра
 
   if (search) list = list.filter(o =>
     (o.client  || '').toLowerCase().includes(search) ||
@@ -51,43 +101,14 @@ function renderOrders() {
   const container = document.getElementById('orders-list');
 
   if (!list.length) {
-    container.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-state-icon">📋</div>
-        <h3>Записей не найдено</h3>
-        <p>Попробуйте изменить фильтры или добавьте новую запись</p>
-      </div>`;
+    const msg = (currentRole !== 'owner' && currentRole !== 'manager' && currentWorkerTab === 'relevant')
+      ? '<h3>Нет актуальных записей</h3><p>Все задачи выполнены 🎉</p>'
+      : '<h3>Записей не найдено</h3><p>Попробуйте изменить фильтры или добавьте новую запись</p>';
+    container.innerHTML = `<div class="empty-state"><div class="empty-state-icon">📋</div>${msg}</div>`;
     return;
   }
 
-  container.innerHTML = list.map(o => `
-    <div class="order-card" onclick="openOrderDetail('${o.id}')">
-      <div class="order-card-top">
-        <div class="order-card-left">
-          <span class="order-id">${o.id}</span>
-          <span class="order-name">${o.car || '—'}</span>
-        </div>
-        <div style="display:flex;gap:8px;align-items:center;">
-          ${statusBadge(o.paymentStatus)}
-          ${mountBadge(o.mount)}
-        </div>
-      </div>
-      <div class="order-card-meta">
-        <span class="order-meta-item">👤 ${o.client || '—'}</span>
-        <span class="order-meta-item">☎️ ${o.phone || '—'}</span>
-        <span class="order-meta-item">🗓️ ${formatDate(o.date)}</span>
-        <span class="order-meta-item">🚧 ${o.responsible || '—'}${o.assistant ? ' + ' + o.assistant : ''}</span>
-        ${o.total ? `<span class="order-meta-item" style="font-weight:700;color:var(--accent);">💰 ${Number(o.total).toLocaleString('ru')} ₴</span>` : ''}
-      </div>
-      ${canMarkWorkerDone() && !o.statusDone && o.responsible === currentWorkerName ? `
-        <div class="worker-done-row" onclick="event.stopPropagation()">
-          <button class="btn-worker-done ${o.workerDone ? 'active' : ''}" onclick="toggleWorkerDone('${o.id}')">
-            ${o.workerDone ? '✓ Выполнено — отменить' : 'Отметить выполненным'}
-          </button>
-        </div>
-      ` : ''}
-    </div>
-  `).join('');
+  container.innerHTML = list.map(o => renderOrderCard(o)).join('');
 }
 
 // ---------- ДЕТАЛЬНЫЙ ЭКРАН ЗАКАЗА ----------
@@ -746,13 +767,21 @@ function renderOrdersForMonth(ym) {
 
   let list = orders.filter(o => o.date && o.date.slice(0, 7) === ym);
 
-  // Работники всегда видят только inWork. Owner и Manager фильтруют по табу.
-  if (currentRole !== 'owner' && currentRole !== 'manager' || currentOrderTab === 'inwork') {
-    list = list.filter(o => o.inWork);
-  } else if (currentOrderTab === 'notinwork') {
-    list = list.filter(o => !o.inWork);
+  if (currentRole === 'owner' || currentRole === 'manager') {
+    if (currentOrderTab === 'inwork') {
+      list = list.filter(o => o.inWork);
+    } else if (currentOrderTab === 'notinwork') {
+      list = list.filter(o => !o.inWork);
+    }
+  } else {
+    // Специалисты: только свои заказы
+    list = list.filter(o =>
+      o.responsible === currentWorkerName || o.assistant === currentWorkerName
+    );
+    if (currentWorkerTab === 'relevant') {
+      list = list.filter(o => o.inWork && !o.workerDone);
+    }
   }
-  // currentOrderTab === 'all' — без фильтра
 
   if (search) list = list.filter(o =>
     (o.client  || '').toLowerCase().includes(search) ||
@@ -775,34 +804,7 @@ function renderOrdersForMonth(ym) {
     return;
   }
 
-  container.innerHTML = list.map(o => `
-    <div class="order-card" onclick="openOrderDetail('${o.id}')">
-      <div class="order-card-top">
-        <div class="order-card-left">
-          <span class="order-id">${o.id}</span>
-          <span class="order-name">${o.car || '—'}</span>
-        </div>
-        <div style="display:flex;gap:8px;align-items:center;">
-          ${statusBadge(o.paymentStatus)}
-          ${mountBadge(o.mount)}
-        </div>
-      </div>
-      <div class="order-card-meta">
-        <span class="order-meta-item">👤 ${o.client || '—'}</span>
-        <span class="order-meta-item">☎️ ${o.phone || '—'}</span>
-        <span class="order-meta-item">🗓️ ${formatDate(o.date)}</span>
-        <span class="order-meta-item">🚧 ${o.responsible || '—'}${o.assistant ? ' + ' + o.assistant : ''}</span>
-        ${o.total ? `<span class="order-meta-item" style="font-weight:700;color:var(--accent);">💰 ${Number(o.total).toLocaleString('ru')} ₴</span>` : ''}
-      </div>
-      ${canMarkWorkerDone() && !o.statusDone && o.responsible === currentWorkerName ? `
-        <div class="worker-done-row" onclick="event.stopPropagation()">
-          <button class="btn-worker-done ${o.workerDone ? 'active' : ''}" onclick="toggleWorkerDone('${o.id}')">
-            ${o.workerDone ? '✓ Выполнено — отменить' : 'Отметить выполненным'}
-          </button>
-        </div>
-      ` : ''}
-    </div>
-  `).join('');
+  container.innerHTML = list.map(o => renderOrderCard(o)).join('');
 }
 
 // ---------- WORKER DONE — СПЕЦИАЛИСТ ОТМЕЧАЕТ ВЫПОЛНЕНИЕ ----------
@@ -870,12 +872,46 @@ async function _upsertOrderSalaries(order) {
 
 function initOrderTabs() {
   const tabsEl = document.getElementById('orders-tabs');
+
   if (currentRole === 'owner' || currentRole === 'manager') {
-    if (tabsEl) tabsEl.style.display = 'flex';
+    if (tabsEl) {
+      tabsEl.style.display = 'flex';
+      tabsEl.innerHTML = `
+        <button class="orders-tab" id="tab-inwork"    onclick="setOrderTab('inwork')">В работе</button>
+        <button class="orders-tab" id="tab-notinwork" onclick="setOrderTab('notinwork')">Выполненные</button>
+        <button class="orders-tab" id="tab-all"       onclick="setOrderTab('all')">Все</button>
+      `;
+    }
     setOrderTab('inwork');
   } else {
-    if (tabsEl) tabsEl.style.display = 'none';
-    currentOrderTab = 'inwork';
+    // Специалисты: Актуальные | Все мои
+    if (tabsEl) {
+      tabsEl.style.display = 'flex';
+      tabsEl.innerHTML = `
+        <button class="orders-tab orders-tab-relevant active" id="tab-relevant" onclick="setWorkerTab('relevant')">
+          <span class="tab-dot"></span> Актуальные
+        </button>
+        <button class="orders-tab" id="tab-my-all" onclick="setWorkerTab('all')">Все мои</button>
+      `;
+    }
+    currentWorkerTab = 'relevant';
+    if (currentMonthFilter) {
+      renderOrdersForMonth(currentMonthFilter);
+    } else {
+      renderOrders();
+    }
+  }
+}
+
+function setWorkerTab(tab) {
+  currentWorkerTab = tab;
+  document.querySelectorAll('.orders-tab').forEach(b => b.classList.remove('active'));
+  const el = document.getElementById(tab === 'relevant' ? 'tab-relevant' : 'tab-my-all');
+  if (el) el.classList.add('active');
+  if (currentMonthFilter) {
+    renderOrdersForMonth(currentMonthFilter);
+  } else {
+    renderOrders();
   }
 }
 
