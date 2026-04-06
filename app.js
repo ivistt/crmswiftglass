@@ -1,8 +1,13 @@
-// ============================================================
+﻿// ============================================================
 // APP.JS — навигация, главный экран
 // ============================================================
 
 let currentMonthFilter = null;
+
+// Fallback если data.js старой версии (без carDirectory)
+if (typeof carDirectory === 'undefined') {
+  window.carDirectory = [];
+}
 
 async function initApp() {
   const minDelay = new Promise(r => setTimeout(r, 2000));
@@ -110,6 +115,7 @@ function showScreen(name) {
     profile: null,
     'order-detail': 'Детали заказа',
     'client-detail': 'Детали клиента',
+    'car-directory': 'Справочник авто',
   };
   const crumb = document.getElementById('breadcrumb');
   const crumbText = document.getElementById('breadcrumb-text');
@@ -200,6 +206,19 @@ function renderHome() {
     `;
   }
 
+  if (currentRole === 'owner') {
+    container.innerHTML += `
+      <div class="home-card" onclick="openCarDirectoryScreen()">
+        <div class="home-card-icon-wrap home-card-icon-dim">
+          <i data-lucide="car" style="width:22px;height:22px;"></i>
+        </div>
+        <h3>Справочник авто</h3>
+        <p>Марки и еврокоды</p>
+        <div class="home-card-count">${carDirectory.length}</div>
+      </div>
+    `;
+  }
+
   initIcons();
 }
 
@@ -246,4 +265,10 @@ async function openWorkersScreen() {
   }
   renderWorkers();
   showScreen('workers');
+}
+
+function openCarDirectoryScreen() {
+  if (currentRole !== 'owner') return;
+  if (typeof renderCarDirectory === 'function') renderCarDirectory();
+  showScreen('car-directory');
 }

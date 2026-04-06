@@ -1,9 +1,10 @@
-// ============================================================
+﻿// ============================================================
 // PROFILE.JS — экран профиля специалиста (учёт зарплат)
 // ============================================================
 
 let workerSalaries = [];
 let workerProblems = [];
+let currentCash    = 0;
 
 async function loadWorkerSalaries() {
   if (currentRole === 'owner' || currentRole === 'manager') return;
@@ -16,7 +17,21 @@ async function loadWorkerSalaries() {
 
 async function loadWorkerProblems() {}
 
+function loadCash() {
+  const raw = localStorage.getItem(`cash_${currentWorkerName}`) || '0';
+  currentCash = Number(raw) || 0;
+}
+
+function saveCash() {
+  const val = Number(document.getElementById('cash-input')?.value) || 0;
+  currentCash = val;
+  localStorage.setItem(`cash_${currentWorkerName}`, String(val));
+  showToast('Касса обновлена');
+  renderProfile();
+}
+
 function openProfileScreen() {
+  loadCash();
   renderProfile();
   showScreen('profile');
   setActiveNav('profile');
@@ -137,6 +152,17 @@ function renderProfile() {
     + '<div class="profile-summary-card"><div class="profile-summary-label">За этот год</div>'
     + '<div class="profile-summary-value">' + yearTotal.toLocaleString('ru') + ' \u20B4</div></div>'
     + '</div>'
+
+    + (currentRole === 'senior'
+      ? '<div class="profile-today-card" style="margin-top:12px;">'
+        + '<div class="profile-today-label"><i data-lucide="wallet" style="width:15px;height:15px;"></i> Касса (наличка)</div>'
+        + '<div style="display:flex;align-items:center;gap:10px;margin-top:8px;">'
+        + '<input id="cash-input" class="form-input" type="number" value="' + currentCash + '" style="flex:1;" placeholder="0" />'
+        + '<button class="btn-secondary" onclick="saveCash()">Сохранить</button>'
+        + '</div>'
+        + '<div style="font-size:12px;color:var(--text3);margin-top:6px;">Сумма переносится на следующий день автоматически</div>'
+        + '</div>'
+      : '')
 
     + '<div class="profile-today-card">'
     + '<div class="profile-today-label"><i data-lucide="calendar-check" style="width:15px;height:15px;"></i> Зарплата — ' + formatDate(today) + '</div>'

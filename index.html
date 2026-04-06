@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
@@ -232,17 +232,17 @@
         <div id="orders-actions"></div>
       </div>
       <div id="orders-tabs" class="orders-tabs">
-        <button class="orders-tab active" id="tab-inwork" onclick="setOrderTab('inwork')">
-          <span class="ico" style="margin-right:5px;"><i data-lucide="hammer" style="width:13px;height:13px;"></i></span>
-          В работе
-        </button>
-        <button class="orders-tab" id="tab-notinwork" onclick="setOrderTab('notinwork')">
+        <button class="orders-tab active" id="tab-selection" onclick="setOrderTab('selection')">
           <span class="ico" style="margin-right:5px;"><i data-lucide="archive" style="width:13px;height:13px;"></i></span>
-          Не в работе
+          Подборка
         </button>
-        <button class="orders-tab" id="tab-all" onclick="setOrderTab('all')">
-          <span class="ico" style="margin-right:5px;"><i data-lucide="list" style="width:13px;height:13px;"></i></span>
-          Все записи
+        <button class="orders-tab" id="tab-planner" onclick="setOrderTab('planner')">
+          <span class="ico" style="margin-right:5px;"><i data-lucide="hammer" style="width:13px;height:13px;"></i></span>
+          Планёрка
+        </button>
+        <button class="orders-tab" id="tab-done" onclick="setOrderTab('done')">
+          <span class="ico" style="margin-right:5px;"><i data-lucide="check" style="width:13px;height:13px;"></i></span>
+          Выполненные
         </button>
       </div>
       <div class="filters-bar">
@@ -257,9 +257,8 @@
           <select class="filter-select" id="filter-status" onchange="renderOrders()">
             <option value="">Все статусы</option>
             <option>Оплачено</option>
-            <option>Частично</option>
             <option>Не оплачено</option>
-            <option>Долг</option>
+            <option>Частично оплачено</option>
           </select>
           <input class="filter-input" type="date" id="filter-date"
             oninput="renderOrders()" style="width:100%;">
@@ -331,20 +330,76 @@
       <div id="finance-content"></div>
     </div>
 
+    <!-- CAR DIRECTORY -->
+    <div class="screen" id="screen-car-directory">
+      <div class="page-header">
+        <div class="page-title" style="display:flex;align-items:center;gap:10px;">
+          <span class="ico page-title-icon"><i data-lucide="car" style="width:22px;height:22px;"></i></span>
+          Справочник авто
+        </div>
+        <button class="btn-primary" style="display:flex;align-items:center;gap:6px;" onclick="openCarDirModal()">
+          <i data-lucide="plus" style="width:14px;height:14px;"></i>
+          Добавить
+        </button>
+      </div>
+      <div class="filters-bar">
+        <div style="position:relative;">
+          <span class="ico" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);opacity:0.35;pointer-events:none;">
+            <i data-lucide="search" style="width:15px;height:15px;"></i>
+          </span>
+          <input class="filter-input" type="text" id="filter-car-dir-search"
+            placeholder="Поиск по модели или евро-коду..." oninput="renderCarDirectory()"
+            style="width:100%;padding-left:38px;">
+        </div>
+      </div>
+      <div id="car-directory-list-screen"></div>
+    </div>
+
     <!-- PROFILE -->
     <div class="screen" id="screen-profile">
       <div id="profile-content"></div>
     </div>
 
-    <!-- CLIENT DETAIL -->
-    <div class="screen" id="screen-client-detail">
-      <button class="back-btn" style="display:flex;align-items:center;gap:6px;" onclick="showScreen('clients')">
-        <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
-        Назад
+<!-- CLIENT DETAIL -->
+<div class="screen" id="screen-client-detail">
+  <button class="back-btn" style="display:flex;align-items:center;gap:6px;" onclick="showScreen('clients')">
+    <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
+    Назад
       </button>
       <div id="client-detail-content"></div>
     </div>
 
+  </div>
+</div>
+
+<!-- ==================== CAR DIRECTORY MODAL ==================== -->
+<div class="modal-overlay" id="car-dir-modal">
+  <div class="modal" style="max-width:460px;">
+    <div class="modal-header">
+      <div class="modal-title" id="car-dir-modal-title">Новый автомобиль</div>
+      <button class="modal-close" onclick="closeCarDirModal()">
+        <i data-lucide="x" style="width:16px;height:16px;"></i>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid col-1">
+        <div class="form-group">
+          <label class="form-label">Марка и модель *</label>
+          <input class="form-input" type="text" id="cd-model" placeholder="Например: Tesla Model 3">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Еврокод</label>
+          <input class="form-input" type="text" id="cd-eurocode" placeholder="EWG...">
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeCarDirModal()">Отмена</button>
+      <button class="btn-primary" id="car-dir-save-btn" style="display:flex;align-items:center;gap:6px;" onclick="saveCarDirEntry()">
+        <i data-lucide="save" style="width:14px;height:14px;"></i>
+        Сохранить
+      </button>
+    </div>
   </div>
 </div>
 
@@ -363,10 +418,6 @@
         <div class="form-section-title">📋 Основная информация</div>
         <div class="form-grid">
           <div class="form-group span-2" style="display:flex;gap:24px;align-items:center;padding:8px 0;">
-            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;font-size:14px;">
-              <input type="checkbox" id="f-status-done" style="width:18px;height:18px;accent-color:#00e5a0;">
-              ✅ Выполнен
-            </label>
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;font-size:14px;">
               <input type="checkbox" id="f-in-work" style="width:18px;height:18px;accent-color:#ffd166;">
               🔨 В работу <span style="font-weight:400;font-size:12px;color:var(--text3);">(видно работникам)</span>
@@ -403,22 +454,6 @@
           <div class="form-group">
             <label class="form-label">🔢 Код</label>
             <input class="form-input" type="text" id="f-code" placeholder="—">
-          </div>
-          <div class="form-group">
-            <label class="form-label">💻 Кодирование</label>
-            <input class="form-input" type="text" id="f-coding" placeholder="—">
-          </div>
-          <div class="form-group">
-            <label class="form-label">🏭 Склад</label>
-            <select class="form-select" id="f-warehouse">
-              <option value="">— выбрать —</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">🔧 Оборудование</label>
-            <select class="form-select" id="f-equipment">
-              <option value="">— выбрать —</option>
-            </select>
           </div>
           <div class="form-group span-2">
             <label class="form-label">📝 Заметки</label>
@@ -469,45 +504,38 @@
             <div id="f-author-checkboxes" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;"></div>
             <input type="hidden" id="f-author">
           </div>
-          <div class="form-group">
-            <label class="form-label">С Подбора</label>
-            <input class="form-input" type="text" id="f-selection" placeholder="—">
-          </div>
         </div>
       </div>
 
       <div class="form-section">
-        <div class="form-section-title">💸 Фінанси</div>
+        <div class="form-section-title">💸 Финансы</div>
         <div class="form-grid col-3">
           <div class="form-group">
-            <label class="form-label">💸 Статус розрахунку</label>
+            <label class="form-label">Расчёт долга клиента</label>
             <select class="form-select" id="f-payment-status">
               <option value="">—</option>
+              <option>Оплачено</option>
+              <option>Не оплачено</option>
+              <option>Частично оплачено</option>
             </select>
           </div>
           <div class="form-group">
-            <label class="form-label">Сверка</label>
-            <input class="form-input" type="number" id="f-check" placeholder="0">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Расчёт долга</label>
+            <label class="form-label">Расчёт долга (сумма)</label>
             <input class="form-input" type="number" id="f-debt" placeholder="0">
           </div>
           <div class="form-group">
-            <label class="form-label">📌 Загальна сума</label>
+            <label class="form-label">Дата расчёта долга</label>
+            <input class="form-input" type="date" id="f-debt-date">
+          </div>
+          <div class="form-group">
+            <label class="form-label">📌 Общая сумма работ</label>
             <input class="form-input" type="number" id="f-total" placeholder="0">
           </div>
           <div class="form-group">
-            <label class="form-label">📍 10%</label>
-            <input class="form-input" type="number" id="f-percent10" placeholder="0" readonly>
-          </div>
-          <div class="form-group">
-            <label class="form-label">📍 20%</label>
-            <input class="form-input" type="number" id="f-percent20" placeholder="0" readonly>
-          </div>
-          <div class="form-group">
             <label class="form-label">Молдинг Автор (Підгонка)</label>
-            <input class="form-input" type="text" id="f-molding-author" placeholder="—">
+            <select class="form-select" id="f-molding-author">
+              <option value="">— выбрать —</option>
+            </select>
           </div>
           <div class="form-group">
             <label class="form-label">🤝 Партнер (постачальник)</label>
@@ -519,28 +547,64 @@
             <label class="form-label">📦 Статус оплати постачальнику</label>
             <select class="form-select" id="f-supplier-status">
               <option value="">—</option>
+              <option>Оплачено</option>
+              <option>Не оплачено</option>
+              <option>Долг</option>
             </select>
           </div>
           <div class="form-group">
-            <label class="form-label">➖ Закупка</label>
-            <input class="form-input" type="number" id="f-purchase" placeholder="0">
+            <label class="form-label">Сумма оплаты постачальнику</label>
+            <input class="form-input" type="number" id="f-check" placeholder="0">
           </div>
           <div class="form-group">
-            <label class="form-label">➕ Приход</label>
-            <input class="form-input" type="number" id="f-income" placeholder="0">
+            <label class="form-label">Сумма покупки стекла</label>
+            <input class="form-input" type="number" id="f-purchase" placeholder="0" oninput="recalcMargin()">
           </div>
           <div class="form-group">
-            <label class="form-label">🟰 Остаток</label>
+            <label class="form-label">Сумма продажи стекла</label>
+            <input class="form-input" type="number" id="f-income" placeholder="0" oninput="recalcMargin()">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Маржа с продажи стекла</label>
             <input class="form-input" type="number" id="f-remainder" placeholder="0" readonly>
           </div>
           <div class="form-group">
-            <label class="form-label">Оплата 📦</label>
-            <input class="form-input" type="text" id="f-payment-method" placeholder="Наличные / Перевод">
+            <label class="form-label">Внешний специалист (тонировка)</label>
+            <label class="checkbox" style="gap:8px;">
+              <input type="checkbox" id="f-toning-external" style="width:18px;height:18px;accent-color:#00e5a0;">
+              <span>Не начислять Лёше 20% за тонировку</span>
+            </label>
           </div>
           <div class="form-group">
-            <label class="form-label">∆ Склад</label>
-            <input class="form-input" type="text" id="f-warehouse-delta" placeholder="—">
+            <label class="form-label">Дропшиппер</label>
+            <select class="form-select" id="f-dropshipper">
+              <option value="">— выбрать —</option>
+            </select>
           </div>
+          <div class="form-group">
+            <label class="form-label">Способ оплаты</label>
+            <select class="form-select" id="f-payment-method">
+              <option value="">— выбрать —</option>
+              <option>Наличные</option>
+              <option>ФОП</option>
+              <option>Карта 1</option>
+              <option>Карта 2</option>
+              <option>Карта 3</option>
+              <option>Карта 4</option>
+              <option>Карта 5</option>
+            </select>
+          </div>
+          <!-- скрытые поля для маржи/выплат -->
+          <input type="hidden" id="f-margin-total">
+          <input type="hidden" id="f-payout-dropshipper">
+          <input type="hidden" id="f-payout-manager-glass">
+          <input type="hidden" id="f-payout-resp-glass">
+          <input type="hidden" id="f-payout-lesha">
+          <input type="hidden" id="f-payout-roma">
+          <input type="hidden" id="f-payout-extra-resp">
+          <input type="hidden" id="f-payout-extra-assist">
+          <input type="hidden" id="f-payout-molding-resp">
+          <input type="hidden" id="f-payout-molding-assist">
         </div>
       </div>
 
@@ -702,6 +766,7 @@
 <script src="orders.js"></script>
 <script src="clients.js"></script>
 <script src="finance.js"></script>
+<script src="car_directory.js"></script>
 <script src="app.js"></script>
 <script>
   function initIcons() { if (window.lucide) lucide.createIcons(); }

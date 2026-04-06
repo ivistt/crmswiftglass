@@ -1,10 +1,15 @@
-// ============================================================
+﻿// ============================================================
 // ORDERS.JS — список заказов, детали, модал создания/редактирования
 // ============================================================
 
 let editingOrderId  = null;      // null = новый, иначе id редактируемого
-let currentOrderTab = 'inwork';  // 'inwork' | 'notinwork' | 'all' — для owner/manager
+let currentOrderTab = 'selection';  // 'selection' | 'planner' | 'done' — для owner/manager
 let currentWorkerTab = 'relevant'; // 'relevant' | 'all' — для специалистов
+
+function canMarkWorkerDone() {
+  // Галочка доступна только специалисту (senior) для своих заказов
+  return currentRole === 'senior';
+}
 
 
 
@@ -21,7 +26,7 @@ function setupOrderActions() {
 // ---------- РЕНДЕР КАРТОЧКИ ЗАКАЗА ----------
 function renderOrderCard(o) {
   const canMark = canMarkWorkerDone() && !o.statusDone &&
-    (o.responsible === currentWorkerName || o.assistant === currentWorkerName);
+    o.responsible === currentWorkerName;
   return `
     <div class="order-card" onclick="openOrderDetail('${o.id}')">
       <div class="order-card-top">
@@ -66,12 +71,13 @@ function renderOrders() {
   let list = [...orders];
 
   if (currentRole === 'owner' || currentRole === 'manager') {
-    if (currentOrderTab === 'inwork') {
-      list = list.filter(o => o.inWork);
-    } else if (currentOrderTab === 'notinwork') {
-      list = list.filter(o => !o.inWork);
+    if (currentOrderTab === 'planner') {
+      list = list.filter(o => o.inWork && !o.workerDone);
+    } else if (currentOrderTab === 'selection') {
+      list = list.filter(o => !o.inWork && !o.workerDone);
+    } else if (currentOrderTab === 'done') {
+      list = list.filter(o => o.workerDone);
     }
-    // 'all' — без фильтра
   } else {
     // Специалисты: только свои заказы
     list = list.filter(o =>
@@ -139,8 +145,7 @@ function openOrderDetail(id) {
           <div class="detail-subtitle">🗓️ ${formatDate(o.date)}${o.time ? ' · 🕐 ' + o.time : ''} &nbsp;·&nbsp; 🚧 ${o.responsible || '—'}</div>
         </div>
         <div class="detail-badges">
-          ${o.statusDone ? '<span class="status-badge" style="background:#16A34A;color:#fff;">✅ Выполнен</span>' : ''}
-          ${o.inWork ? '<span class="status-badge" style="background:#F59E0B;color:#fff;">🔨 В работу</span>' : ''}
+          ${o.inWork ? '<span class="status-badge" style="background:#F59E0B;color:#fff;">🔨 Планёрка</span>' : ''}
           ${statusBadge(o.paymentStatus)}
         </div>
       </div>
@@ -154,10 +159,7 @@ function openOrderDetail(id) {
         ${field('🚗 Авто', o.car)}
         ${field('🔢 Єврокод', o.code, 'mono')}
         ${field('🕐 Время', o.time)}
-        ${field('📦 Склад', o.warehouse)}
-        ${field('📃 Комплектація', o.equipment)}
         ${field('👥 Менеджер', o.author)}
-        ${field('С Подбора', o.selection)}
       </div>
       ${o.notes ? `<div style="margin-top:14px;padding:12px;background:var(--surface2);border-radius:8px;font-size:13px;color:var(--text2);">📝 ${o.notes}</div>` : ''}
     </div>
@@ -178,22 +180,31 @@ function openOrderDetail(id) {
 
     ${canViewFinance() ? `
     <div class="detail-section">
-      <div class="detail-section-title">💸 Фінанси</div>
+      <div class="detail-section-title">💸 Финансы</div>
       <div class="detail-grid">
-        ${field('💸 Статус розрахунку', o.paymentStatus)}
-        ${field('Сверка', o.check ? o.check + ' ₴' : '')}
+        ${field('Расчёт долга клиента', o.paymentStatus)}
+        ${field('Сумма оплаты постачальнику', o.check ? o.check + ' ₴' : '')}
         ${field('Расчёт долга', o.debt ? o.debt + ' ₴' : '')}
-        ${field('📌 Загальна сума', o.total ? o.total + ' ₴' : '', 'mono')}
-        ${field('📍 10%', o.percent10 ? o.percent10 + ' ₴' : '')}
-        ${field('📍 20%', o.percent20 ? o.percent20 + ' ₴' : '')}
+        ${field('Дата расчёта долга', formatDate(o.debtDate))}
+        ${field('📌 Общая сумма работ', o.total ? o.total + ' ₴' : '', 'mono')}
         ${field('Молдинг Автор', o.moldingAuthor)}
         ${field('🤝 Партнер', o.partner)}
         ${field('📦 Статус оплати постачальнику', o.supplierStatus)}
-        ${field('➖ Закупка', o.purchase ? o.purchase + ' ₴' : '')}
-        ${field('➕ Приход', o.income ? o.income + ' ₴' : '')}
-        ${field('🟰 Остаток', o.remainder !== undefined ? o.remainder + ' ₴' : '')}
-        ${field('Оплата', o.paymentMethod)}
-        ${field('∆ Склад', o.warehouseDelta)}
+        ${field('Сумма покупки стекла', o.purchase ? o.purchase + ' ₴' : '')}
+        ${field('Сумма продажи стекла', o.income ? o.income + ' ₴' : '')}
+        ${field('Маржа с продажи стекла', o.remainder !== undefined ? o.remainder + ' ₴' : '')}
+        ${field('Дропшиппер', o.dropshipper)}
+        ${field('Выплата дропшипперу', o.dropshipperPayout ? o.dropshipperPayout + ' ₴' : '')}
+        ${field('Выплата менеджеру (стекло)', o.payoutManagerGlass ? o.payoutManagerGlass + ' ₴' : '')}
+        ${field('Выплата ответственному (стекло)', o.payoutRespGlass ? o.payoutRespGlass + ' ₴' : '')}
+        ${field('Выплата Лёше (тонировка)', o.payoutLesha ? o.payoutLesha + ' ₴' : '')}
+        ${field('Выплата Роме (тату)', o.payoutRoma ? o.payoutRoma + ' ₴' : '')}
+        ${field('Выплата за доп. работы (ответств.)', o.payoutExtraResp ? o.payoutExtraResp + ' ₴' : '')}
+        ${field('Выплата за доп. работы (помощ.)', o.payoutExtraAssist ? o.payoutExtraAssist + ' ₴' : '')}
+        ${field('Выплата за молдинг (ответств.)', o.payoutMoldingResp ? o.payoutMoldingResp + ' ₴' : '')}
+        ${field('Выплата за молдинг (помощ.)', o.payoutMoldingAssist ? o.payoutMoldingAssist + ' ₴' : '')}
+        ${field('Маржа общая', o.marginTotal !== undefined ? o.marginTotal + ' ₴' : '')}
+        ${field('Способ оплаты', o.paymentMethod)}
       </div>
     </div>
     ` : ''}
@@ -226,24 +237,6 @@ function populateRefSelects() {
     if (cur) carSel.value = cur;
   }
 
-  // Склады
-  const whSel = document.getElementById('f-warehouse');
-  if (whSel) {
-    const cur = whSel.value;
-    whSel.innerHTML = '<option value="">— выбрать —</option>' +
-      refWarehouses.map(w => `<option value="${w.name}">${w.name}</option>`).join('');
-    if (cur) whSel.value = cur;
-  }
-
-  // Комплектации
-  const eqSel = document.getElementById('f-equipment');
-  if (eqSel) {
-    const cur = eqSel.value;
-    eqSel.innerHTML = '<option value="">— выбрать —</option>' +
-      refEquipment.map(e => `<option value="${e.name}">${e.name}</option>`).join('');
-    if (cur) eqSel.value = cur;
-  }
-
   // Услуги
   const svcSel = document.getElementById('f-service-type');
   if (svcSel) {
@@ -257,9 +250,18 @@ function populateRefSelects() {
   const psSel = document.getElementById('f-payment-status');
   if (psSel) {
     const cur = psSel.value;
-    psSel.innerHTML = '<option value="">—</option>' +
-      refPaymentStatuses.map(s => `<option value="${s.name}">${s.name}</option>`).join('');
+    const opts = ['Оплачено', 'Не оплачено', 'Частично оплачено'];
+    psSel.innerHTML = '<option value="">—</option>' + opts.map(s => `<option value="${s}">${s}</option>`).join('');
     if (cur) psSel.value = cur;
+  }
+
+  // Дропшипперы
+  const dsSel = document.getElementById('f-dropshipper');
+  if (dsSel) {
+    const cur = dsSel.value;
+    dsSel.innerHTML = '<option value="">— выбрать —</option>' +
+      (refDropshippers || []).map(p => `<option value="${p.name}">${p.name}</option>`).join('');
+    if (cur) dsSel.value = cur;
   }
 
   // Партнёры
@@ -271,12 +273,21 @@ function populateRefSelects() {
     if (cur) partSel.value = cur;
   }
 
+  // Молдинг автор (работники)
+  const maSel = document.getElementById('f-molding-author');
+  if (maSel) {
+    const cur = maSel.value;
+    maSel.innerHTML = '<option value="">— выбрать —</option>' +
+      workers.map(w => `<option value="${w.name}">${w.name}</option>`).join('');
+    if (cur) maSel.value = cur;
+  }
+
   // Статусы оплаты поставщику
   const ssSel = document.getElementById('f-supplier-status');
   if (ssSel) {
     const cur = ssSel.value;
-    ssSel.innerHTML = '<option value="">—</option>' +
-      refSupplierStatuses.map(s => `<option value="${s.name}">${s.name}</option>`).join('');
+    const opts = ['Оплачено','Не оплачено','Долг'];
+    ssSel.innerHTML = '<option value="">—</option>' + opts.map(s => `<option value="${s}">${s}</option>`).join('');
     if (cur) ssSel.value = cur;
   }
 
@@ -363,9 +374,7 @@ function onCarSelect() {
   const found = refCars.find(c => c.model === model);
   if (!found) return;
   const codeEl = document.getElementById('f-code');
-  const codingEl = document.getElementById('f-coding');
   if (codeEl && found.eurocode)  codeEl.value   = found.eurocode;
-  if (codingEl && found.coding)  codingEl.value = found.coding;
 }
 
 // ---------- МОДАЛ СОЗДАНИЯ / РЕДАКТИРОВАНИЯ ----------
@@ -449,17 +458,20 @@ function openOrderModal(id) {
   const totalEl = document.getElementById('f-total');
   const newTotal = totalEl.cloneNode(true);
   totalEl.parentNode.replaceChild(newTotal, totalEl);
-  newTotal.addEventListener('input', recalcPercents);
+  newTotal.addEventListener('input', recalcTotal);
 
   const purchaseEl = document.getElementById('f-purchase');
   const newPurchase = purchaseEl.cloneNode(true);
   purchaseEl.parentNode.replaceChild(newPurchase, purchaseEl);
-  newPurchase.addEventListener('input', recalcRemainder);
+  newPurchase.addEventListener('input', recalcMargin);
 
   const incomeEl = document.getElementById('f-income');
   const newIncome = incomeEl.cloneNode(true);
   incomeEl.parentNode.replaceChild(newIncome, incomeEl);
-  newIncome.addEventListener('input', recalcRemainder);
+  newIncome.addEventListener('input', recalcMargin);
+
+  const tonExtEl = document.getElementById('f-toning-external');
+  if (tonExtEl) tonExtEl.addEventListener('change', recalcFullMargins);
 
   document.getElementById('order-modal').classList.add('active');
 }
@@ -478,8 +490,6 @@ function fillOrderForm(o) {
   set('f-phone', o.phone);
   set('f-car', o.car);
   set('f-code', o.code);
-  set('f-warehouse', o.warehouse);
-  set('f-equipment', o.equipment);
   set('f-notes', o.notes);
   set('f-mount', o.mount);
   set('f-service-type', o.serviceType);
@@ -490,13 +500,11 @@ function fillOrderForm(o) {
   set('f-toning', o.toning);
   set('f-delivery', o.delivery);
   set('f-author', o.author);
-  set('f-selection', o.selection);
   set('f-payment-status', o.paymentStatus);
   set('f-check', o.check);
   set('f-debt', o.debt);
+  set('f-debt-date', o.debtDate);
   set('f-total', o.total);
-  set('f-percent10', o.percent10);
-  set('f-percent20', o.percent20);
   set('f-molding-author', o.moldingAuthor);
   set('f-partner', o.partner);
   set('f-supplier-status', o.supplierStatus);
@@ -504,9 +512,19 @@ function fillOrderForm(o) {
   set('f-income', o.income);
   set('f-remainder', o.remainder);
   set('f-payment-method', o.paymentMethod);
-  set('f-warehouse-delta', o.warehouseDelta);
-  const sdEl = document.getElementById('f-status-done');
-  if (sdEl) sdEl.checked = !!o.statusDone;
+  set('f-dropshipper', o.dropshipper);
+  const tonExtEl = document.getElementById('f-toning-external');
+  if (tonExtEl) tonExtEl.checked = !!o.toningExternal;
+  set('f-margin-total', o.marginTotal);
+  set('f-payout-dropshipper', o.payoutDropshipper);
+  set('f-payout-manager-glass', o.payoutManagerGlass);
+  set('f-payout-resp-glass', o.payoutRespGlass);
+  set('f-payout-lesha', o.payoutLesha);
+  set('f-payout-roma', o.payoutRoma);
+  set('f-payout-extra-resp', o.payoutExtraResp);
+  set('f-payout-extra-assist', o.payoutExtraAssist);
+  set('f-payout-molding-resp', o.payoutMoldingResp);
+  set('f-payout-molding-assist', o.payoutMoldingAssist);
   const iwEl = document.getElementById('f-in-work');
   if (iwEl) iwEl.checked = !!o.inWork;
   const asEl = document.getElementById('f-assistant');
@@ -518,25 +536,31 @@ function fillOrderForm(o) {
 function clearOrderForm() {
   const ids = [
     'f-date','f-time','f-responsible','f-client','f-phone','f-car','f-code',
-    'f-warehouse','f-equipment','f-notes','f-mount','f-service-type','f-glass','f-molding',
-    'f-extra-work','f-tatu','f-toning','f-delivery','f-author','f-selection',
-    'f-payment-status','f-check','f-debt','f-total','f-percent10','f-percent20',
+    'f-notes','f-mount','f-service-type','f-glass','f-molding',
+    'f-extra-work','f-tatu','f-toning','f-delivery','f-author',
+    'f-payment-status','f-check','f-debt','f-debt-date','f-total',
     'f-molding-author','f-partner','f-supplier-status','f-purchase','f-income',
-    'f-remainder','f-payment-method','f-warehouse-delta'
+    'f-remainder','f-payment-method','f-dropshipper','f-margin-total',
+    'f-payout-dropshipper','f-payout-manager-glass','f-payout-resp-glass',
+    'f-payout-lesha','f-payout-roma','f-payout-extra-resp','f-payout-extra-assist',
+    'f-payout-molding-resp','f-payout-molding-assist'
   ];
   ids.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
-  const sdEl = document.getElementById('f-status-done');
-  if (sdEl) sdEl.checked = false;
   const iwEl = document.getElementById('f-in-work');
-  if (iwEl) iwEl.checked = true;
+  if (iwEl) iwEl.checked = false;
 }
 
 function setPriceFieldsLocked(locked) {
-  const priceFields = ['f-total','f-check','f-debt','f-payment-status','f-payment-method','f-purchase','f-income','f-partner','f-supplier-status'];
+  const priceFields = ['f-total','f-check','f-debt','f-debt-date','f-payment-status','f-payment-method','f-purchase','f-income','f-partner','f-supplier-status'];
   priceFields.forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
-    if (locked) {
+    if (id === 'f-payment-status' && currentRole === 'senior') return; // старший может менять статус расчёта
+    if (id === 'f-debt-date' && currentRole === 'senior') return;
+    if (id === 'f-supplier-status' && currentRole === 'senior') return;
+
+    const forceUnlock = (currentRole === 'owner' || currentRole === 'manager');
+    if (locked && !forceUnlock) {
       el.setAttribute('readonly', 'true');
       el.setAttribute('disabled', 'true');
     } else {
@@ -547,24 +571,20 @@ function setPriceFieldsLocked(locked) {
 }
 
 // Автопересчёт
-function recalcPercents() {
-  const total = Number(document.getElementById('f-total').value) || 0;
-  document.getElementById('f-percent10').value = Math.round(total * 0.10);
-  document.getElementById('f-percent20').value = Math.round(total * 0.20);
-  recalcRemainder();
-}
-
-function recalcRemainder() {
-  const income   = Number(document.getElementById('f-income').value) || 0;
-  const purchase = Number(document.getElementById('f-purchase').value) || 0;
-  document.getElementById('f-remainder').value = income - purchase;
+function recalcMargin() {
+  const income   = Number(document.getElementById('f-income')?.value) || 0;
+  const purchase = Number(document.getElementById('f-purchase')?.value) || 0;
+  const remainderEl = document.getElementById('f-remainder');
+  if (remainderEl) remainderEl.value = income - purchase;
+  recalcFullMargins();
 }
 
 function recalcTotal() {
   const sum = ['f-mount','f-glass','f-molding','f-extra-work','f-tatu','f-toning','f-delivery']
     .reduce((s, id) => s + (Number(document.getElementById(id)?.value) || 0), 0);
   const totalEl = document.getElementById('f-total');
-  if (totalEl) { totalEl.value = sum; recalcPercents(); }
+  if (totalEl) { totalEl.value = sum; }
+  recalcMargin();
 }
 
 // ---------- СОХРАНЕНИЕ ----------
@@ -573,6 +593,9 @@ async function saveOrder() {
   const getN = id => Number(document.getElementById(id)?.value) || 0;
 
   const isNew = !editingOrderId;
+  const existingOrder = isNew ? null : orders.find(o => o.id === editingOrderId);
+
+  recalcMargin();
 
   const data = {
     id:              isNew ? generateOrderId() : editingOrderId,
@@ -583,9 +606,6 @@ async function saveOrder() {
     phone:           get('f-phone'),
     car:             get('f-car'),
     code:            get('f-code'),
-    coding:          '',
-    warehouse:       get('f-warehouse'),
-    equipment:       get('f-equipment'),
     notes:           get('f-notes'),
     mount:           getN('f-mount'),
     serviceType:     get('f-service-type'),
@@ -596,13 +616,13 @@ async function saveOrder() {
     toning:          getN('f-toning'),
     delivery:        getN('f-delivery'),
     author:          get('f-author'),
-    selection:       get('f-selection'),
-    paymentStatus:   get('f-payment-status'),
+    paymentStatus:   (currentRole === 'senior')
+      ? get('f-payment-status')
+      : (existingOrder ? existingOrder.paymentStatus : ''),
     check:           getN('f-check'),
     debt:            getN('f-debt'),
+    debtDate:        get('f-debt-date'),
     total:           getN('f-total'),
-    percent10:       getN('f-percent10'),
-    percent20:       getN('f-percent20'),
     moldingAuthor:   get('f-molding-author'),
     partner:         get('f-partner'),
     supplierStatus:  get('f-supplier-status'),
@@ -610,12 +630,26 @@ async function saveOrder() {
     income:          getN('f-income'),
     remainder:       getN('f-remainder'),
     paymentMethod:   get('f-payment-method'),
-    warehouseDelta:  get('f-warehouse-delta'),
-    statusDone:      document.getElementById('f-status-done')?.checked || false,
-    inWork:          document.getElementById('f-in-work')?.checked || false,
+    dropshipper:     get('f-dropshipper'),
+    dropshipperPayout: getN('f-remainder'),
+    statusDone:      existingOrder ? existingOrder.statusDone : false,
+    inWork:          (currentRole === 'owner' || currentRole === 'manager')
+      ? (document.getElementById('f-in-work')?.checked || false)
+      : (existingOrder ? existingOrder.inWork : false),
     workerDone:      isNew ? false : (orders.find(x => x.id === editingOrderId)?.workerDone || false),
     assistant:       document.getElementById('f-assistant')?.value || '',
-    priceLocked:     true,
+    priceLocked:     (currentRole === 'senior') ? true : (existingOrder ? existingOrder.priceLocked : false),
+    toningExternal:  document.getElementById('f-toning-external')?.checked || false,
+    marginTotal:     getN('f-margin-total'),
+    payoutDropshipper:     getN('f-payout-dropshipper'),
+    payoutManagerGlass:    getN('f-payout-manager-glass'),
+    payoutRespGlass:       getN('f-payout-resp-glass'),
+    payoutLesha:           getN('f-payout-lesha'),
+    payoutRoma:            getN('f-payout-roma'),
+    payoutExtraResp:       getN('f-payout-extra-resp'),
+    payoutExtraAssist:     getN('f-payout-extra-assist'),
+    payoutMoldingResp:     getN('f-payout-molding-resp'),
+    payoutMoldingAssist:   getN('f-payout-molding-assist'),
   };
 
   if (!data.date || !data.client) {
@@ -650,10 +684,10 @@ async function saveOrder() {
 // ---------- ХЕЛПЕРЫ ----------
 function statusBadge(status) {
   const map = {
-    'Оплачено':    'status-paid',
-    'Частично':    'status-partial',
-    'Не оплачено': 'status-unpaid',
-    'Долг':        'status-debt',
+    'Оплачено':           'status-paid',
+    'Частично оплачено':  'status-partial',
+    'Не оплачено':        'status-unpaid',
+    'Долг':               'status-debt',
   };
   if (!status) return '';
   return `<span class="status-badge ${map[status] || ''}">${status}</span>`;
@@ -709,7 +743,7 @@ function renderMonths() {
     if (filterVal && ym !== filterVal) continue;
     if (search) {
       const haystack = [o.client, o.phone, o.car, o.id, o.responsible, o.code,
-        o.warehouse, o.equipment, o.notes, o.author, o.selection,
+        o.equipment, o.notes, o.author,
         o.paymentStatus, o.paymentMethod, o.glass, o.mount, o.molding,
         o.extraWork, o.tatu, o.toning].map(v => String(v||'')).join(' ').toLowerCase();
       if (!haystack.includes(search)) continue;
@@ -768,10 +802,12 @@ function renderOrdersForMonth(ym) {
   let list = orders.filter(o => o.date && o.date.slice(0, 7) === ym);
 
   if (currentRole === 'owner' || currentRole === 'manager') {
-    if (currentOrderTab === 'inwork') {
-      list = list.filter(o => o.inWork);
-    } else if (currentOrderTab === 'notinwork') {
-      list = list.filter(o => !o.inWork);
+    if (currentOrderTab === 'planner') {
+      list = list.filter(o => o.inWork && !o.workerDone);
+    } else if (currentOrderTab === 'selection') {
+      list = list.filter(o => !o.inWork && !o.workerDone);
+    } else if (currentOrderTab === 'done') {
+      list = list.filter(o => o.workerDone);
     }
   } else {
     // Специалисты: только свои заказы
@@ -877,12 +913,12 @@ function initOrderTabs() {
     if (tabsEl) {
       tabsEl.style.display = 'flex';
       tabsEl.innerHTML = `
-        <button class="orders-tab" id="tab-inwork"    onclick="setOrderTab('inwork')">В работе</button>
-        <button class="orders-tab" id="tab-notinwork" onclick="setOrderTab('notinwork')">Выполненные</button>
-        <button class="orders-tab" id="tab-all"       onclick="setOrderTab('all')">Все</button>
+        <button class="orders-tab" id="tab-selection" onclick="setOrderTab('selection')">Подборка</button>
+        <button class="orders-tab" id="tab-planner"   onclick="setOrderTab('planner')">Планёрка</button>
+        <button class="orders-tab" id="tab-done"      onclick="setOrderTab('done')">Выполненные</button>
       `;
     }
-    setOrderTab('inwork');
+    setOrderTab('selection');
   } else {
     // Специалисты: Актуальные | Все мои
     if (tabsEl) {
@@ -925,4 +961,51 @@ function setOrderTab(tab) {
   } else {
     renderOrders();
   }
+}
+// Полный пересчёт маржи и выплат
+function recalcFullMargins() {
+  const val = id => Number(document.getElementById(id)?.value) || 0;
+  const incomeGlass   = val('f-income');
+  const purchaseGlass = val('f-purchase');
+  const moldingSum    = val('f-molding');
+  const extraSum      = val('f-extra-work');
+  const toningSum     = val('f-toning');
+  const tatuSum       = val('f-tatu');
+  const total         = val('f-total');
+  const toningExternal = document.getElementById('f-toning-external')?.checked || false;
+
+  const marginGlass = incomeGlass - purchaseGlass;
+  const costMolding = moldingSum * 0.4;
+  const costToning  = toningSum * 0.4;
+
+  const payoutDropshipper = document.getElementById('f-dropshipper')?.value ? marginGlass : 0;
+  const payoutManagerGlass = (document.getElementById('f-author')?.value === 'Sasha Manager') ? marginGlass * 0.10 : 0;
+  const responsibleName = document.getElementById('f-responsible')?.value || '';
+  const payoutRespGlass = (['Костя','Саша Смоков'].includes(responsibleName) && incomeGlass > 0) ? marginGlass * 0.10 : 0;
+  const payoutLesha = toningExternal ? 0 : toningSum * 0.20;
+  const payoutRoma  = tatuSum > 0 ? 500 : 0;
+  const payoutExtraResp   = extraSum * 0.20;
+  const payoutExtraAssist = extraSum * 0.20;
+  const payoutMoldingResp   = moldingSum * 0.20;
+  const payoutMoldingAssist = moldingSum * 0.20;
+
+  const costs = purchaseGlass + costMolding + costToning;
+  const payouts = payoutDropshipper + payoutManagerGlass + payoutRespGlass + payoutLesha + payoutRoma +
+                  payoutExtraResp + payoutExtraAssist + payoutMoldingResp + payoutMoldingAssist;
+
+  const marginTotal = total - costs - payouts;
+
+  // сохранить в скрытых полях (или существующих инпутах)
+  const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = Math.round(val); };
+  setVal('f-remainder', marginGlass);
+  setVal('f-margin-total', marginTotal);
+  setVal('f-payout-dropshipper', payoutDropshipper);
+  setVal('f-payout-manager-glass', payoutManagerGlass);
+  setVal('f-payout-resp-glass', payoutRespGlass);
+  setVal('f-payout-lesha', payoutLesha);
+  setVal('f-payout-roma', payoutRoma);
+  setVal('f-payout-extra-resp', payoutExtraResp);
+  setVal('f-payout-extra-assist', payoutExtraAssist);
+  setVal('f-payout-molding-resp', payoutMoldingResp);
+  setVal('f-payout-molding-assist', payoutMoldingAssist);
 }

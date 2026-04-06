@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 // DATA.JS — глобальное хранилище + запросы через Worker
 // ============================================================
 
@@ -201,9 +201,56 @@ async function sbFetchRef(table) {
   return res.json();
 }
 
+async function sbFetchRefOptional(table) {
+  try {
+    return await sbFetchRef(table);
+  } catch (e) {
+    // если таблица ещё не проксируется воркером — молча возвращаем пустой список
+    return [];
+  }
+}
+
+// -- CAR DIRECTORY --------------------------------------------------
+async function sbFetchCarDirectory() {
+  const res = await fetch(`${WORKER_URL}/api/car-directory`, { headers: getHeaders() });
+  if (!res.ok) throw new Error(await res.text());
+  const body = await res.json();
+  return Array.isArray(body) ? body : (body.data ?? []);
+}
+
+async function sbUpsertCarDirectory(model, eurocode) {
+  const res = await fetch(`${WORKER_URL}/api/car-directory`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ model, eurocode }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const rows = await res.json();
+  return rows[0];
+}
+
+async function sbUpdateCarDirectory(id, model, eurocode) {
+  const res = await fetch(`${WORKER_URL}/api/car-directory/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+    body: JSON.stringify({ model, eurocode }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const rows = await res.json();
+  return rows[0];
+}
+
+async function sbDeleteCarDirectory(id) {
+  const res = await fetch(`${WORKER_URL}/api/car-directory/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers: getHeaders(),
+  });
+  if (!res.ok) throw new Error(await res.text());
+}
+
 async function loadRefData() {
   try {
-    const [cars, wh, eq, svc, ps, part, ss] = await Promise.all([
+    const [cars, wh, eq, svc, ps, part, ss, carDir, drops] = await Promise.all([
       sbFetchRef('ref_cars'),
       sbFetchRef('ref_warehouses'),
       sbFetchRef('ref_equipment'),
@@ -211,6 +258,8 @@ async function loadRefData() {
       sbFetchRef('ref_payment_statuses'),
       sbFetchRef('ref_partners'),
       sbFetchRef('ref_supplier_statuses'),
+      sbFetchCarDirectory().catch(() => []),
+      sbFetchRefOptional('ref_dropshippers'),
     ]);
     refCars             = cars;
     refWarehouses       = wh;
@@ -219,6 +268,8 @@ async function loadRefData() {
     refPaymentStatuses  = ps.map(s => s.name === 'Борг' ? { ...s, name: 'Долг' } : s);
     refPartners         = part;
     refSupplierStatuses = ss;
+    carDirectory        = carDir;
+    refDropshippers     = drops;
   } catch (e) {
     showToast('Ошибка загрузки справочников: ' + e.message, 'error');
   }
@@ -227,7 +278,9 @@ async function loadRefData() {
 // ── MAPPERS ──────────────────────────────────────────────────
 
 function rowToOrder(r) {
-  const paymentStatus = r.payment_status === 'Борг' ? 'Долг' : r.payment_status;
+  let paymentStatus = r.payment_status;
+  if (paymentStatus === 'Борг') paymentStatus = 'Не оплачено';
+  if (paymentStatus === 'Рассчитано') paymentStatus = 'Оплачено';
   return {
     id:              r.id,
     date:            r.date,
@@ -236,7 +289,6 @@ function rowToOrder(r) {
     phone:           r.phone,
     car:             r.car,
     code:            r.code,
-    coding:          r.coding,
     warehouse:       r.warehouse,
     equipment:       r.equipment,
     notes:           r.notes,
@@ -253,6 +305,7 @@ function rowToOrder(r) {
     paymentStatus:   paymentStatus,
     check:           r.check_sum      || 0,
     debt:            r.debt           || 0,
+    debtDate:        r.debt_date      || '',
     total:           r.total          || 0,
     percent10:       r.percent10      || 0,
     percent20:       r.percent20      || 0,
@@ -264,6 +317,18 @@ function rowToOrder(r) {
     remainder:       r.remainder      || 0,
     paymentMethod:   r.payment_method,
     warehouseDelta:  r.warehouse_delta,
+    dropshipper:     r.drop_shipper,
+    dropshipperPayout: r.drop_shipper_payout || 0,
+    toningExternal:  r.toning_external || false,
+    marginTotal:     r.margin_total || 0,
+    payoutManagerGlass:   r.payout_manager_glass || 0,
+    payoutRespGlass:      r.payout_resp_glass || 0,
+    payoutLesha:          r.payout_lesha || 0,
+    payoutRoma:           r.payout_roma || 0,
+    payoutExtraResp:      r.payout_extra_resp || 0,
+    payoutExtraAssist:    r.payout_extra_assist || 0,
+    payoutMoldingResp:    r.payout_molding_resp || 0,
+    payoutMoldingAssist:  r.payout_molding_assist || 0,
     priceLocked:     r.price_locked,
     time:            r.time,
     statusDone:      r.status_done || false,
@@ -282,7 +347,6 @@ function orderToRow(o) {
     phone:            o.phone,
     car:              o.car,
     code:             o.code,
-    coding:           o.coding,
     warehouse:        o.warehouse,
     equipment:        o.equipment,
     notes:            o.notes,
@@ -299,6 +363,7 @@ function orderToRow(o) {
     payment_status:   o.paymentStatus,
     check_sum:        o.check             || 0,
     debt:             o.debt              || 0,
+    debt_date:        o.debtDate          || null,
     total:            o.total             || 0,
     percent10:        o.percent10         || 0,
     percent20:        o.percent20         || 0,
@@ -307,11 +372,23 @@ function orderToRow(o) {
     supplier_status:  o.supplierStatus,
     purchase:         o.purchase          || 0,
     income:           o.income            || 0,
-    remainder:        o.remainder         || 0,
-    payment_method:   o.paymentMethod,
-    warehouse_delta:  o.warehouseDelta,
-    price_locked:     o.priceLocked,
-    time:             o.time,
+    remainder:         o.remainder          || 0,
+    payment_method:    o.paymentMethod,
+    warehouse_delta:   o.warehouseDelta,
+    drop_shipper:      o.dropshipper || null,
+    drop_shipper_payout: o.dropshipperPayout || 0,
+    toning_external:    o.toningExternal || false,
+    margin_total:       o.marginTotal || 0,
+    payout_manager_glass:   o.payoutManagerGlass || 0,
+    payout_resp_glass:      o.payoutRespGlass || 0,
+    payout_lesha:          o.payoutLesha || 0,
+    payout_roma:           o.payoutRoma || 0,
+    payout_extra_resp:     o.payoutExtraResp || 0,
+    payout_extra_assist:   o.payoutExtraAssist || 0,
+    payout_molding_resp:   o.payoutMoldingResp || 0,
+    payout_molding_assist: o.payoutMoldingAssist || 0,
+    price_locked:      o.priceLocked,
+    time:              o.time,
     status_done:      o.statusDone || false,
     in_work:          o.inWork     || false,
     worker_done:      o.workerDone || false,
@@ -427,6 +504,8 @@ let orders      = [];
 
 let refCars             = [];
 let refWarehouses       = [];
+let refDropshippers     = [];
+let carDirectory        = []; // справочник авто
 let refEquipment        = [];
 let refServices         = [];
 let refPaymentStatuses  = [];
@@ -444,11 +523,11 @@ function generateOrderId() {
   return 'SG-' + String(next).padStart(4, '0');
 }
 
-function canCreateOrder()    { return currentRole === 'owner' || currentRole === 'senior' || currentRole === 'manager'; }
+function canCreateOrder()    { return currentRole === 'owner' || currentRole === 'manager'; }
 function canEditPrice(order) {
   if (currentRole === 'owner') return true;
+  if (currentRole === 'manager') return true;
   if (currentRole === 'senior') return !order.priceLocked;
-  if (currentRole === 'manager') return !order.priceLocked;
   return false;
 }
 function canViewClients()  { return currentRole === 'owner' || currentRole === 'manager'; }

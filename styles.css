@@ -1,4 +1,4 @@
-/* ===== CSS VARIABLES ===== */
+﻿/* ===== CSS VARIABLES ===== */
 :root {
   --bg: #0a0a0a;
   --bg2: #0f0f0f;
@@ -1322,7 +1322,7 @@ input[type="datetime-local"] {
   .fin-summary-grid { grid-template-columns: 1fr; }
 }
 
-/* ── WORKER DONE / REVIEW ─────────────────────────────────── */
+/* -- WORKER DONE / REVIEW ----------------------------------- */
 
 .worker-done-row {
   padding: 8px 12px 10px;
@@ -1384,7 +1384,7 @@ input[type="datetime-local"] {
 }
 .review-count-badge:empty { display: none; }
 
-/* ── КНОПКА-ГАЛОЧКА «ВЫПОЛНЕНО» ───────────────────────────── */
+/* -- КНОПКА-ГАЛОЧКА «ВЫПОЛНЕНО» ----------------------------- */
 .btn-check-done {
   display: flex;
   align-items: center;
@@ -1419,7 +1419,7 @@ input[type="datetime-local"] {
   border-color: #16a34a;
 }
 
-/* ── ВКЛАДКИ СПЕЦИАЛИСТА ───────────────────────────────────── */
+/* -- ВКЛАДКИ СПЕЦИАЛИСТА ------------------------------------- */
 .tab-dot {
   display: inline-block;
   width: 7px;
@@ -1441,7 +1441,7 @@ input[type="datetime-local"] {
   opacity: 1;
 }
 
-/* ── КАРТОЧКА СОТРУДНИКА (упрощённая) ─────────────────────── */
+/* -- КАРТОЧКА СОТРУДНИКА (упрощённая) ----------------------- */
 .worker-card-simple {
   display: flex;
   align-items: center;
@@ -1479,4 +1479,29 @@ input[type="datetime-local"] {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
+}
+
+/* ===== CAR DIRECTORY TABLE ===== */
+.car-dir-table { width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.car-dir-header, .car-dir-row {
+  display: grid;
+  grid-template-columns: 1.6fr 1fr 120px;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+}
+.car-dir-header { background: var(--surface2); font-size: 13px; color: var(--text2); text-transform: uppercase; letter-spacing: 0.03em; font-weight: 700; }
+.car-dir-row { border-top: 1px solid var(--border); }
+.car-dir-row:hover { background: rgba(255,255,255,0.03); }
+.car-dir-model { font-weight: 700; font-size: 15px; }
+.car-dir-code { font-family: 'JetBrains Mono', monospace; font-size: 14px; color: var(--text2); }
+.car-dir-col-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+/* ===== CASH INPUT (PROFILE) ===== */
+#cash-input.form-input { max-width: 240px; }
+
+/* ===== AVATARS HIDDEN ===== */
+.worker-avatar,
+.client-avatar {
+  display: none !important;
 }
