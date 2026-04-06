@@ -70,7 +70,6 @@ function renderOrders() {
         <div style="display:flex;gap:8px;align-items:center;">
           ${statusBadge(o.paymentStatus)}
           ${mountBadge(o.mount)}
-          ${o.workerDone && !o.statusDone && currentRole === 'owner' ? '<span class="mount-badge review-badge">⏳ На проверке</span>' : ''}
         </div>
       </div>
       <div class="order-card-meta">
@@ -260,12 +259,14 @@ function populateRefSelects() {
     if (cur) ssSel.value = cur;
   }
 
-  // Ответственный и Автор — из workers
+  // Ответственный — только старшие специалисты
   const respSel = document.getElementById('f-responsible');
   if (respSel) {
     const cur = respSel.value;
     respSel.innerHTML = '<option value="">— выбрать —</option>' +
-      workers.map(w => `<option value="${w.name}">${w.name} (${w.role})</option>`).join('');
+      workers
+        .filter(w => w.systemRole === 'senior')
+        .map(w => `<option value="${w.name}">${w.name} (${w.role})</option>`).join('');
     if (cur) respSel.value = cur;
   }
 
@@ -277,11 +278,14 @@ function populateRefSelects() {
     if (cur) authorSel.value = cur;
   }
 
+  // Помощник — старший или младший специалист
   const assistantSel = document.getElementById('f-assistant');
   if (assistantSel) {
     const cur = assistantSel.value;
     assistantSel.innerHTML = '<option value="">— нет —</option>' +
-      workers.map(w => `<option value="${w.name}">${w.name}</option>`).join('');
+      workers
+        .filter(w => w.systemRole === 'senior' || w.systemRole === 'junior')
+        .map(w => `<option value="${w.name}">${w.name} (${w.role})</option>`).join('');
     if (cur) assistantSel.value = cur;
   }
 }
@@ -781,7 +785,6 @@ function renderOrdersForMonth(ym) {
         <div style="display:flex;gap:8px;align-items:center;">
           ${statusBadge(o.paymentStatus)}
           ${mountBadge(o.mount)}
-          ${o.workerDone && !o.statusDone && currentRole === 'owner' ? '<span class="mount-badge review-badge">⏳ На проверке</span>' : ''}
         </div>
       </div>
       <div class="order-card-meta">
@@ -807,11 +810,12 @@ function renderOrdersForMonth(ym) {
 async function toggleWorkerDone(orderId) {
   const o = orders.find(x => x.id === orderId);
   if (!o) return;
+  // Только ответственный (responsible) может менять статус
+  if (o.responsible !== currentWorkerName) return;
   o.workerDone = !o.workerDone;
   try {
     await sbUpdateOrder(o);
     await _upsertOrderSalaries(o);
-    updateReviewBadge();
     currentMonthFilter ? renderOrdersForMonth(currentMonthFilter) : renderOrders();
     showToast(o.workerDone ? '✓ Выполнено — ЗП начислена' : 'Отметка снята');
     if (document.getElementById('screen-profile')?.classList.contains('active')) {
@@ -826,65 +830,48 @@ async function toggleWorkerDone(orderId) {
 
 // Начислить / удалить записи ЗП для responsible + assistant по конкретному заказу
 async function _upsertOrderSalaries(order) {
-  const _d = new Date();
-  const today = _d.getFullYear() + '-'
-    + String(_d.getMonth() + 1).padStart(2, '0') + '-'
-    + String(_d.getDate()).padStart(2, '0');
   const participants = [order.responsible, order.assistant].filter(Boolean);
 
+  // Всегда берём актуальные записи ЗП по этому заказу из БД
+  let existingInDb = [];
+  try {
+    existingInDb = await sbFetchSalariesByOrder(order.id) || [];
+  } catch (e) { /* если упало — продолжаем с пустым массивом */ }
+
   for (const workerName of participants) {
-    const salArr = typeof workerSalaries !== 'undefined' ? workerSalaries : [];
-    const allArr = typeof allSalaries   !== 'undefined' ? allSalaries   : [];
-    const existingEntry =
-      salArr.find(s => s && s.order_id === order.id && s.worker_name === workerName) ||
-      allArr.find(s => s && s.order_id === order.id && s.worker_name === workerName);
+    const existingEntry = existingInDb.find(s => s.worker_name === workerName);
 
     if (order.workerDone) {
       const amount = calcOrderSalary(workerName, order);
-      if (amount < 0) continue;
+      console.log('[salary] workerName:', workerName, '| total:', order.total, '| purchase:', order.purchase, '| amount:', amount);
+      if (amount <= 0) continue;
       if (!existingEntry) {
-        const saved = await sbInsertWorkerSalary({ worker_name: workerName, date: today, amount, order_id: order.id });
-        const entry = saved || { worker_name: workerName, date: today, amount, order_id: order.id, id: null };
-        if (typeof workerSalaries !== 'undefined' && workerName === currentWorkerName) workerSalaries.push(entry);
-        if (typeof allSalaries   !== 'undefined') allSalaries.push(entry);
+        // Дата ЗП = дата самого заказа, а не сегодня
+        await sbInsertWorkerSalary({ worker_name: workerName, date: order.date, amount, order_id: order.id });
       } else {
         await sbUpdateWorkerSalary(existingEntry.id, amount);
-        existingEntry.amount = amount;
       }
     } else {
       if (existingEntry) {
         await sbDeleteWorkerSalary(existingEntry.id);
-        if (typeof workerSalaries !== 'undefined') {
-          // eslint-disable-next-line no-undef
-          workerSalaries = workerSalaries.filter(s => s.id !== existingEntry.id);
-        }
-        if (typeof allSalaries !== 'undefined') {
-          // eslint-disable-next-line no-undef
-          allSalaries = allSalaries.filter(s => s.id !== existingEntry.id);
-        }
       }
     }
   }
+
+  // Обновляем локальный массив workerSalaries (только для текущего пользователя)
+  if (typeof workerSalaries !== 'undefined') {
+    try {
+      workerSalaries = await sbFetchWorkerSalaries(currentWorkerName);
+    } catch (e) { /* не критично */ }
+  }
 }
 
-// ---------- OWNER — ЭКРАН "НА ПРОВЕРКЕ" ----------
+// ---------- ТАБЫ ЗАКАЗОВ ----------
 
 function initOrderTabs() {
   const tabsEl = document.getElementById('orders-tabs');
   if (currentRole === 'owner' || currentRole === 'manager') {
     if (tabsEl) tabsEl.style.display = 'flex';
-    if (currentRole === 'owner') {
-      if (!document.getElementById('tab-review')) {
-        const reviewBtn = document.createElement('button');
-        reviewBtn.className = 'orders-tab';
-        reviewBtn.id = 'tab-review';
-        reviewBtn.onclick = () => setOrderTab('review');
-        reviewBtn.innerHTML = '<span class="ico" style="margin-right:5px;"><i data-lucide="clock" style="width:13px;height:13px;"></i></span> На проверке <span class="review-count-badge" id="review-count-badge"></span>';
-        tabsEl.appendChild(reviewBtn);
-        initIcons();
-      }
-      updateReviewBadge();
-    }
     setOrderTab('inwork');
   } else {
     if (tabsEl) tabsEl.style.display = 'none';
@@ -897,68 +884,9 @@ function setOrderTab(tab) {
   document.querySelectorAll('.orders-tab').forEach(b => b.classList.remove('active'));
   const el = document.getElementById('tab-' + tab);
   if (el) el.classList.add('active');
-  if (tab === 'review') { renderReviewOrders(); return; }
   if (currentMonthFilter) {
     renderOrdersForMonth(currentMonthFilter);
   } else {
     renderOrders();
-  }
-}
-
-function updateReviewBadge() {
-  const count = orders.filter(o => o.workerDone && !o.statusDone).length;
-  const badge = document.getElementById('review-count-badge');
-  if (badge) badge.textContent = count > 0 ? count : '';
-}
-
-function renderReviewOrders() {
-  const list = orders.filter(o => o.workerDone && !o.statusDone);
-  const container = document.getElementById('orders-list');
-  if (!list.length) {
-    container.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-state-icon">✅</div>
-        <h3>Нет заказов на проверке</h3>
-        <p>Специалисты ещё не отметили выполненные работы</p>
-      </div>`;
-    return;
-  }
-  container.innerHTML = list.map(o => `
-    <div class="order-card">
-      <div class="order-card-top" onclick="openOrderDetail('${o.id}')">
-        <div class="order-card-left">
-          <span class="order-id">${o.id}</span>
-          <span class="order-name">${o.car || '—'}</span>
-        </div>
-        <div style="display:flex;gap:8px;align-items:center;">
-          ${statusBadge(o.paymentStatus)}
-          <span class="mount-badge review-badge">⏳ На проверке</span>
-        </div>
-      </div>
-      <div class="order-card-meta">
-        <span class="order-meta-item">👤 ${o.client || '—'}</span>
-        <span class="order-meta-item">🚧 ${o.responsible || '—'}${o.assistant ? ' + ' + o.assistant : ''}</span>
-        <span class="order-meta-item">🗓️ ${formatDate(o.date)}</span>
-        ${o.total ? `<span class="order-meta-item" style="font-weight:700;color:var(--accent);">💰 ${Number(o.total).toLocaleString('ru')} ₴</span>` : ''}
-      </div>
-      <div class="worker-done-row" onclick="event.stopPropagation()">
-        <button class="btn-confirm-done" onclick="confirmOrderDone('${o.id}')">✓ Подтвердить и закрыть</button>
-      </div>
-    </div>
-  `).join('');
-}
-
-async function confirmOrderDone(orderId) {
-  const o = orders.find(x => x.id === orderId);
-  if (!o) return;
-  o.statusDone = true;
-  try {
-    await sbUpdateOrder(o);
-    renderReviewOrders();
-    updateReviewBadge();
-    showToast('Заказ закрыт ✓');
-  } catch (e) {
-    o.statusDone = false;
-    showToast('Ошибка: ' + e.message, 'error');
   }
 }

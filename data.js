@@ -19,7 +19,8 @@ function getHeaders() {
 async function sbFetchOrders() {
   const res = await fetch(`${WORKER_URL}/api/orders`, { headers: getHeaders() });
   if (!res.ok) throw new Error(await res.text());
-  const rows = await res.json();
+  const body = await res.json();
+  const rows = Array.isArray(body) ? body : (body.data ?? body.orders ?? []);
   return rows.map(rowToOrder);
 }
 
@@ -66,7 +67,8 @@ async function sbDeleteDoneOrders() {
 async function sbFetchWorkers() {
   const res = await fetch(`${WORKER_URL}/api/workers`, { headers: getHeaders() });
   if (!res.ok) throw new Error(await res.text());
-  const rows = await res.json();
+  const body = await res.json();
+  const rows = Array.isArray(body) ? body : (body.data ?? body.workers ?? []);
   return rows.map(rowToWorker);
 }
 
@@ -148,6 +150,15 @@ async function sbFetchWorkerSalaries(workerName) {
 
 async function sbFetchAllSalaries() {
   const res = await fetch(`${WORKER_URL}/api/salaries/all`, { headers: getHeaders() });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+async function sbFetchSalariesByOrder(orderId) {
+  const res = await fetch(
+    `${WORKER_URL}/api/salaries/by-order/${encodeURIComponent(orderId)}`,
+    { headers: getHeaders() }
+  );
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
@@ -382,7 +393,14 @@ function getWorkerFormula(workerName) {
 function calcOrderSalary(workerName, order) {
   const formula = getWorkerFormula(workerName);
   const profit  = calcOrderProfit(order);
-  const result  = evalSalaryFormula(formula, profit);
+  // Если формула не найдена — fallback: считаем по total напрямую
+  if (!formula) {
+    const w = workers.find(x => x.name === workerName);
+    const role = w ? w.systemRole : 'junior';
+    const rate = role === 'senior' ? 0.20 : 0.10;
+    return Math.round((Number(order.total) || 0) * rate);
+  }
+  const result = evalSalaryFormula(formula, profit);
   return result != null ? result : 0;
 }
 
@@ -437,7 +455,7 @@ function canViewClients()  { return currentRole === 'owner' || currentRole === '
 function canViewWorkers()  { return currentRole === 'owner'; }
 function canDeleteOrder()  { return currentRole === 'owner'; }
 function canViewFinance()  { return currentRole === 'owner'; }
-function canMarkWorkerDone() { return currentRole === 'senior' || currentRole === 'junior'; }
+function canMarkWorkerDone() { return currentRole === 'senior'; }
 
 function getClients() {
   const map = {};

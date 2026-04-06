@@ -6,7 +6,7 @@ let currentMonthFilter = null;
 
 async function initApp() {
   const minDelay = new Promise(r => setTimeout(r, 2000));
-  await Promise.all([loadOrders(), loadWorkers(), loadRefData(), loadWorkerSalaries(), loadWorkerProblems(), minDelay]);
+  await Promise.all([loadOrders(), loadWorkers(), loadRefData(), loadWorkerSalaries(), minDelay]);
   updateNavbarVisibility();
   if (currentRole === 'owner') {
     renderHome();

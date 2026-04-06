@@ -63,7 +63,7 @@ function renderProfile() {
   // История: группируем по месяцам → дням → заказам
   // workerSalaries: { id, worker_name, date, amount, order_id }
   const byMonth = {};
-  for (const s of workerSalaries.filter(Boolean)) {
+  for (const s of workerSalaries.filter(s => s && Number(s.amount) > 0)) {
     const ym = s.date.slice(0, 7);
     if (!byMonth[ym]) byMonth[ym] = {};
     if (!byMonth[ym][s.date]) byMonth[ym][s.date] = [];
