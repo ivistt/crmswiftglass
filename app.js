@@ -238,8 +238,12 @@ function openClientsScreen() {
   showScreen('clients');
 }
 
-function openWorkersScreen() {
+async function openWorkersScreen() {
   if (!canViewWorkers()) return;
+  // Загружаем проблемы если ещё не загружены
+  if (typeof allProblems === 'undefined' || !allProblems) {
+    try { allProblems = await sbFetchAllProblems(); } catch(e) { allProblems = []; }
+  }
   renderWorkers();
   showScreen('workers');
 }

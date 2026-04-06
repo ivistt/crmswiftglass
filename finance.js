@@ -4,7 +4,6 @@
 
 // Зарплаты из БД: массив { id, worker_name, date, amount }
 let allSalaries = [];
-let allProblems = [];
 
 async function loadAllSalaries() {
   try {
@@ -14,13 +13,6 @@ async function loadAllSalaries() {
   }
 }
 
-async function loadAllProblems() {
-  try {
-    allProblems = await sbFetchAllProblems();
-  } catch (e) {
-    showToast('Ошибка загрузки проблем: ' + e.message, 'error');
-  }
-}
 
 // Строим salaryData из allSalaries для совместимости с renderFinanceMonth
 function buildSalaryData() {
@@ -35,7 +27,7 @@ function buildSalaryData() {
 }
 
 async function renderFinance() {
-  await Promise.all([loadAllSalaries(), loadAllProblems()]);
+  await loadAllSalaries();
   const container = document.getElementById('finance-content');
 
   // Группируем заказы по месяцам
@@ -168,16 +160,6 @@ function renderFinanceMonth(ym, monthOrders) {
           ${renderSalaryRowsCompact(ym)}
         </div>
 
-        <!-- Проблемы сотрудников -->
-        <div class="fin-section-title" style="margin-top:16px;display:flex;align-items:center;justify-content:space-between;">
-          <span>⚠️ Проблемы сотрудников</span>
-          <button class="fin-add-salary-btn" onclick="openAddProblemModal('${ym}')">
-            <i data-lucide="plus" style="width:12px;height:12px;"></i> Добавить
-          </button>
-        </div>
-        <div id="fin-problems-${ym}">
-          ${renderProblemRowsCompact(ym)}
-        </div>
 
       </div>
     </div>
@@ -452,147 +434,9 @@ function finMetric(label, value, color) {
   `;
 }
 
-// Компактный вид проблем внутри месяца финансов
-function renderProblemRowsCompact(ym) {
-  const rows = allProblems.filter(p => p.date.startsWith(ym));
-  if (!rows.length) {
-    return `<div style="font-size:13px;color:var(--text3);padding:8px 0;">Проблем не зафиксировано</div>`;
-  }
-  return rows.map(p => `
-    <div style="background:var(--surface2);border-radius:10px;padding:10px 12px;margin-bottom:6px;border-left:3px solid var(--red,#DC2626);display:flex;align-items:flex-start;gap:10px;">
-      <div style="flex:1;">
-        <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px;">
-          <div class="worker-avatar" style="width:22px;height:22px;font-size:9px;border-radius:6px;">${getInitials(p.worker_name)}</div>
-          <span style="font-size:13px;font-weight:600;">${p.worker_name}</span>
-          ${p.partner ? `<span style="font-size:11px;color:var(--text3);">+ ${p.partner}</span>` : ''}
-        </div>
-        <div style="font-size:12px;color:var(--text2);">${p.description}</div>
-        <div style="font-size:11px;color:var(--text3);margin-top:2px;">
-          ${formatDate(p.date)}${p.order_id ? ` · ${p.order_id}` : ''}
-        </div>
-      </div>
-      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
-        <div style="font-size:15px;font-weight:800;color:var(--red,#DC2626);white-space:nowrap;">${Number(p.amount).toLocaleString('ru')} ₴</div>
-        <button class="icon-btn" title="Удалить" onclick="deleteProblemEntry('${p.id}', '${ym}')">
-          <i data-lucide="trash-2" style="width:12px;height:12px;"></i>
-        </button>
-      </div>
-    </div>
-  `).join('');
-}
 
-let _problemYm = null;
 
-function openAddProblemModal(ym) {
-  _problemYm = ym;
-  const partnerOptions = workers
-    .map(w => '<option value="' + w.name + '">' + w.name + '</option>')
-    .join('');
 
-  let modal = document.getElementById('problem-modal');
-  if (!modal) {
-    modal = document.createElement('div');
-    modal.id = 'problem-modal';
-    modal.className = 'modal-overlay';
-    modal.innerHTML = ''
-      + '<div class="modal">'
-      + '<div class="modal-header">'
-      + '<div class="modal-title">⚠️ Добавить проблему</div>'
-      + '<button class="modal-close" onclick="closeAddProblemModal()">✕</button>'
-      + '</div>'
-      + '<div class="modal-body" style="display:flex;flex-direction:column;gap:12px;">'
-      + '<div class="form-group"><label class="form-label">Сотрудник</label>'
-      + '<select class="form-select" id="pm-worker"><option value="">— выбрать —</option>' + partnerOptions + '</select></div>'
-      + '<div class="form-group"><label class="form-label">Сумма (₴)</label>'
-      + '<input class="form-input" type="number" id="pm-amount" placeholder="0"></div>'
-      + '<div class="form-group"><label class="form-label">Описание</label>'
-      + '<input class="form-input" type="text" id="pm-desc" placeholder="Напр. разбитое стекло"></div>'
-      + '<div class="form-group"><label class="form-label">Заказ (необязательно)</label>'
-      + '<input class="form-input" type="text" id="pm-order" placeholder="SG-XXXX"></div>'
-      + '<div class="form-group"><label class="form-label">Напарник (необязательно)</label>'
-      + '<select class="form-select" id="pm-partner"><option value="">— нет —</option>' + partnerOptions + '</select></div>'
-      + '<div class="form-group"><label class="form-label">Дата</label>'
-      + '<input class="form-input" type="date" id="pm-date"></div>'
-      + '</div>'
-      + '<div class="modal-footer">'
-      + '<button class="btn-secondary" onclick="closeAddProblemModal()">Отмена</button>'
-      + '<button class="btn-primary" id="pm-save-btn" style="background:var(--red,#DC2626);" onclick="saveNewProblem()">'
-      + '<i data-lucide="save" style="width:14px;height:14px;"></i> Сохранить</button>'
-      + '</div>'
-      + '</div>';
-    document.body.appendChild(modal);
-  }
-
-  // Сброс полей
-  const pmWorker = document.getElementById('pm-worker');
-  const pmAmount = document.getElementById('pm-amount');
-  const pmDesc   = document.getElementById('pm-desc');
-  const pmOrder  = document.getElementById('pm-order');
-  const pmPartner= document.getElementById('pm-partner');
-  const pmDate   = document.getElementById('pm-date');
-  if (pmWorker)  pmWorker.value  = '';
-  if (pmAmount)  pmAmount.value  = '';
-  if (pmDesc)    pmDesc.value    = '';
-  if (pmOrder)   pmOrder.value   = '';
-  if (pmPartner) pmPartner.value = '';
-  if (pmDate)    pmDate.value    = new Date().toISOString().slice(0, 10);
-
-  modal.classList.add('active');
-  initIcons();
-}
-
-function closeAddProblemModal() {
-  const modal = document.getElementById('problem-modal');
-  if (modal) modal.classList.remove('active');
-}
-
-async function saveNewProblem() {
-  const workerName = document.getElementById('pm-worker')?.value;
-  const amount     = Number(document.getElementById('pm-amount')?.value);
-  const desc       = document.getElementById('pm-desc')?.value.trim();
-  const orderId    = document.getElementById('pm-order')?.value.trim();
-  const partner    = document.getElementById('pm-partner')?.value;
-  const date       = document.getElementById('pm-date')?.value;
-
-  if (!workerName) { showToast('Выберите сотрудника', 'error'); return; }
-  if (!amount || amount <= 0) { showToast('Введите сумму', 'error'); return; }
-  if (!desc) { showToast('Введите описание', 'error'); return; }
-
-  const btn = document.getElementById('pm-save-btn');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
-
-  try {
-    const saved = await sbInsertWorkerProblem({
-      worker_name: workerName,
-      date,
-      amount,
-      description: desc,
-      partner: partner || null,
-      order_id: orderId || null,
-    });
-    allProblems.unshift(saved);
-    closeAddProblemModal();
-    const el = document.getElementById('fin-problems-' + _problemYm);
-    if (el) { el.innerHTML = renderProblemRowsCompact(_problemYm); initIcons(); }
-    showToast('Проблема добавлена ✓');
-  } catch(e) {
-    showToast('Ошибка: ' + e.message, 'error');
-    if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="save" style="width:14px;height:14px;"></i> Сохранить'; initIcons(); }
-  }
-}
-
-async function deleteProblemEntry(id, ym) {
-  if (!confirm('Удалить запись о проблеме?')) return;
-  try {
-    await sbDeleteWorkerProblem(id);
-    allProblems = allProblems.filter(p => p.id !== id);
-    const el = document.getElementById('fin-problems-' + ym);
-    if (el) { el.innerHTML = renderProblemRowsCompact(ym); initIcons(); }
-    showToast('Удалено');
-  } catch(e) {
-    showToast('Ошибка: ' + e.message, 'error');
-  }
-}
 
 // Зарплаты добавляются сотрудниками самостоятельно через экран профиля
 

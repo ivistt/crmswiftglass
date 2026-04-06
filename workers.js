@@ -40,22 +40,58 @@ function renderWorkers() {
       </div>
     ` : '';
 
+    const wProblems = (typeof allProblems !== 'undefined' ? allProblems : [])
+      .filter(p => p.worker_name === w.name)
+      .sort((a, b) => b.date.localeCompare(a.date));
+
+    const problemsHtml = wProblems.length
+      ? wProblems.map(p =>
+          '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;' +
+          'padding:7px 10px;background:var(--surface2);border-radius:8px;margin-bottom:4px;' +
+          'border-left:2px solid var(--red,#DC2626);">' +
+            '<div style="min-width:0;">' +
+              '<div style="font-size:12px;font-weight:600;color:var(--text);">' + p.description + '</div>' +
+              '<div style="font-size:11px;color:var(--text3);margin-top:1px;">' +
+                formatDate(p.date) + (p.order_id ? ' · ' + p.order_id : '') + (p.partner ? ' · с ' + p.partner : '') +
+              '</div>' +
+            '</div>' +
+            '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">' +
+              '<span style="font-size:13px;font-weight:700;color:var(--red,#DC2626);">' + Number(p.amount).toLocaleString('ru') + ' ₴</span>' +
+              '<button class="icon-btn" onclick="deleteWorkerProblem(\'' + p.id + '\', \'' + w.id + '\')" style="width:22px;height:22px;border-radius:6px;">' +
+                '<i data-lucide="trash-2" style="width:10px;height:10px;"></i>' +
+              '</button>' +
+            '</div>' +
+          '</div>'
+        ).join('')
+      : '<div style="font-size:12px;color:var(--text3);padding:4px 0;">Проблем не зафиксировано</div>';
+
     return `
-      <div class="worker-card">
-        <div class="worker-avatar">${getInitials(w.name)}</div>
-        <div class="worker-info" style="flex:1;min-width:0;">
-          <div class="worker-name">${w.name}</div>
-          <div class="worker-role">${w.role}</div>
-          ${w.note ? `<div style="font-size:12px;color:var(--text3);margin-top:2px;">${w.note}</div>` : ''}
-          ${formulaBlock}
+      <div class="worker-card" style="flex-direction:column;gap:0;">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div class="worker-avatar">${getInitials(w.name)}</div>
+          <div class="worker-info" style="flex:1;min-width:0;">
+            <div class="worker-name">${w.name}</div>
+            <div class="worker-role">${w.role}</div>
+            ${w.note ? `<div style="font-size:12px;color:var(--text3);margin-top:2px;">${w.note}</div>` : ''}
+            ${formulaBlock}
+          </div>
+          <div class="worker-actions" style="display:flex;gap:6px;flex-shrink:0;">
+            <button class="icon-btn" title="Установить PIN" onclick="openPinModal('${w.id}', '${escapeAttr(w.name)}')">
+              <i data-lucide="key-round" style="width:14px;height:14px;"></i>
+            </button>
+            <button class="icon-btn" title="Удалить" onclick="deleteWorker('${w.id}')">
+              <i data-lucide="trash-2" style="width:14px;height:14px;"></i>
+            </button>
+          </div>
         </div>
-        <div class="worker-actions" style="display:flex;gap:6px;flex-shrink:0;">
-          <button class="icon-btn" title="Установить PIN" onclick="openPinModal('${w.id}', '${escapeAttr(w.name)}')">
-            <i data-lucide="key-round" style="width:14px;height:14px;"></i>
-          </button>
-          <button class="icon-btn" title="Удалить" onclick="deleteWorker('${w.id}')">
-            <i data-lucide="trash-2" style="width:14px;height:14px;"></i>
-          </button>
+        <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <div style="font-size:11px;font-weight:700;color:var(--text3);letter-spacing:0.04em;">ПРОБЛЕМЫ</div>
+            <button class="fin-add-salary-btn" onclick="openAddProblemModal('${escapeAttr(w.name)}')">
+              <i data-lucide="plus" style="width:11px;height:11px;"></i> Добавить
+            </button>
+          </div>
+          <div id="worker-problems-${w.id}">${problemsHtml}</div>
         </div>
       </div>
     `;
@@ -332,96 +368,190 @@ async function savePin() {
 }
 
 
-function renderWorkers() {
-  const container = document.getElementById('workers-list');
 
-  if (!workers.length) {
-    container.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-state-icon">👷</div>
-        <h3>Сотрудников нет</h3>
-        <p>Добавьте первого сотрудника, нажав кнопку выше</p>
-      </div>`;
-    return;
+
+
+
+
+
+// ── ПРОБЛЕМЫ СОТРУДНИКОВ ─────────────────────────────────────
+
+let _problemWorkerName = null;
+
+function openAddProblemModal(workerName) {
+  _problemWorkerName = workerName;
+
+  let modal = document.getElementById('problem-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'problem-modal';
+    modal.className = 'modal-overlay';
+    const partnerOptions = workers
+      .map(w => `<option value="${w.name}">${w.name}</option>`)
+      .join('');
+    modal.innerHTML = `
+      <div class="modal">
+        <div class="modal-header">
+          <div class="modal-title">⚠️ Добавить проблему</div>
+          <button class="modal-close" onclick="closeAddProblemModal()">✕</button>
+        </div>
+        <div class="modal-body" style="display:flex;flex-direction:column;gap:12px;">
+          <div id="pm-worker-label" style="font-weight:700;font-size:15px;"></div>
+          <div class="form-group">
+            <label class="form-label">Сумма (₴)</label>
+            <input class="form-input" type="number" id="pm-amount" placeholder="0">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Описание</label>
+            <input class="form-input" type="text" id="pm-desc" placeholder="Напр. разбитое стекло">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Заказ (необязательно)</label>
+            <input class="form-input" type="text" id="pm-order" placeholder="SG-XXXX">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Напарник (необязательно)</label>
+            <select class="form-select" id="pm-partner">
+              <option value="">— нет —</option>
+              ${partnerOptions}
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Дата</label>
+            <input class="form-input" type="date" id="pm-date">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" onclick="closeAddProblemModal()">Отмена</button>
+          <button class="btn-primary" id="pm-save-btn" style="background:var(--red,#DC2626);" onclick="saveNewProblem()">
+            <i data-lucide="save" style="width:14px;height:14px;"></i> Сохранить
+          </button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
   }
 
-  container.innerHTML = workers.map(w => `
-    <div class="worker-card">
-      <div class="worker-avatar">${getInitials(w.name)}</div>
-      <div class="worker-info">
-        <div class="worker-name">${w.name}</div>
-        <div class="worker-role">${w.role}</div>
-        ${w.note ? `<div style="font-size:12px;color:var(--text3);margin-top:2px;">${w.note}</div>` : ''}
-      </div>
-      <div class="worker-actions" style="display:flex;gap:6px;">
-        <button class="icon-btn" title="Установить PIN" onclick="openPinModal('${w.id}', '${escapeAttr(w.name)}')">
-          <i data-lucide="key-round" style="width:14px;height:14px;"></i>
-        </button>
-        <button class="icon-btn" title="Удалить" onclick="deleteWorker('${w.id}')">
-          <i data-lucide="trash-2" style="width:14px;height:14px;"></i>
-        </button>
-      </div>
-    </div>
-  `).join('');
+  document.getElementById('pm-worker-label').textContent = workerName;
+  document.getElementById('pm-amount').value  = '';
+  document.getElementById('pm-desc').value    = '';
+  document.getElementById('pm-order').value   = '';
+  document.getElementById('pm-partner').value = '';
+  document.getElementById('pm-date').value    = new Date().toISOString().slice(0, 10);
 
+  modal.classList.add('active');
   initIcons();
+  setTimeout(() => document.getElementById('pm-amount').focus(), 100);
 }
 
-function escapeAttr(str) {
-  return (str || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+function closeAddProblemModal() {
+  const modal = document.getElementById('problem-modal');
+  if (modal) modal.classList.remove('active');
 }
 
-function openWorkerModal() {
-  document.getElementById('w-name').value = '';
-  document.getElementById('w-role').value = 'Старший специалист';
-  document.getElementById('w-system-role').value = 'senior';
-  document.getElementById('w-note').value = '';
-  document.getElementById('worker-modal').classList.add('active');
-  setTimeout(() => document.getElementById('w-name').focus(), 100);
-}
+async function saveNewProblem() {
+  const amount = Number(document.getElementById('pm-amount')?.value);
+  const desc   = document.getElementById('pm-desc')?.value.trim();
+  const order  = document.getElementById('pm-order')?.value.trim();
+  const partner= document.getElementById('pm-partner')?.value;
+  const date   = document.getElementById('pm-date')?.value;
 
-function closeWorkerModal() {
-  document.getElementById('worker-modal').classList.remove('active');
-}
+  if (!amount || amount <= 0) { showToast('Введите сумму', 'error'); return; }
+  if (!desc) { showToast('Введите описание', 'error'); return; }
 
-async function saveWorker() {
-  const name       = document.getElementById('w-name').value.trim();
-  const role       = document.getElementById('w-role').value;
-  const systemRole = document.getElementById('w-system-role').value;
-  const note       = document.getElementById('w-note').value.trim();
-
-  if (!name) {
-    alert('Введите имя сотрудника');
-    document.getElementById('w-name').focus();
-    return;
-  }
-
-  const saveBtn = document.querySelector('#worker-modal .btn-primary');
-  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '⏳'; }
+  const btn = document.getElementById('pm-save-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
 
   try {
-    const saved = await sbInsertWorker({ name, role, systemRole, note });
-    workers.push(saved);
-    closeWorkerModal();
-    renderWorkers();
-    renderHome();
-    showToast('Сотрудник добавлен ✓');
+    const saved = await sbInsertWorkerProblem({
+      worker_name: _problemWorkerName,
+      date,
+      amount,
+      description: desc,
+      partner: partner || null,
+      order_id: order || null,
+    });
+
+    if (typeof allProblems !== 'undefined') {
+      allProblems.unshift(saved);
+    }
+
+    closeAddProblemModal();
+
+    // Обновляем карточку конкретного сотрудника
+    const w = workers.find(x => x.name === _problemWorkerName);
+    if (w) {
+      const el = document.getElementById('worker-problems-' + w.id);
+      if (el) {
+        const probs = (typeof allProblems !== 'undefined' ? allProblems : [])
+          .filter(p => p.worker_name === w.name)
+          .sort((a, b) => b.date.localeCompare(a.date));
+        el.innerHTML = probs.map(p =>
+          '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;' +
+          'padding:7px 10px;background:var(--surface2);border-radius:8px;margin-bottom:4px;' +
+          'border-left:2px solid var(--red,#DC2626);">' +
+            '<div style="min-width:0;">' +
+              '<div style="font-size:12px;font-weight:600;color:var(--text);">' + p.description + '</div>' +
+              '<div style="font-size:11px;color:var(--text3);margin-top:1px;">' +
+                formatDate(p.date) + (p.order_id ? ' · ' + p.order_id : '') + (p.partner ? ' · с ' + p.partner : '') +
+              '</div>' +
+            '</div>' +
+            '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">' +
+              '<span style="font-size:13px;font-weight:700;color:var(--red,#DC2626);">' + Number(p.amount).toLocaleString('ru') + ' ₴</span>' +
+              '<button class="icon-btn" onclick="deleteWorkerProblem(\'' + p.id + '\', \'' + w.id + '\')" style="width:22px;height:22px;border-radius:6px;">' +
+                '<i data-lucide="trash-2" style="width:10px;height:10px;"></i>' +
+              '</button>' +
+            '</div>' +
+          '</div>'
+        ).join('') || '<div style="font-size:12px;color:var(--text3);padding:4px 0;">Проблем не зафиксировано</div>';
+        initIcons();
+      }
+    }
+
+    showToast('Проблема добавлена ✓');
   } catch (e) {
-    showToast('Ошибка сохранения: ' + e.message, 'error');
+    showToast('Ошибка: ' + e.message, 'error');
   } finally {
-    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 Сохранить'; }
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="save" style="width:14px;height:14px;"></i> Сохранить'; initIcons(); }
   }
 }
 
-async function deleteWorker(id) {
-  if (!confirm('Удалить этого сотрудника?')) return;
+async function deleteWorkerProblem(problemId, workerId) {
+  if (!confirm('Удалить запись о проблеме?')) return;
   try {
-    await sbDeleteWorker(id);
-    workers = workers.filter(w => w.id !== id);
-    renderWorkers();
-    renderHome();
-    showToast('Сотрудник удалён');
+    await sbDeleteWorkerProblem(problemId);
+    if (typeof allProblems !== 'undefined') {
+      allProblems = allProblems.filter(p => p.id !== problemId);
+    }
+    // Перерисовываем список проблем в карточке
+    const w = workers.find(x => x.id === workerId);
+    const el = document.getElementById('worker-problems-' + workerId);
+    if (el && w) {
+      const probs = (typeof allProblems !== 'undefined' ? allProblems : [])
+        .filter(p => p.worker_name === w.name)
+        .sort((a, b) => b.date.localeCompare(a.date));
+      el.innerHTML = probs.map(p =>
+        '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;' +
+        'padding:7px 10px;background:var(--surface2);border-radius:8px;margin-bottom:4px;' +
+        'border-left:2px solid var(--red,#DC2626);">' +
+          '<div style="min-width:0;">' +
+            '<div style="font-size:12px;font-weight:600;color:var(--text);">' + p.description + '</div>' +
+            '<div style="font-size:11px;color:var(--text3);margin-top:1px;">' +
+              formatDate(p.date) + (p.order_id ? ' · ' + p.order_id : '') + (p.partner ? ' · с ' + p.partner : '') +
+            '</div>' +
+          '</div>' +
+          '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">' +
+            '<span style="font-size:13px;font-weight:700;color:var(--red,#DC2626);">' + Number(p.amount).toLocaleString('ru') + ' ₴</span>' +
+            '<button class="icon-btn" onclick="deleteWorkerProblem(\'' + p.id + '\', \'' + workerId + '\')" style="width:22px;height:22px;border-radius:6px;">' +
+              '<i data-lucide="trash-2" style="width:10px;height:10px;"></i>' +
+            '</button>' +
+          '</div>' +
+        '</div>'
+      ).join('') || '<div style="font-size:12px;color:var(--text3);padding:4px 0;">Проблем не зафиксировано</div>';
+      initIcons();
+    }
+    showToast('Удалено');
   } catch (e) {
-    showToast('Ошибка удаления: ' + e.message, 'error');
+    showToast('Ошибка: ' + e.message, 'error');
   }
 }
