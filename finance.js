@@ -445,8 +445,11 @@ async function deleteSalaryEntry(id, ym) {
   try {
     await sbDeleteWorkerSalary(id);
     allSalaries = allSalaries.filter(s => s.id !== id);
+    // Обновляем компактный блок зарплат в карточке месяца
     const salEl = document.getElementById('fin-salaries-' + ym);
-    if (salEl) { salEl.innerHTML = renderSalaryRows(ym); initIcons(); }
+    if (salEl) { salEl.innerHTML = renderSalaryRowsCompact(ym); initIcons(); }
+    // Если открыт детальный экран — перерисовываем его тоже
+    renderSalaryScreen();
     showToast('Удалено');
   } catch(e) {
     showToast('Ошибка: ' + e.message, 'error');
@@ -484,54 +487,78 @@ async function exportAllCSV() {
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Загрузка...'; }
 
   try {
-    // 1. orders — берём из памяти (уже загружены)
+    // 1. orders — из памяти
     const orderRows = orders.map(o => ({
       id: o.id, date: o.date, time: o.time || '',
       responsible: o.responsible || '', client: o.client || '',
       phone: o.phone || '', car: o.car || '', code: o.code || '',
-      coding: o.coding || '', warehouse: o.warehouse || '',
-      equipment: o.equipment || '', notes: o.notes || '',
-      mount: o.mount || '', service_type: o.serviceType || '',
-      glass: o.glass || '', molding: o.molding || '',
-      extra_work: o.extraWork || '', tatu: o.tatu || '',
-      toning: o.toning || '', delivery: o.delivery || 0,
-      author: o.author || '', selection: o.selection || '',
+      notes: o.notes || '',
+      mount: o.mount || 0, service_type: o.serviceType || '',
+      molding: o.molding || 0, extra_work: o.extraWork || 0,
+      tatu: o.tatu || 0, toning: o.toning || 0, delivery: o.delivery || 0,
+      author: o.author || '',
       payment_status: o.paymentStatus || '', check_sum: o.check || 0,
-      debt: o.debt || 0, total: o.total || 0,
-      percent10: o.percent10 || 0, percent20: o.percent20 || 0,
+      debt: o.debt || 0, debt_date: o.debtDate || '',
+      total: o.total || 0,
       molding_author: o.moldingAuthor || '', partner: o.partner || '',
       supplier_status: o.supplierStatus || '', purchase: o.purchase || 0,
       income: o.income || 0, remainder: o.remainder || 0,
       payment_method: o.paymentMethod || '',
-      warehouse_delta: o.warehouseDelta || '',
+      drop_shipper: o.dropshipper || '',
+      drop_shipper_payout: o.dropshipperPayout || 0,
+      toning_external: o.toningExternal ? 'true' : 'false',
+      margin_total: o.marginTotal || 0,
+      payout_manager_glass: o.payoutManagerGlass || 0,
+      payout_resp_glass: o.payoutRespGlass || 0,
+      payout_lesha: o.payoutLesha || 0,
+      payout_roma: o.payoutRoma || 0,
+      payout_extra_resp: o.payoutExtraResp || 0,
+      payout_extra_assist: o.payoutExtraAssist || 0,
+      payout_molding_resp: o.payoutMoldingResp || 0,
+      payout_molding_assist: o.payoutMoldingAssist || 0,
       status_done: o.statusDone ? 'true' : 'false',
       in_work: o.inWork ? 'true' : 'false',
+      worker_done: o.workerDone ? 'true' : 'false',
+      assistant: o.assistant || '',
     }));
     downloadCsv(`orders_${date}.csv`, makeCsv(orderRows));
     await new Promise(r => setTimeout(r, 400));
 
     // 2. workers — из памяти
     const workerRows = workers.map(w => ({
-      id: w.id, name: w.name, role: w.role || '', note: w.note || '',
+      id: w.id, name: w.name, role: w.role || '',
+      system_role: w.systemRole || '', note: w.note || '',
+      salary_formula: w.salaryFormula || '',
     }));
     downloadCsv(`workers_${date}.csv`, makeCsv(workerRows));
     await new Promise(r => setTimeout(r, 400));
 
-    // 3. ref таблицы — запрашиваем свежие данные
-    const refTables = [
-      'ref_cars', 'ref_warehouses', 'ref_equipment',
-      'ref_services', 'ref_payment_statuses',
-      'ref_partners', 'ref_supplier_statuses',
+    // 3. worker_salaries — из памяти (уже загружены)
+    if (allSalaries.length) {
+      const salRows = allSalaries.map(s => ({
+        id: s.id, worker_name: s.worker_name,
+        date: s.date, amount: s.amount, order_id: s.order_id || '',
+      }));
+      downloadCsv(`worker_salaries_${date}.csv`, makeCsv(salRows));
+      await new Promise(r => setTimeout(r, 400));
+    }
+
+    // 4. ref таблицы — через Worker API
+    const refFetches = [
+      { name: 'ref_cars',             data: refCars },
+      { name: 'ref_services',         data: refServices },
+      { name: 'ref_partners',         data: refPartners },
+      { name: 'ref_payment_statuses', data: refPaymentStatuses },
+      { name: 'ref_supplier_statuses',data: refSupplierStatuses },
+      { name: 'ref_warehouses',       data: refWarehouses },
+      { name: 'ref_dropshippers',     data: refDropshippers || [] },
+      { name: 'car_directory',        data: carDirectory || [] },
     ];
-    for (const table of refTables) {
-      const res = await fetch(
-        `${SUPABASE_URL}/rest/v1/${table}?limit=10000`,
-        { headers: sbHeaders }
-      );
-      if (!res.ok) { showToast(`Ошибка загрузки ${table}`, 'error'); continue; }
-      const rows = await res.json();
-      if (rows.length) downloadCsv(`${table}_${date}.csv`, makeCsv(rows));
-      await new Promise(r => setTimeout(r, 300));
+    for (const { name, data } of refFetches) {
+      if (data && data.length) {
+        downloadCsv(`${name}_${date}.csv`, makeCsv(data));
+        await new Promise(r => setTimeout(r, 200));
+      }
     }
 
     showToast(`Экспорт завершён — ${orders.length} записей`);
@@ -540,7 +567,7 @@ async function exportAllCSV() {
   } finally {
     if (btn) {
       btn.disabled = false;
-      btn.innerHTML = '<i data-lucide="download" style="width:14px;height:14px;"></i> Скачать все таблицы';
+      btn.innerHTML = '<i data-lucide="download" style="width:14px;height:14px;"></i> Скачать';
       initIcons();
     }
   }
@@ -570,5 +597,107 @@ async function deleteDoneOrders() {
   } catch (e) {
     showToast('Ошибка удаления: ' + e.message, 'error');
     if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="trash-2" style="width:14px;height:14px;"></i> Удалить выполненные'; initIcons(); }
+  }
+}
+
+// ============================================================
+// МОДАЛ РЕДАКТИРОВАНИЯ ФОРМУЛЫ ЗП (из экрана финансов)
+// ============================================================
+
+let _formulaModalWorkerId = null;
+
+function openFormulaModal(workerId, workerName, currentFormula) {
+  _formulaModalWorkerId = workerId;
+
+  let modal = document.getElementById('formula-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'formula-modal';
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+      <div class="modal">
+        <div class="modal-header">
+          <div class="modal-title">📐 Формула зарплаты</div>
+          <button class="modal-close" onclick="closeFormulaModal()">✕</button>
+        </div>
+        <div class="modal-body" style="display:flex;flex-direction:column;gap:14px;">
+          <div id="formula-modal-name" style="font-weight:800;font-size:16px;"></div>
+          <div class="form-group">
+            <label class="form-label">Формула</label>
+            <input class="form-input" id="formula-modal-input" type="text"
+              style="font-family:monospace;font-size:14px;"
+              placeholder="напр. mount * 0.20">
+            <div style="font-size:11px;color:var(--text3);margin-top:6px;line-height:1.7;">
+              <b>Старший специалист</b> — переменная: <code style="color:var(--accent);">mount</code> (сумма монтажа)<br>
+              <code style="color:var(--accent);">mount * 0.20</code> — 20% от монтажа<br>
+              <code style="color:var(--accent);">mount * 0.25</code> — 25% от монтажа<br>
+              <b>Младший специалист</b> — фикс. ставка:<br>
+              <code style="color:var(--accent);">500</code> — 500 ₴ за каждый заказ
+            </div>
+          </div>
+          <div id="formula-modal-error" style="display:none;color:var(--red,#DC2626);font-size:12px;"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" onclick="closeFormulaModal()">Отмена</button>
+          <button class="btn-primary" id="formula-modal-save-btn" onclick="saveFormulaModal()">
+            <i data-lucide="save" style="width:14px;height:14px;"></i> Сохранить
+          </button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+  }
+
+  document.getElementById('formula-modal-name').textContent = workerName;
+  document.getElementById('formula-modal-input').value = currentFormula || '';
+  document.getElementById('formula-modal-error').style.display = 'none';
+  modal.classList.add('active');
+  initIcons();
+  setTimeout(() => document.getElementById('formula-modal-input').focus(), 100);
+}
+
+function closeFormulaModal() {
+  const modal = document.getElementById('formula-modal');
+  if (modal) modal.classList.remove('active');
+  _formulaModalWorkerId = null;
+}
+
+async function saveFormulaModal() {
+  if (!_formulaModalWorkerId) return;
+  const formula = document.getElementById('formula-modal-input').value.trim();
+  const errEl   = document.getElementById('formula-modal-error');
+  const btn     = document.getElementById('formula-modal-save-btn');
+
+  // Валидация формулы
+  if (formula) {
+    const testResult = evalSalaryFormula(formula, 1000);
+    if (testResult === null) {
+      errEl.textContent = 'Невалидная формула. Используйте только числа и переменную mount.';
+      errEl.style.display = 'block';
+      return;
+    }
+  }
+
+  if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+  errEl.style.display = 'none';
+
+  try {
+    await sbUpdateWorkerFormula(_formulaModalWorkerId, formula);
+    // Обновляем локально
+    const w = workers.find(x => x.id === _formulaModalWorkerId);
+    if (w) w.salaryFormula = formula;
+    closeFormulaModal();
+    // Перерисовываем финансы чтобы обновились бейджи формул
+    await renderFinance();
+    showToast('Формула обновлена ✓');
+  } catch (e) {
+    errEl.textContent = 'Ошибка: ' + e.message;
+    errEl.style.display = 'block';
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i data-lucide="save" style="width:14px;height:14px;"></i> Сохранить';
+      initIcons();
+    }
   }
 }

@@ -101,6 +101,26 @@ async function sbSetWorkerPin(workerId, pin) {
   if (!res.ok) throw new Error(await res.text());
 }
 
+// Обновление данных сотрудника (роль, формула, пароль)
+async function sbUpdateWorker(workerId, updates) {
+  const body = {};
+  if (updates.systemRole !== undefined) body.system_role    = updates.systemRole;
+  if (updates.salaryFormula !== undefined) body.salary_formula = updates.salaryFormula || '';
+  // Пароль обновляется через set-pin если передан
+  if (updates.password) {
+    await sbSetWorkerPin(workerId, updates.password);
+  }
+  if (Object.keys(body).length === 0) return;
+  const res = await fetch(`${WORKER_URL}/api/workers/${encodeURIComponent(workerId)}`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const rows = await res.json();
+  return rows[0] ? rowToWorker(rows[0]) : null;
+}
+
 // ── WORKER PROBLEMS ──────────────────────────────────────────
 
 async function sbFetchWorkerProblems(workerName) {
@@ -278,7 +298,8 @@ async function loadRefData() {
 // ── MAPPERS ──────────────────────────────────────────────────
 
 function rowToOrder(r) {
-  let paymentStatus = r.payment_status;
+  if (!r) return {};
+  let paymentStatus = r.payment_status || '';
   if (paymentStatus === 'Борг') paymentStatus = 'Не оплачено';
   if (paymentStatus === 'Рассчитано') paymentStatus = 'Оплачено';
   return {
@@ -289,26 +310,23 @@ function rowToOrder(r) {
     phone:           r.phone,
     car:             r.car,
     code:            r.code,
-    warehouse:       r.warehouse,
-    equipment:       r.equipment,
     notes:           r.notes,
     mount:           r.mount,
     serviceType:     r.service_type,
-    glass:           r.glass,
     molding:         r.molding,
     extraWork:       r.extra_work,
     tatu:            r.tatu,
     toning:          r.toning,
     delivery:        r.delivery       || 0,
     author:          r.author,
-    selection:       r.selection,
+    selection:       r.selection, // legacy, column может отсутствовать
     paymentStatus:   paymentStatus,
     check:           r.check_sum      || 0,
     debt:            r.debt           || 0,
     debtDate:        r.debt_date      || '',
     total:           r.total          || 0,
-    percent10:       r.percent10      || 0,
-    percent20:       r.percent20      || 0,
+    percent10:       r.percent10      || 0, // legacy
+    percent20:       r.percent20      || 0, // legacy
     moldingAuthor:   r.molding_author,
     partner:         r.partner,
     supplierStatus:  r.supplier_status,
@@ -347,26 +365,20 @@ function orderToRow(o) {
     phone:            o.phone,
     car:              o.car,
     code:             o.code,
-    warehouse:        o.warehouse,
-    equipment:        o.equipment,
     notes:            o.notes,
     mount:            Number(o.mount)     || 0,
     service_type:     o.serviceType,
-    glass:            Number(o.glass)     || 0,
     molding:          Number(o.molding)   || 0,
     extra_work:       Number(o.extraWork) || 0,
     tatu:             Number(o.tatu)      || 0,
     toning:           Number(o.toning)    || 0,
     delivery:         o.delivery          || 0,
     author:           o.author,
-    selection:        o.selection,
     payment_status:   o.paymentStatus,
     check_sum:        o.check             || 0,
     debt:             o.debt              || 0,
     debt_date:        o.debtDate          || null,
     total:            o.total             || 0,
-    percent10:        o.percent10         || 0,
-    percent20:        o.percent20         || 0,
     molding_author:   o.moldingAuthor,
     partner:          o.partner,
     supplier_status:  o.supplierStatus,
@@ -374,7 +386,6 @@ function orderToRow(o) {
     income:           o.income            || 0,
     remainder:         o.remainder          || 0,
     payment_method:    o.paymentMethod,
-    warehouse_delta:   o.warehouseDelta,
     drop_shipper:      o.dropshipper || null,
     drop_shipper_payout: o.dropshipperPayout || 0,
     toning_external:    o.toningExternal || false,
@@ -432,22 +443,22 @@ async function sbUpdateWorkerFormula(workerId, formula) {
 
 // ── ФОРМУЛЬНЫЙ ДВИЖОК ────────────────────────────────────────
 
-// Дефолтные формулы по системной роли
+// Дефолтные формулы по системной роли:
+//   senior — процент от суммы монтажа заказа, переменная: mount
+//   junior — фиксированная ставка за каждый заказ (просто число)
 const DEFAULT_SALARY_FORMULA = {
-  senior: 'percent * 0.20',
-  junior: 'percent * 0.10',
+  senior: 'mount * 0.20',
+  junior: '500',
 };
 
-// Прибыль по конкретному заказу
-function calcOrderProfit(order) {
-  return (Number(order.total) || 0) - (Number(order.purchase) || 0);
-}
-
-// Безопасно вычисляет формулу. Переменная: percent (прибыль по заказу).
-function evalSalaryFormula(formula, profit) {
+// Безопасно вычисляет формулу.
+// Для senior: переменная mount = сумма монтажа заказа.
+// Для junior: формула — просто число (фикс. ставка).
+function evalSalaryFormula(formula, mount) {
   if (!formula || !formula.trim()) return null;
   try {
-    const safe = formula.replace(/percent/g, String(profit));
+    const safe = formula.replace(/mount/g, String(mount));
+    // После подстановки не должно остаться букв — иначе формула небезопасна
     if (/[a-zA-Z_$]/.test(safe)) return null;
     // eslint-disable-next-line no-new-func
     const result = Function('"use strict"; return (' + safe + ')')();
@@ -461,24 +472,23 @@ function evalSalaryFormula(formula, profit) {
 // Возвращает формулу работника (или дефолтную по роли)
 function getWorkerFormula(workerName) {
   const w = workers.find(x => x.name === workerName);
-  if (!w) return '';
+  if (!w) return DEFAULT_SALARY_FORMULA['junior'];
   if (w.salaryFormula && w.salaryFormula.trim()) return w.salaryFormula;
-  return DEFAULT_SALARY_FORMULA[w.systemRole] || '';
+  return DEFAULT_SALARY_FORMULA[w.systemRole] || DEFAULT_SALARY_FORMULA['junior'];
 }
 
-// ЗП за конкретный заказ для конкретного сотрудника
+// ЗП за конкретный заказ для конкретного сотрудника:
+//   senior (и ответственный, и ассистент): mount * процент по своей формуле
+//   junior (ассистент): фикс. ставка из формулы (например 500 ₴ за заказ)
 function calcOrderSalary(workerName, order) {
+  const w = workers.find(x => x.name === workerName);
   const formula = getWorkerFormula(workerName);
-  const profit  = calcOrderProfit(order);
-  // Если формула не найдена — fallback: считаем по total напрямую
-  if (!formula) {
-    const w = workers.find(x => x.name === workerName);
-    const role = w ? w.systemRole : 'junior';
-    const rate = role === 'senior' ? 0.20 : 0.10;
-    return Math.round((Number(order.total) || 0) * rate);
-  }
-  const result = evalSalaryFormula(formula, profit);
-  return result != null ? result : 0;
+  const mount = Number(order.mount) || 0;
+  const result = evalSalaryFormula(formula, mount);
+  if (result != null) return result;
+  // Fallback если формула невалидна
+  const role = w ? w.systemRole : 'junior';
+  return role === 'senior' ? Math.round(mount * 0.20) : 500;
 }
 
 // Итоговая зп за день (используется в profile для совместимости)

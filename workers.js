@@ -106,13 +106,14 @@ function openWorkerEditModal(workerId) {
           <div class="form-group" id="we-formula-group">
             <label class="form-label">📐 Формула зарплаты</label>
             <input class="form-input" id="we-formula" type="text"
-              placeholder="напр. percent * 0.20"
+              placeholder="напр. mount * 0.20"
               style="font-family:monospace;font-size:14px;">
             <div style="font-size:11px;color:var(--text3);margin-top:5px;line-height:1.6;">
-              Переменная: <code style="color:var(--accent);">percent</code> — прибыль за день<br>
-              <code style="color:var(--accent);">percent * 0.20</code> — 20% от прибыли<br>
-              <code style="color:var(--accent);">500 + percent * 0.15</code> — ставка + %<br>
-              <code style="color:var(--accent);">1200</code> — фиксированная ставка
+              <b>Старший специалист</b> — переменная: <code style="color:var(--accent);">mount</code> (сумма монтажа)<br>
+              <code style="color:var(--accent);">mount * 0.20</code> — 20% от монтажа (дефолт)<br>
+              <code style="color:var(--accent);">mount * 0.25</code> — 25% от монтажа<br>
+              <b>Младший специалист</b> — фикс. ставка за каждый заказ:<br>
+              <code style="color:var(--accent);">500</code> — 500 ₴ за заказ (дефолт)
             </div>
           </div>
 

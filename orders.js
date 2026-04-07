@@ -99,10 +99,11 @@ function renderOrders() {
   if (dateF) list = list.filter(o => o.date === dateF);
   if (statF) list = list.filter(o => o.paymentStatus === statF);
 
-  list.sort((a, b) => sort === 'asc'
-    ? a.date.localeCompare(b.date)
-    : b.date.localeCompare(a.date)
-  );
+  list.sort((a, b) => {
+    const ad = a.date || '';
+    const bd = b.date || '';
+    return sort === 'asc' ? ad.localeCompare(bd) : bd.localeCompare(ad);
+  });
 
   const container = document.getElementById('orders-list');
 
@@ -169,7 +170,6 @@ function openOrderDetail(id) {
       <div class="detail-grid">
         ${field('⚙️ Монтаж', o.mount ? o.mount + ' ₴' : '')}
         ${field('🛠️ Вид послуги', o.serviceType)}
-        ${field('🔘 Скло', o.glass)}
         ${field('*️⃣ Молдинг', o.molding)}
         ${field('⚙️ Доп. работы', o.extraWork)}
         ${field('*️⃣ Тату', o.tatu)}
@@ -237,13 +237,16 @@ function populateRefSelects() {
     if (cur) carSel.value = cur;
   }
 
-  // Услуги
-  const svcSel = document.getElementById('f-service-type');
-  if (svcSel) {
-    const cur = svcSel.value;
-    svcSel.innerHTML = '<option value="">— выбрать —</option>' +
-      refServices.map(s => `<option value="${s.name}">${s.name}</option>`).join('');
-    if (cur) svcSel.value = cur;
+  // Услуги — чекбоксы
+  const svcBox = document.getElementById('service-type-checkboxes');
+  if (svcBox) {
+    const cur = (document.getElementById('f-service-type')?.value || '').split(',').map(s => s.trim()).filter(Boolean);
+    svcBox.innerHTML = refServices.map(s => `
+      <label class="checkbox" style="gap:8px;border:1px solid var(--border);padding:6px 10px;border-radius:10px;">
+        <input type="checkbox" value="${s.name}" ${cur.includes(s.name) ? 'checked' : ''} onchange="syncServiceTypes()" style="accent-color:var(--accent);width:15px;height:15px;">
+        ${s.name}
+      </label>
+    `).join('');
   }
 
   // Статусы расчёта
@@ -446,7 +449,7 @@ function openOrderModal(id) {
   });
 
   // Авторасчёт total из полей работ
-  ['f-mount','f-glass','f-molding','f-extra-work','f-tatu','f-toning','f-delivery'].forEach(fid => {
+  ['f-mount','f-molding','f-extra-work','f-tatu','f-toning','f-delivery'].forEach(fid => {
     const el = document.getElementById(fid);
     if (!el) return;
     const newEl = el.cloneNode(true);
@@ -492,8 +495,6 @@ function fillOrderForm(o) {
   set('f-code', o.code);
   set('f-notes', o.notes);
   set('f-mount', o.mount);
-  set('f-service-type', o.serviceType);
-  set('f-glass', o.glass);
   set('f-molding', o.molding);
   set('f-extra-work', o.extraWork);
   set('f-tatu', o.tatu);
@@ -515,6 +516,12 @@ function fillOrderForm(o) {
   set('f-dropshipper', o.dropshipper);
   const tonExtEl = document.getElementById('f-toning-external');
   if (tonExtEl) tonExtEl.checked = !!o.toningExternal;
+  // услуги — чекбоксы
+  const svcHidden = document.getElementById('f-service-type');
+  if (svcHidden) {
+    svcHidden.value = o.serviceType || '';
+    syncServiceTypes(false);
+  }
   set('f-margin-total', o.marginTotal);
   set('f-payout-dropshipper', o.payoutDropshipper);
   set('f-payout-manager-glass', o.payoutManagerGlass);
@@ -536,7 +543,7 @@ function fillOrderForm(o) {
 function clearOrderForm() {
   const ids = [
     'f-date','f-time','f-responsible','f-client','f-phone','f-car','f-code',
-    'f-notes','f-mount','f-service-type','f-glass','f-molding',
+    'f-notes','f-mount','f-service-type','f-molding',
     'f-extra-work','f-tatu','f-toning','f-delivery','f-author',
     'f-payment-status','f-check','f-debt','f-debt-date','f-total',
     'f-molding-author','f-partner','f-supplier-status','f-purchase','f-income',
@@ -548,6 +555,14 @@ function clearOrderForm() {
   ids.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   const iwEl = document.getElementById('f-in-work');
   if (iwEl) iwEl.checked = false;
+  const tonExtEl = document.getElementById('f-toning-external');
+  if (tonExtEl) tonExtEl.checked = false;
+  document.querySelectorAll('#service-type-checkboxes input[type="checkbox"]').forEach(el => el.checked = false);
+  document.querySelectorAll('#f-author-checkboxes input[type="checkbox"]').forEach(el => {
+    el.checked = false;
+    const lbl = el.closest('label');
+    if (lbl) lbl.style.borderColor = 'transparent';
+  });
 }
 
 function setPriceFieldsLocked(locked) {
@@ -570,21 +585,17 @@ function setPriceFieldsLocked(locked) {
   });
 }
 
-// Автопересчёт
+// Автопересчёт маржи и всех выплат
 function recalcMargin() {
-  const income   = Number(document.getElementById('f-income')?.value) || 0;
-  const purchase = Number(document.getElementById('f-purchase')?.value) || 0;
-  const remainderEl = document.getElementById('f-remainder');
-  if (remainderEl) remainderEl.value = income - purchase;
   recalcFullMargins();
 }
 
 function recalcTotal() {
-  const sum = ['f-mount','f-glass','f-molding','f-extra-work','f-tatu','f-toning','f-delivery']
+  const sum = ['f-mount','f-molding','f-extra-work','f-tatu','f-toning','f-delivery']
     .reduce((s, id) => s + (Number(document.getElementById(id)?.value) || 0), 0);
   const totalEl = document.getElementById('f-total');
   if (totalEl) { totalEl.value = sum; }
-  recalcMargin();
+  recalcFullMargins();
 }
 
 // ---------- СОХРАНЕНИЕ ----------
@@ -609,16 +620,14 @@ async function saveOrder() {
     notes:           get('f-notes'),
     mount:           getN('f-mount'),
     serviceType:     get('f-service-type'),
-    glass:           getN('f-glass'),
+    glass:           0,
     molding:         getN('f-molding'),
     extraWork:       getN('f-extra-work'),
     tatu:            getN('f-tatu'),
     toning:          getN('f-toning'),
     delivery:        getN('f-delivery'),
     author:          get('f-author'),
-    paymentStatus:   (currentRole === 'senior')
-      ? get('f-payment-status')
-      : (existingOrder ? existingOrder.paymentStatus : ''),
+    paymentStatus:   get('f-payment-status'),
     check:           getN('f-check'),
     debt:            getN('f-debt'),
     debtDate:        get('f-debt-date'),
@@ -631,7 +640,7 @@ async function saveOrder() {
     remainder:       getN('f-remainder'),
     paymentMethod:   get('f-payment-method'),
     dropshipper:     get('f-dropshipper'),
-    dropshipperPayout: getN('f-remainder'),
+    dropshipperPayout: getN('f-payout-dropshipper'),
     statusDone:      existingOrder ? existingOrder.statusDone : false,
     inWork:          (currentRole === 'owner' || currentRole === 'manager')
       ? (document.getElementById('f-in-work')?.checked || false)
@@ -826,7 +835,11 @@ function renderOrdersForMonth(ym) {
     (o.id      || '').toLowerCase().includes(search)
   );
   if (statF) list = list.filter(o => o.paymentStatus === statF);
-  list.sort((a, b) => sort === 'asc' ? a.date.localeCompare(b.date) : b.date.localeCompare(a.date));
+  list.sort((a, b) => {
+    const ad = a.date || '';
+    const bd = b.date || '';
+    return sort === 'asc' ? ad.localeCompare(bd) : bd.localeCompare(ad);
+  });
 
   const container = document.getElementById('orders-list');
 
@@ -979,7 +992,10 @@ function recalcFullMargins() {
   const costToning  = toningSum * 0.4;
 
   const payoutDropshipper = document.getElementById('f-dropshipper')?.value ? marginGlass : 0;
-  const payoutManagerGlass = (document.getElementById('f-author')?.value === 'Sasha Manager') ? marginGlass * 0.10 : 0;
+  // Менеджер с маржи стекла — только сотрудник с именем 'Sasha Manager'
+  const authorValue = document.getElementById('f-author')?.value || '';
+  const managerWorker = workers.find(w => w.name === 'Sasha Manager');
+  const payoutManagerGlass = (managerWorker && authorValue.includes('Sasha Manager')) ? Math.round(marginGlass * 0.10) : 0;
   const responsibleName = document.getElementById('f-responsible')?.value || '';
   const payoutRespGlass = (['Костя','Саша Смоков'].includes(responsibleName) && incomeGlass > 0) ? marginGlass * 0.10 : 0;
   const payoutLesha = toningExternal ? 0 : toningSum * 0.20;
@@ -1008,4 +1024,13 @@ function recalcFullMargins() {
   setVal('f-payout-extra-assist', payoutExtraAssist);
   setVal('f-payout-molding-resp', payoutMoldingResp);
   setVal('f-payout-molding-assist', payoutMoldingAssist);
+}
+
+// синхронизация чекбоксов услуг с hidden-полем
+function syncServiceTypes(recalc = true) {
+  const box = document.querySelectorAll('#service-type-checkboxes input[type="checkbox"]');
+  const vals = [...box].filter(el => el.checked).map(el => el.value);
+  const hidden = document.getElementById('f-service-type');
+  if (hidden) hidden.value = vals.join(', ');
+  if (recalc) recalcTotal();
 }
