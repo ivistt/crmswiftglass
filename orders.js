@@ -182,11 +182,11 @@ function openOrderDetail(id) {
     <div class="detail-section">
       <div class="detail-section-title">💸 Финансы</div>
       <div class="detail-grid">
-        ${field('Расчёт долга клиента', o.paymentStatus)}
-        ${field('Сумма оплаты постачальнику', o.check ? o.check + ' ₴' : '')}
-        ${field('Расчёт долга', o.debt ? o.debt + ' ₴' : '')}
-        ${field('Дата расчёта долга', formatDate(o.debtDate))}
-        ${field('📌 Общая сумма работ', o.total ? o.total + ' ₴' : '', 'mono')}
+    ${field('Расчёт долга клиента', o.paymentStatus)}
+    ${field('Сумма поставщику', o.check ? o.check + ' ₴' : '')}
+    ${field('Расчёт долга', o.debt ? o.debt + ' ₴' : '')}
+    ${field('Дата расчёта долга', formatDate(o.debtDate))}
+    ${field('📌 Общая сумма работ', o.total ? o.total + ' ₴' : '', 'mono')}
         ${field('Молдинг Автор', o.moldingAuthor)}
         ${field('🤝 Партнер', o.partner)}
         ${field('📦 Статус оплати постачальнику', o.supplierStatus)}

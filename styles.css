@@ -985,6 +985,7 @@ body {
 .form-group { display: flex; flex-direction: column; gap: 5px; }
 .form-group.span-2 { grid-column: span 2; }
 .form-group.span-3 { grid-column: span 3; }
+.form-group.span-full { grid-column: 1 / -1; }
 
 .form-label {
   font-size: 11px;
@@ -1577,7 +1578,7 @@ input[type="datetime-local"] {
 /* Чекбоксы услуг */
 .service-checkboxes {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 8px;
 }
 .service-checkboxes label.checkbox {
@@ -1604,8 +1605,8 @@ input[type="datetime-local"] {
 /* Чекбоксы менеджера */
 .manager-checkboxes {
   display: grid;
-  grid-template-columns: 1fr 1fr;
   gap: 8px;
+  grid-template-columns: 1fr;
 }
 .manager-checkboxes label {
   display: flex;
@@ -1709,13 +1710,20 @@ input[type="datetime-local"] {
 }
 
 @media (max-width: 600px) {
-  .service-checkboxes,
-  .manager-checkboxes { grid-template-columns: 1fr; }
   .order-totals-bar { flex-direction: column; }
   .order-total-item--glass,
   .order-total-item--works { border-right: none; border-bottom: 1px solid var(--border); }
   .order-total-divider { display: none; }
+
+  /* Держим 2 колонки в модале заказа на мобилке */
+  .modal-order .form-grid:not(.col-1) { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .modal-order .form-grid.col-1 { grid-template-columns: 1fr; gap: 8px; }
+  .modal-order .form-input,
+  .modal-order .form-select { font-size: 13px; padding: 9px 10px; }
+  .modal-order .form-label { font-size: 10px; }
 }
+
+.modal-order .form-group.span-full { grid-column: 1 / -1; }
 
 /* ===== AUTOCOMPLETE DROPDOWN ===== */
 .ac-wrap {
