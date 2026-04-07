@@ -106,6 +106,7 @@ async function sbUpdateWorker(workerId, updates) {
   const body = {};
   if (updates.systemRole !== undefined) body.system_role    = updates.systemRole;
   if (updates.salaryFormula !== undefined) body.salary_formula = updates.salaryFormula || '';
+  if (updates.assistant !== undefined) body.assistant = updates.assistant || '';
   // Пароль обновляется через set-pin если передан
   if (updates.password) {
     await sbSetWorkerPin(workerId, updates.password);
@@ -271,13 +272,13 @@ async function sbDeleteCarDirectory(id) {
 async function loadRefData() {
   try {
     const [cars, wh, eq, svc, ps, part, ss, carDir, drops] = await Promise.all([
-      sbFetchRef('ref_cars'),
-      sbFetchRef('ref_warehouses'),
-      sbFetchRef('ref_equipment'),
-      sbFetchRef('ref_services'),
-      sbFetchRef('ref_payment_statuses'),
-      sbFetchRef('ref_partners'),
-      sbFetchRef('ref_supplier_statuses'),
+      sbFetchRefOptional('ref_cars'),
+      sbFetchRefOptional('ref_warehouses'),
+      sbFetchRefOptional('ref_equipment'),
+      sbFetchRefOptional('ref_services'),
+      sbFetchRefOptional('ref_payment_statuses'),
+      sbFetchRefOptional('ref_partners'),
+      sbFetchRefOptional('ref_supplier_statuses'),
       sbFetchCarDirectory().catch(() => []),
       sbFetchRefOptional('ref_dropshippers'),
     ]);
@@ -415,6 +416,7 @@ function rowToWorker(r) {
     systemRole:    r.system_role   || 'junior',
     note:          r.note          || '',
     salaryFormula: r.salary_formula || '',
+    assistant:     r.assistant     || '',
   };
 }
 
@@ -425,6 +427,7 @@ function workerToRow(w) {
     system_role:    w.systemRole    || 'junior',
     note:           w.note          || '',
     salary_formula: w.salaryFormula || '',
+    assistant:      w.assistant     || '',
   };
 }
 

@@ -481,9 +481,10 @@
           </div>
           <div class="form-group">
             <label class="form-label">🔢 Еврокод</label>
-            <div style="display:flex;align-items:center;gap:6px;">
-              <input class="form-input" type="text" id="f-code" placeholder="Авто из справочника" style="flex:1;">
-              <button type="button" id="f-code-lock-btn" class="ac-lock-btn" title="Заблокировать/разблокировать" onclick="toggleCodeLock()">🔒</button>
+            <div class="ac-wrap" id="ac-code-wrap">
+              <input class="form-input" type="text" id="f-code" placeholder="Авто из справочника"
+                autocomplete="off" oninput="acFilter('code')" onfocus="acOpen('code')" onblur="acBlur('code')" onkeydown="acKey(event,'code')">
+              <div class="ac-dropdown" id="ac-code-list"></div>
             </div>
           </div>
           <div class="form-group">

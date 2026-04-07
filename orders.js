@@ -231,6 +231,15 @@ function populateCarDatalist() {
   // теперь просто инициализируем ac — данные берутся напрямую из refCars
 }
 
+// Подставляет помощника по умолчанию для выбранного ответственного
+function applyAssistantForResponsible(respName) {
+  const senior = workers.find(w => w.name === respName && w.systemRole === 'senior');
+  const asSel  = document.getElementById('f-assistant');
+  if (asSel && senior && senior.assistant) {
+    asSel.value = senior.assistant;
+  }
+}
+
 function populateRefSelects() {
   // Марки авто — теперь datalist
   populateCarDatalist();
@@ -301,6 +310,15 @@ function populateRefSelects() {
         .filter(w => w.systemRole === 'senior')
         .map(w => `<option value="${w.name}">${w.name} (${w.role})</option>`).join('');
     if (cur) respSel.value = cur;
+
+    // Автоподстановка помощника при смене ответственного
+    // Навешиваем только один раз (убираем старый listener через замену ноды)
+    const newRespSel = respSel.cloneNode(true);
+    respSel.parentNode.replaceChild(newRespSel, respSel);
+    if (cur) newRespSel.value = cur;
+    newRespSel.addEventListener('change', () => {
+      applyAssistantForResponsible(newRespSel.value);
+    });
   }
 
   const authorSel = document.getElementById('f-author');
@@ -373,30 +391,22 @@ function onCarInputChange(val) {
   const found = (refCars || []).find(c => c.model.toLowerCase() === val.toLowerCase());
   if (found) {
     const codeEl = document.getElementById('f-code');
-    if (codeEl && !codeEl.dataset.manualLock) {
-      codeEl.value = found.eurocode || '';
-      codeEl.readOnly = false;
-      codeEl.style.opacity = '';
-    }
+    if (codeEl) codeEl.value = found.eurocode || '';
   }
 }
 
-function toggleCodeLock() {
-  const codeEl = document.getElementById('f-code');
-  const btn    = document.getElementById('f-code-lock-btn');
-  if (!codeEl || !btn) return;
-  if (codeEl.readOnly) {
-    codeEl.readOnly = false;
-    codeEl.style.opacity = '';
-    delete codeEl.dataset.manualLock;
-    btn.textContent = '🔓';
-    codeEl.focus();
-  } else {
-    codeEl.readOnly = false; // всегда редактируемое, кнопка просто индикатор
-    codeEl.dataset.manualLock = '1';
-    btn.textContent = '🔒';
+// Обратный поиск: при вводе еврокода — заполняем поле авто
+function onCodeInputChange(val) {
+  if (!val) return;
+  const q = val.trim().toLowerCase();
+  const found = (refCars || []).find(c => c.eurocode && c.eurocode.toLowerCase() === q);
+  if (found) {
+    const carEl = document.getElementById('f-car');
+    if (carEl) carEl.value = found.model;
   }
 }
+
+// toggleCodeLock removed — поле f-code теперь автокомплит без кнопки блокировки
 
 // ---------- МОДАЛ СОЗДАНИЯ / РЕДАКТИРОВАНИЯ ----------
 function openOrderModal(id) {
@@ -421,14 +431,38 @@ function openOrderModal(id) {
     clearOrderForm();
     setPriceFieldsLocked(false);
     document.getElementById('f-date').value = todayStr();
+
+    // Если текущий пользователь — senior, автоподставляем его и его помощника
+    if (currentRole === 'senior' && currentWorkerName) {
+      const respSel = document.getElementById('f-responsible');
+      if (respSel) respSel.value = currentWorkerName;
+      const senior = workers.find(w => w.name === currentWorkerName && w.systemRole === 'senior');
+      if (senior && senior.assistant) {
+        const asSel = document.getElementById('f-assistant');
+        if (asSel) asSel.value = senior.assistant;
+      }
+    }
+    // Для owner/manager: если один senior — подставляем его и его помощника
+    else {
+      const seniors = workers.filter(w => w.systemRole === 'senior');
+      const respSel = document.getElementById('f-responsible');
+      if (respSel) {
+        // Если в системе один senior — выбираем его автоматически
+        if (seniors.length === 1 && !respSel.value) {
+          respSel.value = seniors[0].name;
+        }
+        if (respSel.value) {
+          applyAssistantForResponsible(respSel.value);
+        }
+      }
+    }
   }
 
   // Автокомплит инициализируется глобально через acInit()
   // Сбрасываем состояние замка еврокода при открытии нового заказа
   const codeEl2 = document.getElementById('f-code');
-  const lockBtn = document.getElementById('f-code-lock-btn');
-  if (codeEl2) { codeEl2.readOnly = false; delete codeEl2.dataset.manualLock; }
-  if (lockBtn) lockBtn.textContent = '🔓';
+
+  // f-code теперь управляется через acFilter/acSelect (автокомплит)
 
   // Авторасчёт total из полей работ
   ['f-mount','f-molding','f-extra-work','f-tatu','f-toning','f-delivery'].forEach(fid => {
@@ -545,7 +579,7 @@ function clearOrderForm() {
     'f-remainder','f-payment-method','f-dropshipper','f-margin-total',
     'f-payout-dropshipper','f-payout-manager-glass','f-payout-resp-glass',
     'f-payout-lesha','f-payout-roma','f-payout-extra-resp','f-payout-extra-assist',
-    'f-payout-molding-resp','f-payout-molding-assist'
+    'f-payout-molding-resp','f-payout-molding-assist','f-assistant'
   ];
   ids.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   const iwEl = document.getElementById('f-in-work');
@@ -1074,6 +1108,7 @@ function syncServiceTypes(recalc = true) {
 const _ac = {
   client: { activeIdx: -1 },
   car:    { activeIdx: -1 },
+  code:   { activeIdx: -1 },
 };
 
 // Подсвечивает совпадающую часть строки
@@ -1110,6 +1145,18 @@ function acGetItems(type, query) {
         sub:     c.eurocode ? 'Еврокод: ' + c.eurocode : '',
         value:   c.model,
         car:     c,
+      }));
+  }
+  if (type === 'code') {
+    const cars = (refCars || []).filter(c => c.eurocode);
+    return cars
+      .filter(c => !q || c.eurocode.toLowerCase().startsWith(q))
+      .slice(0, 40)
+      .map(c => ({
+        label: c.eurocode,
+        sub:   c.model,
+        value: c.eurocode,
+        car:   c,
       }));
   }
   return [];
@@ -1155,6 +1202,8 @@ function acFilter(type) {
   listEl.classList.add('open');
   // Для авто — пробуем заполнить еврокод при точном совпадении
   if (type === 'car') onCarInputChange(input.value);
+  // Для кода — пробуем заполнить авто при точном совпадении
+  if (type === 'code') onCodeInputChange(input.value);
 }
 
 function acBlur(type) {
@@ -1227,11 +1276,18 @@ function acSelect(type, idx) {
     const input = document.getElementById('f-car');
     if (input) input.value = item.value;
 
-    // Автозаполнение еврокода если не заблокирован вручную
+    // Автозаполнение еврокода из справочника
     const codeEl = document.getElementById('f-code');
-    if (codeEl && !codeEl.dataset.manualLock) {
-      codeEl.value = item.car?.eurocode || '';
-    }
+    if (codeEl) codeEl.value = item.car?.eurocode || '';
+  }
+
+  if (type === 'code') {
+    const input = document.getElementById('f-code');
+    if (input) input.value = item.value;
+
+    // Обратное заполнение: еврокод → авто
+    const carEl = document.getElementById('f-car');
+    if (carEl && item.car?.model) carEl.value = item.car.model;
   }
 
   // Закрываем список

@@ -102,6 +102,17 @@ function openWorkerEditModal(workerId) {
             </select>
           </div>
 
+          <!-- Помощник (для senior) -->
+          <div class="form-group" id="we-assistant-group">
+            <label class="form-label">🤝 Помощник по умолчанию</label>
+            <select class="form-select" id="we-assistant">
+              <option value="">— нет —</option>
+            </select>
+            <div style="font-size:11px;color:var(--text3);margin-top:4px;">
+              Автоматически подставляется в новые заказы при выборе этого специалиста
+            </div>
+          </div>
+
           <!-- Формула ЗП -->
           <div class="form-group" id="we-formula-group">
             <label class="form-label">📐 Формула зарплаты</label>
@@ -155,6 +166,17 @@ function openWorkerEditModal(workerId) {
   document.getElementById('we-formula').value = w.salaryFormula || DEFAULT_SALARY_FORMULA?.[w.systemRole] || '';
   document.getElementById('we-error').style.display = 'none';
 
+  // Заполняем список помощников (только junior)
+  const asSel = document.getElementById('we-assistant');
+  if (asSel) {
+    asSel.innerHTML = '<option value="">— нет —</option>' +
+      workers
+        .filter(x => x.systemRole === 'junior' && x.name !== w.name)
+        .map(x => `<option value="${x.name}">${x.name}</option>`)
+        .join('');
+    asSel.value = w.assistant || '';
+  }
+
   // Показываем/скрываем формулу в зависимости от роли
   _updateWeFormulaVisibility();
   document.getElementById('we-role').onchange = _updateWeFormulaVisibility;
@@ -169,7 +191,10 @@ function openWorkerEditModal(workerId) {
 function _updateWeFormulaVisibility() {
   const role = document.getElementById('we-role')?.value;
   const group = document.getElementById('we-formula-group');
+  const asGroup = document.getElementById('we-assistant-group');
   if (group) group.style.display = (role === 'manager') ? 'none' : '';
+  // Поле помощника — только для senior
+  if (asGroup) asGroup.style.display = (role === 'senior') ? '' : 'none';
 }
 
 function _renderWeProblems(w) {
@@ -217,9 +242,10 @@ async function saveWorkerEdit() {
   const w = workers.find(x => x.id === _editWorkerId);
   if (!w) return;
 
-  const password = document.getElementById('we-password').value.trim();
-  const role     = document.getElementById('we-role').value;
-  const formula  = document.getElementById('we-formula').value.trim();
+  const password  = document.getElementById('we-password').value.trim();
+  const role      = document.getElementById('we-role').value;
+  const formula   = document.getElementById('we-formula').value.trim();
+  const assistant = document.getElementById('we-assistant')?.value || '';
 
   const btn = document.getElementById('we-save-btn');
   if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
@@ -228,6 +254,7 @@ async function saveWorkerEdit() {
     const updates = {
       systemRole: role,
       salaryFormula: formula || null,
+      assistant: assistant,
     };
     if (password) updates.password = password;
 
@@ -237,6 +264,7 @@ async function saveWorkerEdit() {
     Object.assign(w, updates);
     w.systemRole = role;
     w.salaryFormula = formula || null;
+    w.assistant = assistant;
 
     closeWorkerEditModal();
     renderWorkers();
