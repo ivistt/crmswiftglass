@@ -1716,3 +1716,62 @@ input[type="datetime-local"] {
   .order-total-item--works { border-right: none; border-bottom: 1px solid var(--border); }
   .order-total-divider { display: none; }
 }
+
+/* ===== AUTOCOMPLETE DROPDOWN ===== */
+.ac-wrap {
+  position: relative;
+  width: 100%;
+}
+.ac-dropdown {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0; right: 0;
+  background: var(--surface);
+  border: 1.5px solid var(--accent);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+  z-index: 2000;
+  max-height: 220px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.ac-dropdown.open { display: block; }
+.ac-item {
+  padding: 10px 14px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+  transition: background 0.1s;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ac-item:last-child { border-bottom: none; }
+.ac-item:hover, .ac-item.ac-active {
+  background: rgba(0,229,160,0.08);
+}
+.ac-item-name { font-weight: 600; }
+.ac-item-sub  { font-size: 11px; color: var(--text3); }
+.ac-item-match { color: var(--accent); }
+.ac-empty {
+  padding: 12px 14px;
+  font-size: 13px;
+  color: var(--text3);
+  text-align: center;
+}
+
+/* Кнопка lock/unlock еврокода */
+.ac-lock-btn {
+  width: 34px; height: 38px;
+  border-radius: 10px;
+  border: 1.5px solid var(--border2);
+  background: var(--surface2);
+  cursor: pointer;
+  font-size: 14px;
+  flex-shrink: 0;
+  transition: all 0.15s;
+  display: flex; align-items: center; justify-content: center;
+}
+.ac-lock-btn:hover { border-color: var(--accent); }

@@ -228,9 +228,7 @@ async function deleteOrder(id) {
 
 // ---------- ЗАПОЛНЕНИЕ СЕЛЕКТОВ ИЗ СПРАВОЧНИКОВ ----------
 function populateCarDatalist() {
-  const dl = document.getElementById('car-datalist');
-  if (!dl) return;
-  dl.innerHTML = (refCars || []).map(c => `<option value="${c.model}">`).join('');
+  // теперь просто инициализируем ac — данные берутся напрямую из refCars
 }
 
 function populateRefSelects() {
@@ -362,11 +360,7 @@ function syncAuthorField() {
 
 // Клиенты — datalist
 function populateClientDatalist() {
-  const clientList = document.getElementById('client-list');
-  if (!clientList) return;
-  clientList.innerHTML = getClients()
-    .map(c => `<option value="${c.name}">${c.name}${c.phone ? ' · ' + c.phone : ''}</option>`)
-    .join('');
+  // теперь просто инициализируем ac — данные берутся напрямую из getClients()
 }
 
 // Автозаполнение кода и кодирования при выборе марки авто
@@ -376,9 +370,32 @@ function onCarSelect() {
 
 function onCarInputChange(val) {
   if (!val) return;
-  const found = refCars.find(c => c.model.toLowerCase() === val.toLowerCase());
+  const found = (refCars || []).find(c => c.model.toLowerCase() === val.toLowerCase());
+  if (found) {
+    const codeEl = document.getElementById('f-code');
+    if (codeEl && !codeEl.dataset.manualLock) {
+      codeEl.value = found.eurocode || '';
+      codeEl.readOnly = false;
+      codeEl.style.opacity = '';
+    }
+  }
+}
+
+function toggleCodeLock() {
   const codeEl = document.getElementById('f-code');
-  if (codeEl) codeEl.value = found?.eurocode || '';
+  const btn    = document.getElementById('f-code-lock-btn');
+  if (!codeEl || !btn) return;
+  if (codeEl.readOnly) {
+    codeEl.readOnly = false;
+    codeEl.style.opacity = '';
+    delete codeEl.dataset.manualLock;
+    btn.textContent = '🔓';
+    codeEl.focus();
+  } else {
+    codeEl.readOnly = false; // всегда редактируемое, кнопка просто индикатор
+    codeEl.dataset.manualLock = '1';
+    btn.textContent = '🔒';
+  }
 }
 
 // ---------- МОДАЛ СОЗДАНИЯ / РЕДАКТИРОВАНИЯ ----------
@@ -406,48 +423,12 @@ function openOrderModal(id) {
     document.getElementById('f-date').value = todayStr();
   }
 
-  // Автозаполнение по имени клиента → телефон + авто
-  const clientEl = document.getElementById('f-client');
-  const newClient = clientEl.cloneNode(true);
-  clientEl.parentNode.replaceChild(newClient, clientEl);
-  newClient.addEventListener('input', function() {
-    const name = this.value.trim();
-    if (!name) return;
-    const clients = getClients();
-    const match = clients.find(cl => cl.name === name);
-    if (match) {
-      const phoneEl2 = document.getElementById('f-phone');
-      if (phoneEl2) phoneEl2.value = match.phone || '';
-      const carSel = document.getElementById('f-car');
-      if (carSel && match.orders.length) {
-        const lastCar = match.orders[match.orders.length - 1].car || '';
-        carSel.value = lastCar;
-        onCarSelect();
-      }
-    }
-  });
-
-  // Автозаполнение по телефону → имя + авто
-  const phoneEl = document.getElementById('f-phone');
-  // Клонируем элемент чтобы убрать старые слушатели
-  const newPhone = phoneEl.cloneNode(true);
-  phoneEl.parentNode.replaceChild(newPhone, phoneEl);
-  newPhone.addEventListener('input', function() {
-    const phone = this.value.trim();
-    if (!phone || phone.length < 5) return;
-    const clients = getClients();
-    const match = clients.find(cl => (cl.phone || '').includes(phone));
-    if (match) {
-      const nameEl = document.getElementById('f-client');
-      nameEl.value = match.name;
-      const carSel = document.getElementById('f-car');
-      if (carSel && match.orders.length) {
-        const lastCar = match.orders[match.orders.length - 1].car || '';
-        carSel.value = lastCar;
-        onCarSelect();
-      }
-    }
-  });
+  // Автокомплит инициализируется глобально через acInit()
+  // Сбрасываем состояние замка еврокода при открытии нового заказа
+  const codeEl2 = document.getElementById('f-code');
+  const lockBtn = document.getElementById('f-code-lock-btn');
+  if (codeEl2) { codeEl2.readOnly = false; delete codeEl2.dataset.manualLock; }
+  if (lockBtn) lockBtn.textContent = '🔓';
 
   // Авторасчёт total из полей работ
   ['f-mount','f-molding','f-extra-work','f-tatu','f-toning','f-delivery'].forEach(fid => {
@@ -1084,4 +1065,177 @@ function syncServiceTypes(recalc = true) {
   const hidden = document.getElementById('f-service-type');
   if (hidden) hidden.value = vals.join(', ');
   if (recalc) recalcTotal();
+}
+
+// ============================================================
+// AUTOCOMPLETE ENGINE — клиент и авто
+// ============================================================
+
+const _ac = {
+  client: { activeIdx: -1 },
+  car:    { activeIdx: -1 },
+};
+
+// Подсвечивает совпадающую часть строки
+function acHighlight(str, query) {
+  if (!query) return escapeHtml(str);
+  const idx = str.toLowerCase().indexOf(query.toLowerCase());
+  if (idx === -1) return escapeHtml(str);
+  return escapeHtml(str.slice(0, idx))
+    + '<span class="ac-item-match">' + escapeHtml(str.slice(idx, idx + query.length)) + '</span>'
+    + escapeHtml(str.slice(idx + query.length));
+}
+
+function acGetItems(type, query) {
+  const q = (query || '').trim().toLowerCase();
+  if (type === 'client') {
+    const clients = getClients();
+    return clients
+      .filter(c => !q || c.name.toLowerCase().startsWith(q))
+      .slice(0, 40)
+      .map(c => ({
+        label:   c.name,
+        sub:     c.phone || '',
+        value:   c.name,
+        client:  c,
+      }));
+  }
+  if (type === 'car') {
+    const cars = refCars || [];
+    return cars
+      .filter(c => !q || c.model.toLowerCase().startsWith(q))
+      .slice(0, 40)
+      .map(c => ({
+        label:   c.model,
+        sub:     c.eurocode ? 'Еврокод: ' + c.eurocode : '',
+        value:   c.model,
+        car:     c,
+      }));
+  }
+  return [];
+}
+
+function acRender(type, query) {
+  const listEl = document.getElementById('ac-' + type + '-list');
+  if (!listEl) return;
+  const items = acGetItems(type, query);
+  _ac[type].activeIdx = -1;
+
+  if (!items.length) {
+    listEl.innerHTML = '<div class="ac-empty">Ничего не найдено</div>';
+    return;
+  }
+
+  listEl.innerHTML = items.map((item, i) => `
+    <div class="ac-item" data-idx="${i}"
+      onmousedown="acSelect('${type}', ${i})"
+      onmouseover="acSetActive('${type}', ${i})">
+      <div class="ac-item-name">${acHighlight(item.label, query)}</div>
+      ${item.sub ? `<div class="ac-item-sub">${escapeHtml(item.sub)}</div>` : ''}
+    </div>
+  `).join('');
+
+  // Сохраняем items для выбора по индексу
+  _ac[type]._items = items;
+}
+
+function acOpen(type) {
+  const input  = document.getElementById('f-' + type);
+  const listEl = document.getElementById('ac-' + type + '-list');
+  if (!input || !listEl) return;
+  acRender(type, input.value);
+  listEl.classList.add('open');
+}
+
+function acFilter(type) {
+  const input  = document.getElementById('f-' + type);
+  const listEl = document.getElementById('ac-' + type + '-list');
+  if (!input || !listEl) return;
+  acRender(type, input.value);
+  listEl.classList.add('open');
+  // Для авто — пробуем заполнить еврокод при точном совпадении
+  if (type === 'car') onCarInputChange(input.value);
+}
+
+function acBlur(type) {
+  // Задержка чтобы onmousedown на item успел сработать раньше blur
+  setTimeout(() => {
+    const listEl = document.getElementById('ac-' + type + '-list');
+    if (listEl) listEl.classList.remove('open');
+    _ac[type].activeIdx = -1;
+  }, 180);
+}
+
+function acSetActive(type, idx) {
+  _ac[type].activeIdx = idx;
+  const items = document.querySelectorAll('#ac-' + type + '-list .ac-item');
+  items.forEach((el, i) => el.classList.toggle('ac-active', i === idx));
+}
+
+function acKey(event, type) {
+  const listEl = document.getElementById('ac-' + type + '-list');
+  if (!listEl || !listEl.classList.contains('open')) return;
+
+  const items = listEl.querySelectorAll('.ac-item');
+  let idx = _ac[type].activeIdx;
+
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    idx = Math.min(idx + 1, items.length - 1);
+    acSetActive(type, idx);
+    items[idx]?.scrollIntoView({ block: 'nearest' });
+  } else if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    idx = Math.max(idx - 1, 0);
+    acSetActive(type, idx);
+    items[idx]?.scrollIntoView({ block: 'nearest' });
+  } else if (event.key === 'Enter') {
+    if (idx >= 0) {
+      event.preventDefault();
+      acSelect(type, idx);
+    }
+  } else if (event.key === 'Escape') {
+    listEl.classList.remove('open');
+  }
+}
+
+function acSelect(type, idx) {
+  const item = (_ac[type]._items || [])[idx];
+  if (!item) return;
+
+  if (type === 'client') {
+    const input = document.getElementById('f-client');
+    if (input) input.value = item.value;
+
+    // Автозаполнение телефона
+    const phoneEl = document.getElementById('f-phone');
+    if (phoneEl && item.client?.phone) phoneEl.value = item.client.phone;
+
+    // Автозаполнение последнего авто этого клиента
+    const c = item.client;
+    if (c && c.orders && c.orders.length) {
+      const lastCar = c.orders[c.orders.length - 1].car || '';
+      const carEl   = document.getElementById('f-car');
+      if (carEl && lastCar) {
+        carEl.value = lastCar;
+        onCarInputChange(lastCar);
+      }
+    }
+  }
+
+  if (type === 'car') {
+    const input = document.getElementById('f-car');
+    if (input) input.value = item.value;
+
+    // Автозаполнение еврокода если не заблокирован вручную
+    const codeEl = document.getElementById('f-code');
+    if (codeEl && !codeEl.dataset.manualLock) {
+      codeEl.value = item.car?.eurocode || '';
+    }
+  }
+
+  // Закрываем список
+  const listEl = document.getElementById('ac-' + type + '-list');
+  if (listEl) listEl.classList.remove('open');
+  _ac[type].activeIdx = -1;
 }

@@ -477,7 +477,8 @@ async function deleteSalaryEntry(id, ym) {
 // BACKUP В SUPABASE
 // ============================================================
 
-function buildBackupPayload() {
+function buildBackupPayload(freshProblems) {
+  // Маппим все поля заказа точно как они хранятся в БД (через orderToRow)
   const orderRows = orders.map(o => ({
     id: o.id, date: o.date || null, time: o.time || null,
     responsible: o.responsible || null, client: o.client || null,
@@ -505,20 +506,39 @@ function buildBackupPayload() {
     status_done: !!o.statusDone, in_work: !!o.inWork,
     worker_done: !!o.workerDone, assistant: o.assistant || null,
     price_locked: !!o.priceLocked,
+    // legacy поля — могут быть null если не использовались
+    selection: o.selection || null,
+    percent10: Number(o.percent10) || 0,
+    percent20: Number(o.percent20) || 0,
+    warehouse_delta: o.warehouseDelta || null,
   }));
 
   return {
-    orders:          orderRows,
-    workers:         workers.map(w => ({ id: w.id, name: w.name, role: w.role || null, system_role: w.systemRole || null, note: w.note || null, salary_formula: w.salaryFormula || null })),
-    worker_salaries: allSalaries.map(s => ({ id: s.id, worker_name: s.worker_name, date: s.date, amount: Number(s.amount), order_id: s.order_id || null })),
-    ref_cars:             refCars || [],
-    ref_services:         refServices || [],
-    ref_partners:         refPartners || [],
-    ref_payment_statuses: refPaymentStatuses || [],
+    orders:               orderRows,
+    workers:              workers.map(w => ({
+                            id: w.id, name: w.name, role: w.role || null,
+                            system_role: w.systemRole || null, note: w.note || null,
+                            salary_formula: w.salaryFormula || null,
+                          })),
+    worker_salaries:      allSalaries.map(s => ({
+                            id: s.id, worker_name: s.worker_name,
+                            date: s.date, amount: Number(s.amount),
+                            order_id: s.order_id || null,
+                          })),
+    worker_problems:      (freshProblems || []).map(p => ({
+                            id: p.id, worker_name: p.worker_name,
+                            date: p.date, description: p.description || null,
+                            created_at: p.created_at || null,
+                          })),
+    ref_cars:             refCars             || [],
+    ref_services:         refServices         || [],
+    ref_partners:         refPartners         || [],
+    ref_payment_statuses: refPaymentStatuses  || [],
     ref_supplier_statuses:refSupplierStatuses || [],
-    ref_warehouses:       refWarehouses || [],
-    ref_dropshippers:     refDropshippers || [],
-    car_directory:        carDirectory || [],
+    ref_warehouses:       refWarehouses       || [],
+    ref_dropshippers:     refDropshippers     || [],
+    ref_equipment:        refEquipment        || [],
+    car_directory:        carDirectory        || [],
   };
 }
 
@@ -527,8 +547,13 @@ async function backupToSupabase() {
   if (btn) { btn.disabled = true; btn.innerHTML = '<i data-lucide="loader" style="width:14px;height:14px;"></i> Сохраняю...'; initIcons(); }
 
   try {
-    const payload = buildBackupPayload();
-    const label   = `manual — ${orders.length} заказов, ${new Date().toLocaleString('ru')}`;
+    // Загружаем worker_problems свежо — они могут быть не в памяти
+    let freshProblems = [];
+    try { freshProblems = await sbFetchAllProblems(); } catch(e) { /* не критично */ }
+
+    const payload = buildBackupPayload(freshProblems);
+    const tableCount = Object.keys(payload).length;
+    const label   = `manual — ${orders.length} заказов · ${tableCount} таблиц · ${new Date().toLocaleString('ru')}`;
 
     const res = await fetch(`${WORKER_URL}/api/backup`, {
       method: 'POST',

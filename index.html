@@ -460,8 +460,11 @@
           </div>
           <div class="form-group">
             <label class="form-label">👤 Клиент</label>
-            <input class="form-input" type="text" id="f-client" placeholder="Имя клиента" list="client-list" autocomplete="off">
-            <datalist id="client-list"></datalist>
+            <div class="ac-wrap" id="ac-client-wrap">
+              <input class="form-input" type="text" id="f-client" placeholder="Имя клиента"
+                autocomplete="off" oninput="acFilter('client')" onfocus="acOpen('client')" onblur="acBlur('client')" onkeydown="acKey(event,'client')">
+              <div class="ac-dropdown" id="ac-client-list"></div>
+            </div>
           </div>
           <div class="form-group">
             <label class="form-label">☎️ Телефон</label>
@@ -469,12 +472,18 @@
           </div>
           <div class="form-group">
             <label class="form-label">🚗 Автомобиль</label>
-            <input class="form-input" type="text" id="f-car" placeholder="Марка, модель" list="car-datalist" autocomplete="off" oninput="onCarInputChange(this.value)">
-            <datalist id="car-datalist"></datalist>
+            <div class="ac-wrap" id="ac-car-wrap">
+              <input class="form-input" type="text" id="f-car" placeholder="Марка, модель"
+                autocomplete="off" oninput="acFilter('car')" onfocus="acOpen('car')" onblur="acBlur('car')" onkeydown="acKey(event,'car')">
+              <div class="ac-dropdown" id="ac-car-list"></div>
+            </div>
           </div>
           <div class="form-group">
             <label class="form-label">🔢 Еврокод</label>
-            <input class="form-input" type="text" id="f-code" placeholder="Авто из справочника" readonly style="opacity:0.6;">
+            <div style="display:flex;align-items:center;gap:6px;">
+              <input class="form-input" type="text" id="f-code" placeholder="Авто из справочника" style="flex:1;">
+              <button type="button" id="f-code-lock-btn" class="ac-lock-btn" title="Заблокировать/разблокировать" onclick="toggleCodeLock()">🔒</button>
+            </div>
           </div>
           <div class="form-group span-2">
             <label class="form-label">📝 Заметки</label>
