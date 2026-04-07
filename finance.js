@@ -1,4 +1,4 @@
-﻿// ============================================================
+// ============================================================
 // FINANCE.JS — экран финансов (только для owner)
 // ============================================================
 
@@ -33,7 +33,7 @@ async function renderFinance() {
   // Группируем заказы по месяцам
   const map = {};
   for (const o of orders) {
-    if (!o.date) continue;
+    if (!o.date || o.isCancelled) continue;
     const ym = o.date.slice(0, 7);
     if (!map[ym]) map[ym] = [];
     map[ym].push(o);

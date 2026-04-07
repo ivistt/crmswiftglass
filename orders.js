@@ -1,4 +1,4 @@
-﻿// ============================================================
+// ============================================================
 // ORDERS.JS — список заказов, детали, модал создания/редактирования
 // ============================================================
 
@@ -35,6 +35,7 @@ function renderOrderCard(o) {
           <span class="order-name">${o.car || '—'}</span>
         </div>
         <div style="display:flex;gap:8px;align-items:center;">
+          ${o.isCancelled ? '<span class="status-badge" style="background:var(--red,#DC2626);color:#fff;">Отменен</span>' : ''}
           ${statusBadge(o.paymentStatus)}
           ${mountBadge(o.mount)}
           ${canMark ? `
@@ -72,16 +73,20 @@ function renderOrders() {
 
   if (currentRole === 'owner' || currentRole === 'manager') {
     if (currentOrderTab === 'planner') {
-      list = list.filter(o => o.inWork && !o.workerDone);
+      list = list.filter(o => o.inWork && !o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'selection') {
-      list = list.filter(o => !o.inWork && !o.workerDone);
+      list = list.filter(o => !o.inWork && !o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'done') {
-      list = list.filter(o => o.workerDone);
+      list = list.filter(o => o.workerDone && !o.isCancelled);
+    } else if (currentOrderTab === 'debt') {
+      list = list.filter(o => !o.isCancelled && (o.paymentStatus === 'Не оплачено' || o.paymentStatus === 'Частично оплачено'));
+    } else if (currentOrderTab === 'cancelled') {
+      list = list.filter(o => o.isCancelled);
     }
   } else {
     // Специалисты: только свои заказы
     list = list.filter(o =>
-      o.responsible === currentWorkerName || o.assistant === currentWorkerName
+      (o.responsible === currentWorkerName || o.assistant === currentWorkerName) && !o.isCancelled
     );
     if (currentWorkerTab === 'relevant') {
       // Актуальные = inWork и ещё не отмечены выполненными
@@ -157,6 +162,7 @@ function openOrderDetail(id) {
       <div class="detail-grid">
         ${field('👤 Клиент', o.client)}
         ${field('☎️ Телефон', o.phone, 'mono')}
+        ${field('📍 Место', o.address)}
         ${field('🚗 Авто', o.car)}
         ${field('🔢 Єврокод', o.code, 'mono')}
         ${field('🕐 Время', o.time)}
@@ -178,7 +184,7 @@ function openOrderDetail(id) {
       </div>
     </div>
 
-    ${canViewFinance() ? `
+    ${(canViewFinance() || (currentRole === 'extra' && (o.responsible === currentWorkerName || o.assistant === currentWorkerName))) ? `
     <div class="detail-section">
       <div class="detail-section-title">💸 Финансы</div>
       <div class="detail-grid">
@@ -233,10 +239,23 @@ function populateCarDatalist() {
 
 // Подставляет помощника по умолчанию для выбранного ответственного
 function applyAssistantForResponsible(respName) {
-  const senior = workers.find(w => w.name === respName && w.systemRole === 'senior');
+  if (!respName) return;
+  const norm   = s => (s || '').trim().toLowerCase();
+  const senior = (workers || []).find(w => norm(w.name) === norm(respName));
   const asSel  = document.getElementById('f-assistant');
-  if (asSel && senior && senior.assistant) {
-    asSel.value = senior.assistant;
+
+  if (asSel && senior) {
+    if (senior.assistant) {
+      // Ищем опцию без учёта регистра и лишних пробелов
+      const matchedOption = Array.from(asSel.options).find(o => norm(o.value) === norm(senior.assistant));
+      if (matchedOption) {
+        asSel.value = matchedOption.value;
+      } else {
+        console.warn(`Assistant "${senior.assistant}" for ${respName} not found in dropdown options.`);
+      }
+    } else {
+      asSel.value = '';
+    }
   }
 }
 
@@ -301,24 +320,31 @@ function populateRefSelects() {
     if (cur) ssSel.value = cur;
   }
 
+  // Помощник — старший или младший специалист
+  const assistantSel = document.getElementById('f-assistant');
+  if (assistantSel) {
+    const cur = assistantSel.value;
+    assistantSel.innerHTML = '<option value="">— нет —</option>' +
+      workers
+        .filter(w => w.systemRole === 'senior' || w.systemRole === 'junior' || w.systemRole === 'extra')
+        .map(w => `<option value="${w.name}">${w.name} (${w.role})</option>`).join('');
+    if (cur) assistantSel.value = cur;
+  }
+
   // Ответственный — только старшие специалисты
   const respSel = document.getElementById('f-responsible');
   if (respSel) {
     const cur = respSel.value;
     respSel.innerHTML = '<option value="">— выбрать —</option>' +
       workers
-        .filter(w => w.systemRole === 'senior')
+        .filter(w => w.systemRole === 'senior' || w.systemRole === 'extra')
         .map(w => `<option value="${w.name}">${w.name} (${w.role})</option>`).join('');
     if (cur) respSel.value = cur;
 
-    // Автоподстановка помощника при смене ответственного
-    // Навешиваем только один раз (убираем старый listener через замену ноды)
-    const newRespSel = respSel.cloneNode(true);
-    respSel.parentNode.replaceChild(newRespSel, respSel);
-    if (cur) newRespSel.value = cur;
-    newRespSel.addEventListener('change', () => {
-      applyAssistantForResponsible(newRespSel.value);
-    });
+    // При смене ответственного — всегда подставляем его помощника
+    respSel.onchange = () => {
+      applyAssistantForResponsible(respSel.value);
+    };
   }
 
   const authorSel = document.getElementById('f-author');
@@ -327,17 +353,6 @@ function populateRefSelects() {
     authorSel.innerHTML = '<option value="">— выбрать —</option>' +
       workers.map(w => `<option value="${w.name}">${w.name}</option>`).join('');
     if (cur) authorSel.value = cur;
-  }
-
-  // Помощник — старший или младший специалист
-  const assistantSel = document.getElementById('f-assistant');
-  if (assistantSel) {
-    const cur = assistantSel.value;
-    assistantSel.innerHTML = '<option value="">— нет —</option>' +
-      workers
-        .filter(w => w.systemRole === 'senior' || w.systemRole === 'junior')
-        .map(w => `<option value="${w.name}">${w.name} (${w.role})</option>`).join('');
-    if (cur) assistantSel.value = cur;
   }
 }
 
@@ -412,10 +427,14 @@ function onCodeInputChange(val) {
 function openOrderModal(id) {
   editingOrderId = id;
 
-  // Заполнить все селекты из справочников
   populateRefSelects();
   populateClientDatalist();
   populateAuthorCheckboxes();
+
+  const cancelWrap = document.getElementById('cancel-toggle-wrap');
+  if (cancelWrap) {
+    cancelWrap.style.display = (currentRole === 'owner' || currentRole === 'manager') ? 'inline-flex' : 'none';
+  }
 
   if (id) {
     // РЕДАКТИРОВАНИЕ
@@ -423,6 +442,16 @@ function openOrderModal(id) {
     if (!o) return;
     document.getElementById('order-modal-title').textContent = `Редактировать ${o.id}`;
     fillOrderForm(o);
+
+    // После заполнения формы: если помощник не задан в заказе — подставляем по умолчанию
+    {
+      const asSel   = document.getElementById('f-assistant');
+      const respSel = document.getElementById('f-responsible');
+      if (asSel && respSel && respSel.value && !o.assistant) {
+        applyAssistantForResponsible(respSel.value);
+      }
+    }
+
     // Блокировка цены если уже сохранён
     setPriceFieldsLocked(o.priceLocked && !canEditPrice(o));
   } else {
@@ -436,24 +465,15 @@ function openOrderModal(id) {
     if (currentRole === 'senior' && currentWorkerName) {
       const respSel = document.getElementById('f-responsible');
       if (respSel) respSel.value = currentWorkerName;
-      const senior = workers.find(w => w.name === currentWorkerName && w.systemRole === 'senior');
-      if (senior && senior.assistant) {
-        const asSel = document.getElementById('f-assistant');
-        if (asSel) asSel.value = senior.assistant;
-      }
+      applyAssistantForResponsible(currentWorkerName);
     }
     // Для owner/manager: если один senior — подставляем его и его помощника
     else {
       const seniors = workers.filter(w => w.systemRole === 'senior');
       const respSel = document.getElementById('f-responsible');
-      if (respSel) {
-        // Если в системе один senior — выбираем его автоматически
-        if (seniors.length === 1 && !respSel.value) {
-          respSel.value = seniors[0].name;
-        }
-        if (respSel.value) {
-          applyAssistantForResponsible(respSel.value);
-        }
+      if (respSel && seniors.length === 1 && !respSel.value) {
+        respSel.value = seniors[0].name;
+        applyAssistantForResponsible(seniors[0].name);
       }
     }
   }
@@ -520,6 +540,7 @@ function fillOrderForm(o) {
   set('f-responsible', o.responsible);
   set('f-client', o.client);
   set('f-phone', o.phone);
+  set('f-address', o.address);
   set('f-car', o.car);
   set('f-code', o.code);
   set('f-notes', o.notes);
@@ -563,6 +584,8 @@ function fillOrderForm(o) {
   set('f-payout-molding-assist', o.payoutMoldingAssist);
   const iwEl = document.getElementById('f-in-work');
   if (iwEl) iwEl.checked = !!o.inWork;
+  const cancelEl = document.getElementById('f-cancelled');
+  if (cancelEl) cancelEl.checked = !!o.isCancelled;
   const asEl = document.getElementById('f-assistant');
   if (asEl) asEl.value = o.assistant || '';
   // перерисовать чекбоксы менеджера с текущим значением
@@ -571,7 +594,7 @@ function fillOrderForm(o) {
 
 function clearOrderForm() {
   const ids = [
-    'f-date','f-time','f-responsible','f-client','f-phone','f-car','f-code',
+    'f-date','f-time','f-responsible','f-client','f-phone','f-address','f-car','f-code',
     'f-notes','f-mount','f-service-type','f-molding',
     'f-extra-work','f-tatu','f-toning','f-delivery','f-author',
     'f-payment-status','f-check','f-debt','f-debt-date','f-total',
@@ -584,6 +607,8 @@ function clearOrderForm() {
   ids.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   const iwEl = document.getElementById('f-in-work');
   if (iwEl) iwEl.checked = false;
+  const cancelEl = document.getElementById('f-cancelled');
+  if (cancelEl) cancelEl.checked = false;
   const tonExtEl = document.getElementById('f-toning-external');
   if (tonExtEl) tonExtEl.checked = false;
   document.querySelectorAll('#service-type-checkboxes input[type="checkbox"]').forEach(el => el.checked = false);
@@ -599,11 +624,11 @@ function setPriceFieldsLocked(locked) {
   priceFields.forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
-    if (id === 'f-payment-status' && currentRole === 'senior') return; // старший может менять статус расчёта
+    if (id === 'f-payment-status') return; // Now fully automated
     if (id === 'f-debt-date' && currentRole === 'senior') return;
     if (id === 'f-supplier-status' && currentRole === 'senior') return;
 
-    const forceUnlock = (currentRole === 'owner' || currentRole === 'manager');
+    const forceUnlock = (currentRole === 'owner' || currentRole === 'manager' || currentRole === 'extra');
     if (locked && !forceUnlock) {
       el.setAttribute('readonly', 'true');
       el.setAttribute('disabled', 'true');
@@ -631,12 +656,14 @@ function recalcMargin() {
 }
 
 function recalcTotal() {
-  const worksSum = ['f-mount','f-molding','f-extra-work','f-tatu','f-toning','f-delivery']
+  const worksSum = ['f-mount','f-molding','f-extra-work','f-tatu','f-toning']
     .reduce((s, id) => s + (Number(document.getElementById(id)?.value) || 0), 0);
 
   // Сумма продажи стекла из финансового блока
   const glassSum = Number(document.getElementById('f-income')?.value) || 0;
-  const totalAll = worksSum + glassSum;
+  // Доставка из финансового блока
+  const deliverySum = Number(document.getElementById('f-delivery')?.value) || 0;
+  const totalAll = worksSum + glassSum + deliverySum;
 
   // Скрытое поле (для сохранения — только работы, как было)
   const totalEl = document.getElementById('f-total');
@@ -661,6 +688,20 @@ function recalcTotal() {
   if (liveWorks) liveWorks.textContent = fmt(worksSum);
   if (liveAll)   liveAll.textContent   = fmt(totalAll);
 
+  // Авторасчет статуса оплаты
+  const debtInput = document.getElementById('f-debt');
+  const paymentStatusSel = document.getElementById('f-payment-status');
+  if (debtInput && paymentStatusSel) {
+    const debtVal = Number(debtInput.value) || 0;
+    if (debtInput.value.trim() === '' || debtVal === 0) {
+      paymentStatusSel.value = 'Не оплачено';
+    } else if (debtVal >= totalAll && totalAll > 0) {
+      paymentStatusSel.value = 'Оплачено';
+    } else {
+      paymentStatusSel.value = 'Частично оплачено';
+    }
+  }
+
   recalcFullMargins();
 }
 
@@ -681,6 +722,7 @@ async function saveOrder() {
     responsible:     get('f-responsible'),
     client:          get('f-client'),
     phone:           get('f-phone'),
+    address:         get('f-address'),
     car:             get('f-car'),
     code:            get('f-code'),
     notes:           get('f-notes'),
@@ -711,6 +753,9 @@ async function saveOrder() {
     inWork:          (currentRole === 'owner' || currentRole === 'manager')
       ? (document.getElementById('f-in-work')?.checked || false)
       : (existingOrder ? existingOrder.inWork : false),
+    isCancelled:     (currentRole === 'owner' || currentRole === 'manager')
+      ? (document.getElementById('f-cancelled')?.checked || false)
+      : (existingOrder ? !!existingOrder.isCancelled : false),
     workerDone:      isNew ? false : (orders.find(x => x.id === editingOrderId)?.workerDone || false),
     assistant:       document.getElementById('f-assistant')?.value || '',
     priceLocked:     (currentRole === 'senior') ? true : (existingOrder ? existingOrder.priceLocked : false),
@@ -995,6 +1040,8 @@ function initOrderTabs() {
         <button class="orders-tab" id="tab-selection" onclick="setOrderTab('selection')">Подборка</button>
         <button class="orders-tab" id="tab-planner"   onclick="setOrderTab('planner')">Планёрка</button>
         <button class="orders-tab" id="tab-done"      onclick="setOrderTab('done')">Выполненные</button>
+        <button class="orders-tab" id="tab-debt"      onclick="setOrderTab('debt')">Долг</button>
+        <button class="orders-tab" id="tab-cancelled" onclick="setOrderTab('cancelled')">Отмененные</button>
       `;
     }
     setOrderTab('selection');

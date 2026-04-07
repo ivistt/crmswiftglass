@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
@@ -245,6 +245,14 @@
           <span class="ico" style="margin-right:5px;"><i data-lucide="check" style="width:13px;height:13px;"></i></span>
           Выполненные
         </button>
+        <button class="orders-tab" id="tab-debt" onclick="setOrderTab('debt')">
+          <span class="ico" style="margin-right:5px;"><i data-lucide="alert-circle" style="width:13px;height:13px;"></i></span>
+          Долг
+        </button>
+        <button class="orders-tab" id="tab-cancelled" onclick="setOrderTab('cancelled')">
+          <span class="ico" style="margin-right:5px;"><i data-lucide="x-circle" style="width:13px;height:13px;"></i></span>
+          Отменены
+        </button>
       </div>
       <div class="filters-bar">
         <div style="position:relative;">
@@ -435,12 +443,16 @@
           Основная информация
         </div>
         <div class="form-grid col-1">
-          <div class="form-group">
+          <div class="form-group" style="display:flex; flex-wrap:wrap; gap:12px;">
             <label class="inwork-toggle">
               <input type="checkbox" id="f-in-work" style="width:18px;height:18px;accent-color:#ffd166;">
               <span class="inwork-toggle-icon">🔨</span>
-              <span class="inwork-toggle-label">В работу</span>
-              <span class="inwork-toggle-hint">(видно работникам)</span>
+              <span class="inwork-toggle-label" style="margin-right:0;">В работу</span>
+            </label>
+            <label class="inwork-toggle" id="cancel-toggle-wrap" style="background:var(--surface2);">
+              <input type="checkbox" id="f-cancelled" style="width:18px;height:18px;accent-color:#ef4444;">
+              <span class="inwork-toggle-icon">❌</span>
+              <span class="inwork-toggle-label">Отменен</span>
             </label>
           </div>
           <div class="form-group">
@@ -470,6 +482,10 @@
           <div class="form-group">
             <label class="form-label">☎️ Телефон</label>
             <input class="form-input" type="text" id="f-phone" placeholder="+380...">
+          </div>
+          <div class="form-group">
+            <label class="form-label">📍 Место</label>
+            <input class="form-input" type="text" id="f-address" placeholder="Адрес / Расположение">
           </div>
           <div class="form-group">
             <label class="form-label">🚗 Автомобиль</label>
@@ -531,10 +547,6 @@
             <label class="form-label">Тонировка</label>
             <input class="form-input" type="number" id="f-toning" placeholder="0">
           </div>
-          <div class="form-group">
-            <label class="form-label">🚛 Доставка</label>
-            <input class="form-input" type="number" id="f-delivery" placeholder="0">
-          </div>
 
           <!-- Итоговые поля — 2 колонки: стекло | работы, затем итог на всю ширину -->
           <div class="form-group">
@@ -584,14 +596,22 @@
         <div class="form-section-body" id="finance-section-body" style="display:none;">
           <div class="form-grid" style="margin-top:14px;">
 
+            <!-- Строка 0: доставка -->
+            <div class="form-group">
+              <label class="form-label">🚛 Доставка</label>
+              <input class="form-input" type="number" id="f-delivery" placeholder="0">
+            </div>
+            <div class="form-group">
+               <!-- пусто для выравнивания -->
+            </div>
+
             <!-- Строка 1: статус долга + способ оплаты -->
             <div class="form-group">
               <label class="form-label">Расчёт долга клиента</label>
-              <select class="form-select" id="f-payment-status">
-                <option value="">—</option>
-                <option>Оплачено</option>
-                <option>Не оплачено</option>
-                <option>Частично оплачено</option>
+              <select class="form-select" id="f-payment-status" disabled style="background-color: var(--surface2); cursor: not-allowed;">
+                <option value="Оплачено">Оплачено</option>
+                <option value="Не оплачено">Не оплачено</option>
+                <option value="Частично оплачено">Частично оплачено</option>
               </select>
             </div>
             <div class="form-group">
@@ -611,7 +631,7 @@
             <!-- Строка 2: сумма долга + дата (date не трогаем) -->
             <div class="form-group">
               <label class="form-label">Расчёт долга (сумма)</label>
-              <input class="form-input" type="number" id="f-debt" placeholder="0">
+              <input class="form-input" type="number" id="f-debt" placeholder="0" oninput="recalcTotal()">
             </div>
             <div class="form-group">
               <label class="form-label">Дата расчёта долга</label>
@@ -738,6 +758,7 @@
             <option value="manager">Менеджер — записи и клиенты, без финансов</option>
             <option value="senior">Старший — создаёт и редактирует записи</option>
             <option value="junior">Младший — только просмотр записей</option>
+            <option value="extra">Экстра — спец. с полным доступом к заказам</option>
           </select>
         </div>
         <div class="form-group">

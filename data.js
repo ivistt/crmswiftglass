@@ -1,4 +1,4 @@
-﻿// ============================================================
+// ============================================================
 // DATA.JS — глобальное хранилище + запросы через Worker
 // ============================================================
 
@@ -99,6 +99,17 @@ async function sbSetWorkerPin(workerId, pin) {
     body: JSON.stringify({ workerId, pin }),
   });
   if (!res.ok) throw new Error(await res.text());
+}
+
+async function sbInsertWorker(entry) {
+  const res = await fetch(`${WORKER_URL}/api/workers`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(entry),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const rows = await res.json();
+  return rows && rows.length ? rowToWorker(rows[0]) : null;
 }
 
 // Обновление данных сотрудника (роль, формула, пароль)
@@ -309,6 +320,7 @@ function rowToOrder(r) {
     responsible:     r.responsible,
     client:          r.client,
     phone:           r.phone,
+    address:         r.address || '',
     car:             r.car,
     code:            r.code,
     notes:           r.notes,
@@ -354,6 +366,7 @@ function rowToOrder(r) {
     inWork:          r.in_work || false,
     workerDone:      r.worker_done || false,
     assistant:       r.assistant || '',
+    isCancelled:     r.is_cancelled || false,
   };
 }
 
@@ -364,6 +377,7 @@ function orderToRow(o) {
     responsible:      o.responsible,
     client:           o.client,
     phone:            o.phone,
+    address:          o.address || null,
     car:              o.car,
     code:             o.code,
     notes:            o.notes,
@@ -405,6 +419,7 @@ function orderToRow(o) {
     in_work:          o.inWork     || false,
     worker_done:      o.workerDone || false,
     assistant:        o.assistant  || null,
+    is_cancelled:     o.isCancelled || false,
   };
 }
 
@@ -452,6 +467,7 @@ async function sbUpdateWorkerFormula(workerId, formula) {
 const DEFAULT_SALARY_FORMULA = {
   senior: 'mount * 0.20',
   junior: '500',
+  extra:  'mount * 0.20',
 };
 
 // Безопасно вычисляет формулу.
@@ -491,13 +507,13 @@ function calcOrderSalary(workerName, order) {
   if (result != null) return result;
   // Fallback если формула невалидна
   const role = w ? w.systemRole : 'junior';
-  return role === 'senior' ? Math.round(mount * 0.20) : 500;
+  return (role === 'senior' || role === 'extra') ? Math.round(mount * 0.20) : 500;
 }
 
 // Итоговая зп за день (используется в profile для совместимости)
 function calcDaySalary(workerName, date) {
   return orders
-    .filter(o => o.workerDone && o.date === date && (o.responsible === workerName || o.assistant === workerName))
+    .filter(o => o.workerDone && !o.isCancelled && o.date === date && (o.responsible === workerName || o.assistant === workerName))
     .reduce((sum, o) => sum + calcOrderSalary(workerName, o), 0);
 }
 
@@ -508,6 +524,7 @@ const ROLE_LABELS = {
   manager: '📋 Менеджер',
   senior:  '🔧 Старший специалист',
   junior:  '👤 Младший специалист',
+  extra:   '⭐ Экстра специалист',
 };
 
 let currentRole = null;
@@ -540,6 +557,10 @@ function canCreateOrder()    { return currentRole === 'owner' || currentRole ===
 function canEditPrice(order) {
   if (currentRole === 'owner') return true;
   if (currentRole === 'manager') return true;
+  if (currentRole === 'extra') {
+    if (order && (order.responsible === currentWorkerName || order.assistant === currentWorkerName)) return true;
+    return !order.priceLocked;
+  }
   if (currentRole === 'senior') return !order.priceLocked;
   return false;
 }
@@ -547,7 +568,7 @@ function canViewClients()  { return currentRole === 'owner' || currentRole === '
 function canViewWorkers()  { return currentRole === 'owner'; }
 function canDeleteOrder()  { return currentRole === 'owner'; }
 function canViewFinance()  { return currentRole === 'owner'; }
-function canMarkWorkerDone() { return currentRole === 'senior'; }
+function canMarkWorkerDone() { return currentRole === 'senior' || currentRole === 'extra'; }
 
 function getClients() {
   const map = {};

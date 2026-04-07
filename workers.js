@@ -1,4 +1,4 @@
-﻿// ============================================================
+// ============================================================
 // WORKERS.JS — экран сотрудников, модал редактирования
 // ============================================================
 
@@ -60,6 +60,53 @@ function escapeHtml(str) {
   return (str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
+// ── МОДАЛ ДОБАВЛЕНИЯ СОТРУДНИКА ──────────────────────────────
+
+function openWorkerModal() {
+  const m = document.getElementById('worker-modal');
+  if (!m) return;
+  document.getElementById('w-name').value = '';
+  document.getElementById('w-role').value = 'Старший специалист';
+  document.getElementById('w-system-role').value = 'senior';
+  document.getElementById('w-note').value = '';
+  m.classList.add('active');
+}
+
+function closeWorkerModal() {
+  const m = document.getElementById('worker-modal');
+  if (m) m.classList.remove('active');
+}
+
+async function saveWorker() {
+  const name = document.getElementById('w-name').value.trim();
+  const role = document.getElementById('w-role').value;
+  const sysRole = document.getElementById('w-system-role').value;
+  const note = document.getElementById('w-note').value.trim();
+
+  if (!name) {
+    showToast('Введите имя', 'error');
+    return;
+  }
+
+  try {
+    const w = await sbInsertWorker({
+      name: name,
+      role: role,
+      system_role: sysRole,
+      note: note
+    });
+    
+    if (w) {
+      workers.push(w);
+      renderWorkers();
+      closeWorkerModal();
+      showToast('Сотрудник добавлен ✓');
+    }
+  } catch (e) {
+    showToast('Ошибка: ' + e.message, 'error');
+  }
+}
+
 // ── МОДАЛ РЕДАКТИРОВАНИЯ СОТРУДНИКА ──────────────────────────
 
 let _editWorkerId = null;
@@ -99,6 +146,7 @@ function openWorkerEditModal(workerId) {
               <option value="senior">senior — Старший специалист</option>
               <option value="junior">junior — Младший специалист</option>
               <option value="manager">manager — Менеджер</option>
+              <option value="extra">extra — Экстра спец. с полным доступом</option>
             </select>
           </div>
 
