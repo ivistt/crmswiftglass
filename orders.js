@@ -227,23 +227,23 @@ async function deleteOrder(id) {
 }
 
 // ---------- ЗАПОЛНЕНИЕ СЕЛЕКТОВ ИЗ СПРАВОЧНИКОВ ----------
+function populateCarDatalist() {
+  const dl = document.getElementById('car-datalist');
+  if (!dl) return;
+  dl.innerHTML = (refCars || []).map(c => `<option value="${c.model}">`).join('');
+}
+
 function populateRefSelects() {
-  // Марки авто
-  const carSel = document.getElementById('f-car');
-  if (carSel) {
-    const cur = carSel.value;
-    carSel.innerHTML = '<option value="">— выбрать —</option>' +
-      refCars.map(c => `<option value="${c.model}">${c.model}</option>`).join('');
-    if (cur) carSel.value = cur;
-  }
+  // Марки авто — теперь datalist
+  populateCarDatalist();
 
   // Услуги — чекбоксы
   const svcBox = document.getElementById('service-type-checkboxes');
   if (svcBox) {
     const cur = (document.getElementById('f-service-type')?.value || '').split(',').map(s => s.trim()).filter(Boolean);
     svcBox.innerHTML = refServices.map(s => `
-      <label class="checkbox" style="gap:8px;border:1px solid var(--border);padding:6px 10px;border-radius:10px;">
-        <input type="checkbox" value="${s.name}" ${cur.includes(s.name) ? 'checked' : ''} onchange="syncServiceTypes()" style="accent-color:var(--accent);width:15px;height:15px;">
+      <label class="checkbox">
+        <input type="checkbox" value="${s.name}" ${cur.includes(s.name) ? 'checked' : ''} onchange="syncServiceTypes()" style="accent-color:var(--accent);width:15px;height:15px;flex-shrink:0;">
         ${s.name}
       </label>
     `).join('');
@@ -342,9 +342,9 @@ function populateAuthorCheckboxes() {
   if (!box) return;
   const cur = (document.getElementById('f-author')?.value || '').split(',').map(s => s.trim()).filter(Boolean);
   box.innerHTML = MANAGER_OPTIONS.map(opt => `
-    <label style="display:flex;align-items:center;gap:6px;padding:6px 12px;background:var(--surface2);border-radius:8px;cursor:pointer;font-size:13px;font-weight:500;border:1.5px solid ${cur.includes(opt) ? 'var(--accent)' : 'transparent'};">
+    <label style="border-color:${cur.includes(opt) ? 'var(--accent)' : 'transparent'};">
       <input type="checkbox" value="${opt}" ${cur.includes(opt) ? 'checked' : ''}
-        onchange="syncAuthorField()" style="accent-color:var(--accent);width:15px;height:15px;">
+        onchange="syncAuthorField()" style="accent-color:var(--accent);width:15px;height:15px;flex-shrink:0;">
       ${opt}
     </label>
   `).join('');
@@ -371,13 +371,14 @@ function populateClientDatalist() {
 
 // Автозаполнение кода и кодирования при выборе марки авто
 function onCarSelect() {
-  const carSel = document.getElementById('f-car');
-  const model = carSel?.value;
-  if (!model) return;
-  const found = refCars.find(c => c.model === model);
-  if (!found) return;
+  onCarInputChange(document.getElementById('f-car')?.value || '');
+}
+
+function onCarInputChange(val) {
+  if (!val) return;
+  const found = refCars.find(c => c.model.toLowerCase() === val.toLowerCase());
   const codeEl = document.getElementById('f-code');
-  if (codeEl && found.eurocode)  codeEl.value   = found.eurocode;
+  if (codeEl) codeEl.value = found?.eurocode || '';
 }
 
 // ---------- МОДАЛ СОЗДАНИЯ / РЕДАКТИРОВАНИЯ ----------
@@ -474,9 +475,22 @@ function openOrderModal(id) {
   newIncome.addEventListener('input', recalcMargin);
 
   const tonExtEl = document.getElementById('f-toning-external');
-  if (tonExtEl) tonExtEl.addEventListener('change', recalcFullMargins);
+  if (tonExtEl) tonExtEl.addEventListener('change', () => { recalcFullMargins(); recalcTotal(); });
+
+  // Сворачиваем финансовый блок при открытии
+  const finBody = document.getElementById('finance-section-body');
+  const finChevron = document.getElementById('finance-chevron');
+  if (finBody) finBody.style.display = 'none';
+  if (finChevron) finChevron.style.transform = '';
+
+  // Прячем live-total пока нет данных
+  const liveTotalEl = document.getElementById('modal-live-total');
+  if (liveTotalEl) liveTotalEl.style.display = 'none';
 
   document.getElementById('order-modal').classList.add('active');
+
+  // Начальный пересчёт итогов (при редактировании)
+  setTimeout(recalcTotal, 50);
 }
 
 function closeOrderModal() {
@@ -585,16 +599,53 @@ function setPriceFieldsLocked(locked) {
   });
 }
 
+// Collapse финансового блока
+function toggleFinanceSection() {
+  const body = document.getElementById('finance-section-body');
+  const chevron = document.getElementById('finance-chevron');
+  if (!body) return;
+  const isOpen = body.style.display !== 'none';
+  body.style.display = isOpen ? 'none' : 'block';
+  if (chevron) chevron.style.transform = isOpen ? '' : 'rotate(180deg)';
+}
+
 // Автопересчёт маржи и всех выплат
 function recalcMargin() {
   recalcFullMargins();
+  recalcTotal(); // обновляем итог стекла в шапке
 }
 
 function recalcTotal() {
-  const sum = ['f-mount','f-molding','f-extra-work','f-tatu','f-toning','f-delivery']
+  const worksSum = ['f-mount','f-molding','f-extra-work','f-tatu','f-toning','f-delivery']
     .reduce((s, id) => s + (Number(document.getElementById(id)?.value) || 0), 0);
+
+  // Сумма продажи стекла из финансового блока
+  const glassSum = Number(document.getElementById('f-income')?.value) || 0;
+  const totalAll = worksSum + glassSum;
+
+  // Скрытое поле (для сохранения — только работы, как было)
   const totalEl = document.getElementById('f-total');
-  if (totalEl) { totalEl.value = sum; }
+  if (totalEl) totalEl.value = worksSum;
+
+  // Обновляем визуальные итоги в секции работ
+  const fmt = v => v.toLocaleString('ru') + ' \u20B4';
+  const dispGlass = document.getElementById('display-total-glass');
+  const dispWorks = document.getElementById('display-total-works');
+  const dispAll   = document.getElementById('display-total-all');
+  if (dispGlass) dispGlass.textContent = fmt(glassSum);
+  if (dispWorks) dispWorks.textContent = fmt(worksSum);
+  if (dispAll)   dispAll.textContent   = fmt(totalAll);
+
+  // Обновляем live-счётчик в хедере модала
+  const liveTotal = document.getElementById('modal-live-total');
+  const liveGlass = document.getElementById('modal-total-glass');
+  const liveWorks = document.getElementById('modal-total-works');
+  const liveAll   = document.getElementById('modal-total-all');
+  if (liveTotal) liveTotal.style.display = totalAll > 0 ? 'flex' : 'none';
+  if (liveGlass) liveGlass.textContent = fmt(glassSum);
+  if (liveWorks) liveWorks.textContent = fmt(worksSum);
+  if (liveAll)   liveAll.textContent   = fmt(totalAll);
+
   recalcFullMargins();
 }
 

@@ -65,13 +65,29 @@ async function renderFinance() {
 
   container.innerHTML = `
     <!-- Инструменты архивации -->
-    <div style="display:flex;gap:10px;margin-bottom:16px;">
-      <button class="btn-secondary" style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;" onclick="exportAllCSV()">
-        <i data-lucide="download" style="width:14px;height:14px;"></i> Скачать
+    <div style="display:flex;gap:10px;margin-bottom:8px;flex-wrap:wrap;">
+      <button class="btn-primary" style="flex:1;min-width:140px;display:flex;align-items:center;justify-content:center;gap:6px;" onclick="backupToSupabase()">
+        <i data-lucide="cloud-upload" style="width:14px;height:14px;"></i> Backup в Supabase
       </button>
-      <button class="btn-danger" style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;" onclick="deleteDoneOrders()">
+      <button class="btn-secondary" style="flex:1;min-width:120px;display:flex;align-items:center;justify-content:center;gap:6px;" onclick="exportAllJSON()">
+        <i data-lucide="download" style="width:14px;height:14px;"></i> Скачать JSON
+      </button>
+      <button class="btn-secondary" style="flex:1;min-width:120px;display:flex;align-items:center;justify-content:center;gap:6px;" onclick="exportAllCSV()">
+        <i data-lucide="file-spreadsheet" style="width:14px;height:14px;"></i> CSV файлы
+      </button>
+      <button class="btn-danger" style="flex:1;min-width:140px;display:flex;align-items:center;justify-content:center;gap:6px;" onclick="deleteDoneOrders()">
         <i data-lucide="trash-2" style="width:14px;height:14px;"></i> Удалить выполненные
       </button>
+    </div>
+    <div id="backup-history-wrap" style="margin-bottom:16px;">
+      <div id="backup-history-bar" style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--surface2);border-radius:12px;cursor:pointer;border:1px solid var(--border);" onclick="toggleBackupHistory()">
+        <span style="font-size:13px;font-weight:600;display:flex;align-items:center;gap:7px;">
+          <i data-lucide="history" style="width:14px;height:14px;color:var(--text3);"></i>
+          История бэкапов
+        </span>
+        <i data-lucide="chevron-down" id="backup-history-chevron" style="width:14px;height:14px;color:var(--text3);transition:transform 0.2s;"></i>
+      </div>
+      <div id="backup-history-body" style="display:none;"></div>
     </div>
 
     <!-- Общая сводка -->
@@ -456,9 +472,294 @@ async function deleteSalaryEntry(id, ym) {
   }
 }
 
+
 // ============================================================
-// ЭКСПОРТ CSV + УДАЛЕНИЕ ВЫПОЛНЕННЫХ
+// BACKUP В SUPABASE
 // ============================================================
+
+function buildBackupPayload() {
+  const orderRows = orders.map(o => ({
+    id: o.id, date: o.date || null, time: o.time || null,
+    responsible: o.responsible || null, client: o.client || null,
+    phone: o.phone || null, car: o.car || null, code: o.code || null,
+    notes: o.notes || null,
+    mount: Number(o.mount) || 0, service_type: o.serviceType || null,
+    molding: Number(o.molding) || 0, extra_work: Number(o.extraWork) || 0,
+    tatu: Number(o.tatu) || 0, toning: Number(o.toning) || 0,
+    delivery: Number(o.delivery) || 0, author: o.author || null,
+    payment_status: o.paymentStatus || null, check_sum: Number(o.check) || 0,
+    debt: Number(o.debt) || 0, debt_date: o.debtDate || null,
+    total: Number(o.total) || 0, molding_author: o.moldingAuthor || null,
+    partner: o.partner || null, supplier_status: o.supplierStatus || null,
+    purchase: Number(o.purchase) || 0, income: Number(o.income) || 0,
+    remainder: Number(o.remainder) || 0, payment_method: o.paymentMethod || null,
+    drop_shipper: o.dropshipper || null, drop_shipper_payout: Number(o.dropshipperPayout) || 0,
+    toning_external: !!o.toningExternal, margin_total: Number(o.marginTotal) || 0,
+    payout_manager_glass: Number(o.payoutManagerGlass) || 0,
+    payout_resp_glass: Number(o.payoutRespGlass) || 0,
+    payout_lesha: Number(o.payoutLesha) || 0, payout_roma: Number(o.payoutRoma) || 0,
+    payout_extra_resp: Number(o.payoutExtraResp) || 0,
+    payout_extra_assist: Number(o.payoutExtraAssist) || 0,
+    payout_molding_resp: Number(o.payoutMoldingResp) || 0,
+    payout_molding_assist: Number(o.payoutMoldingAssist) || 0,
+    status_done: !!o.statusDone, in_work: !!o.inWork,
+    worker_done: !!o.workerDone, assistant: o.assistant || null,
+    price_locked: !!o.priceLocked,
+  }));
+
+  return {
+    orders:          orderRows,
+    workers:         workers.map(w => ({ id: w.id, name: w.name, role: w.role || null, system_role: w.systemRole || null, note: w.note || null, salary_formula: w.salaryFormula || null })),
+    worker_salaries: allSalaries.map(s => ({ id: s.id, worker_name: s.worker_name, date: s.date, amount: Number(s.amount), order_id: s.order_id || null })),
+    ref_cars:             refCars || [],
+    ref_services:         refServices || [],
+    ref_partners:         refPartners || [],
+    ref_payment_statuses: refPaymentStatuses || [],
+    ref_supplier_statuses:refSupplierStatuses || [],
+    ref_warehouses:       refWarehouses || [],
+    ref_dropshippers:     refDropshippers || [],
+    car_directory:        carDirectory || [],
+  };
+}
+
+async function backupToSupabase() {
+  const btn = document.querySelector('[onclick="backupToSupabase()"]');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i data-lucide="loader" style="width:14px;height:14px;"></i> Сохраняю...'; initIcons(); }
+
+  try {
+    const payload = buildBackupPayload();
+    const label   = `manual — ${orders.length} заказов, ${new Date().toLocaleString('ru')}`;
+
+    const res = await fetch(`${WORKER_URL}/api/backup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken || '' },
+      body: JSON.stringify({ label, payload }),
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(err);
+    }
+    const data = await res.json();
+    showToast(`Backup сохранён в Supabase (ID: ${data.id})`);
+    // Обновляем историю если она открыта
+    const body = document.getElementById('backup-history-body');
+    if (body && body.style.display !== 'none') loadBackupHistory();
+  } catch (e) {
+    showToast('Ошибка backup: ' + e.message, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i data-lucide="cloud-upload" style="width:14px;height:14px;"></i> Backup в Supabase';
+      initIcons();
+    }
+  }
+}
+
+async function toggleBackupHistory() {
+  const body    = document.getElementById('backup-history-body');
+  const chevron = document.getElementById('backup-history-chevron');
+  if (!body) return;
+  const isOpen = body.style.display !== 'none';
+  if (isOpen) {
+    body.style.display = 'none';
+    if (chevron) chevron.style.transform = '';
+  } else {
+    body.style.display = 'block';
+    if (chevron) chevron.style.transform = 'rotate(180deg)';
+    await loadBackupHistory();
+  }
+}
+
+async function loadBackupHistory() {
+  const body = document.getElementById('backup-history-body');
+  if (!body) return;
+  body.innerHTML = '<div style="padding:12px 14px;font-size:13px;color:var(--text3);">Загрузка...</div>';
+
+  try {
+    const res = await fetch(`${WORKER_URL}/api/backup`, {
+      headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken || '' },
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const list = await res.json();
+
+    if (!Array.isArray(list) || !list.length) {
+      body.innerHTML = '<div style="padding:12px 14px;font-size:13px;color:var(--text3);">Бэкапов пока нет</div>';
+      return;
+    }
+
+    body.innerHTML = `
+      <div style="border:1px solid var(--border);border-top:none;border-radius:0 0 12px 12px;overflow:hidden;">
+        ${list.map((b, i) => {
+          const dt = new Date(b.created_at).toLocaleString('ru', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
+          return `
+            <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:${i < list.length-1 ? '1px solid var(--border)' : 'none'};background:var(--surface);">
+              <div style="flex:1;min-width:0;">
+                <div style="font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(b.label || '—')}</div>
+                <div style="font-size:11px;color:var(--text3);margin-top:2px;">${dt} · ID ${b.id}</div>
+              </div>
+              <button class="btn-secondary" style="padding:5px 10px;font-size:12px;display:flex;align-items:center;gap:5px;flex-shrink:0;" onclick="downloadBackup(${b.id})">
+                <i data-lucide="download" style="width:12px;height:12px;"></i> JSON
+              </button>
+              <button class="icon-action-btn icon-action-danger" title="Удалить" onclick="deleteBackup(${b.id})" style="flex-shrink:0;">🗑️</button>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+    initIcons();
+  } catch (e) {
+    body.innerHTML = `<div style="padding:12px 14px;font-size:13px;color:var(--red);">Ошибка: ${e.message}</div>`;
+  }
+}
+
+async function downloadBackup(id) {
+  try {
+    showToast('Загружаю бэкап...');
+    const res = await fetch(`${WORKER_URL}/api/backup/${id}`, {
+      headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken || '' },
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    const json = JSON.stringify(data, null, 2);
+    const blob = new Blob([json], { type: 'application/json;charset=utf-8;' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    const dt   = new Date(data.created_at).toISOString().slice(0, 10);
+    a.href = url;
+    a.download = `swiftglass_backup_${dt}_id${id}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    showToast('Ошибка скачивания: ' + e.message, 'error');
+  }
+}
+
+async function deleteBackup(id) {
+  if (!confirm('Удалить этот бэкап из базы?')) return;
+  try {
+    const res = await fetch(`${WORKER_URL}/api/backup/${id}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken || '' },
+    });
+    if (!res.ok) throw new Error(await res.text());
+    showToast('Бэкап удалён');
+    loadBackupHistory();
+  } catch (e) {
+    showToast('Ошибка: ' + e.message, 'error');
+  }
+}
+
+// ============================================================
+// ЭКСПОРТ JSON (для Supabase) + CSV
+// ============================================================
+
+// ---------- JSON EXPORT ----------
+async function exportAllJSON() {
+  const date = new Date().toISOString().slice(0, 10);
+  const btn  = document.querySelector('[onclick="exportAllJSON()"]');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Подготовка...'; }
+
+  try {
+    const orderRows = orders.map(o => ({
+      id: o.id, date: o.date || null, time: o.time || null,
+      responsible: o.responsible || null, client: o.client || null,
+      phone: o.phone || null, car: o.car || null, code: o.code || null,
+      notes: o.notes || null,
+      mount: Number(o.mount) || 0, service_type: o.serviceType || null,
+      molding: Number(o.molding) || 0, extra_work: Number(o.extraWork) || 0,
+      tatu: Number(o.tatu) || 0, toning: Number(o.toning) || 0,
+      delivery: Number(o.delivery) || 0,
+      author: o.author || null,
+      payment_status: o.paymentStatus || null,
+      check_sum: Number(o.check) || 0,
+      debt: Number(o.debt) || 0, debt_date: o.debtDate || null,
+      total: Number(o.total) || 0,
+      molding_author: o.moldingAuthor || null,
+      partner: o.partner || null,
+      supplier_status: o.supplierStatus || null,
+      purchase: Number(o.purchase) || 0,
+      income: Number(o.income) || 0,
+      remainder: Number(o.remainder) || 0,
+      payment_method: o.paymentMethod || null,
+      drop_shipper: o.dropshipper || null,
+      drop_shipper_payout: Number(o.dropshipperPayout) || 0,
+      toning_external: !!o.toningExternal,
+      margin_total: Number(o.marginTotal) || 0,
+      payout_manager_glass: Number(o.payoutManagerGlass) || 0,
+      payout_resp_glass: Number(o.payoutRespGlass) || 0,
+      payout_lesha: Number(o.payoutLesha) || 0,
+      payout_roma: Number(o.payoutRoma) || 0,
+      payout_extra_resp: Number(o.payoutExtraResp) || 0,
+      payout_extra_assist: Number(o.payoutExtraAssist) || 0,
+      payout_molding_resp: Number(o.payoutMoldingResp) || 0,
+      payout_molding_assist: Number(o.payoutMoldingAssist) || 0,
+      status_done: !!o.statusDone,
+      in_work: !!o.inWork,
+      worker_done: !!o.workerDone,
+      assistant: o.assistant || null,
+      price_locked: !!o.priceLocked,
+    }));
+
+    const workerRows = workers.map(w => ({
+      id: w.id, name: w.name, role: w.role || null,
+      system_role: w.systemRole || null, note: w.note || null,
+      salary_formula: w.salaryFormula || null,
+    }));
+
+    const salaryRows = allSalaries.map(s => ({
+      id: s.id, worker_name: s.worker_name,
+      date: s.date, amount: Number(s.amount), order_id: s.order_id || null,
+    }));
+
+    const backup = {
+      _meta: {
+        exported_at: new Date().toISOString(),
+        app: 'SwiftGlass CRM',
+        version: '1.0',
+        // Инструкция по импорту в Supabase:
+        // 1. Откройте Supabase Dashboard → Table Editor
+        // 2. Для каждой таблицы: Insert → Import data → JSON
+        //    или используйте SQL: INSERT INTO tablename SELECT * FROM json_populate_recordset(...)
+        // 3. Таблицы: orders, workers, worker_salaries, ref_cars,
+        //    ref_services, ref_partners, car_directory и др.
+      },
+      tables: {
+        orders:          { count: orderRows.length,   rows: orderRows  },
+        workers:         { count: workerRows.length,  rows: workerRows },
+        worker_salaries: { count: salaryRows.length,  rows: salaryRows },
+        ref_cars:             { count: (refCars||[]).length,             rows: refCars||[]             },
+        ref_services:         { count: (refServices||[]).length,         rows: refServices||[]         },
+        ref_partners:         { count: (refPartners||[]).length,         rows: refPartners||[]         },
+        ref_payment_statuses: { count: (refPaymentStatuses||[]).length,  rows: refPaymentStatuses||[]  },
+        ref_supplier_statuses:{ count: (refSupplierStatuses||[]).length, rows: refSupplierStatuses||[] },
+        ref_warehouses:       { count: (refWarehouses||[]).length,       rows: refWarehouses||[]       },
+        ref_dropshippers:     { count: (refDropshippers||[]).length,     rows: refDropshippers||[]     },
+        car_directory:        { count: (carDirectory||[]).length,        rows: carDirectory||[]        },
+      }
+    };
+
+    const json = JSON.stringify(backup, null, 2);
+    const blob = new Blob([json], { type: 'application/json;charset=utf-8;' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url;
+    a.download = `swiftglass_backup_${date}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+
+    const totalRows = orderRows.length + workerRows.length + salaryRows.length;
+    showToast(`Backup готов — ${totalRows} записей в 1 файле`);
+  } catch (e) {
+    showToast('Ошибка экспорта: ' + e.message, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i data-lucide="database" style="width:14px;height:14px;"></i> Backup JSON';
+      initIcons();
+    }
+  }
+}
 
 function makeCsv(rows) {
   if (!rows.length) return '';

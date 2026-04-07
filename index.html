@@ -405,22 +405,41 @@
 
 <!-- ==================== ORDER MODAL ==================== -->
 <div class="modal-overlay" id="order-modal">
-  <div class="modal">
+  <div class="modal modal-order">
+
+    <!-- HEADER с live-счётчиком итого -->
     <div class="modal-header">
-      <div class="modal-title" id="order-modal-title">Новая запись</div>
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <div class="modal-title" id="order-modal-title">Новая запись</div>
+        <div class="modal-live-total" id="modal-live-total" style="display:none;">
+          <span style="font-size:11px;color:var(--text3);font-weight:500;text-transform:uppercase;letter-spacing:0.5px;">Итого:</span>
+          <span id="modal-total-glass" class="modal-live-chip modal-live-chip-glass" title="Стекло">0 ₴</span>
+          <span style="font-size:12px;color:var(--text3);">+</span>
+          <span id="modal-total-works" class="modal-live-chip modal-live-chip-works" title="Работы">0 ₴</span>
+          <span style="font-size:12px;color:var(--text3);">=</span>
+          <span id="modal-total-all" class="modal-live-total-sum">0 ₴</span>
+        </div>
+      </div>
       <button class="modal-close" onclick="closeOrderModal()">
         <i data-lucide="x" style="width:16px;height:16px;"></i>
       </button>
     </div>
+
     <div class="modal-body">
 
+      <!-- ── СЕКЦИЯ 1: ОСНОВНАЯ ИНФОРМАЦИЯ ── -->
       <div class="form-section">
-        <div class="form-section-title">📋 Основная информация</div>
+        <div class="form-section-title form-section-title--blue">
+          <i data-lucide="clipboard-list" style="width:13px;height:13px;"></i>
+          Основная информация
+        </div>
         <div class="form-grid">
-          <div class="form-group span-2" style="display:flex;gap:24px;align-items:center;padding:8px 0;">
-            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;font-size:14px;">
+          <div class="form-group span-2">
+            <label class="inwork-toggle">
               <input type="checkbox" id="f-in-work" style="width:18px;height:18px;accent-color:#ffd166;">
-              🔨 В работу <span style="font-weight:400;font-size:12px;color:var(--text3);">(видно работникам)</span>
+              <span class="inwork-toggle-icon">🔨</span>
+              <span class="inwork-toggle-label">В работу</span>
+              <span class="inwork-toggle-hint">(видно работникам)</span>
             </label>
           </div>
           <div class="form-group">
@@ -441,7 +460,8 @@
           </div>
           <div class="form-group">
             <label class="form-label">👤 Клиент</label>
-            <input class="form-input" type="text" id="f-client" placeholder="Имя клиента">
+            <input class="form-input" type="text" id="f-client" placeholder="Имя клиента" list="client-list" autocomplete="off">
+            <datalist id="client-list"></datalist>
           </div>
           <div class="form-group">
             <label class="form-label">☎️ Телефон</label>
@@ -449,11 +469,12 @@
           </div>
           <div class="form-group">
             <label class="form-label">🚗 Автомобиль</label>
-            <input class="form-input" type="text" id="f-car" placeholder="Марка, модель">
+            <input class="form-input" type="text" id="f-car" placeholder="Марка, модель" list="car-datalist" autocomplete="off" oninput="onCarInputChange(this.value)">
+            <datalist id="car-datalist"></datalist>
           </div>
           <div class="form-group">
-            <label class="form-label">🔢 Код</label>
-            <input class="form-input" type="text" id="f-code" placeholder="—">
+            <label class="form-label">🔢 Еврокод</label>
+            <input class="form-input" type="text" id="f-code" placeholder="Авто из справочника" readonly style="opacity:0.6;">
           </div>
           <div class="form-group span-2">
             <label class="form-label">📝 Заметки</label>
@@ -462,17 +483,26 @@
         </div>
       </div>
 
+      <!-- ── СЕКЦИЯ 2: УСЛУГИ (тип) ── -->
       <div class="form-section">
-        <div class="form-section-title">🔧 Работы</div>
+        <div class="form-section-title form-section-title--teal">
+          <i data-lucide="wrench" style="width:13px;height:13px;"></i>
+          Тип услуги
+        </div>
+        <div id="service-type-checkboxes" class="service-checkboxes"></div>
+        <input type="hidden" id="f-service-type">
+      </div>
+
+      <!-- ── СЕКЦИЯ 3: РАБОТЫ (суммы) ── -->
+      <div class="form-section">
+        <div class="form-section-title form-section-title--teal">
+          <i data-lucide="hammer" style="width:13px;height:13px;"></i>
+          Стоимость работ
+        </div>
         <div class="form-grid">
           <div class="form-group">
             <label class="form-label">🔩 Монтаж</label>
             <input class="form-input" type="number" id="f-mount" placeholder="0">
-          </div>
-          <div class="form-group">
-            <label class="form-label">🛠️ Тип услуги</label>
-            <div id="service-type-checkboxes" style="display:flex;flex-wrap:wrap;gap:10px;"></div>
-            <input type="hidden" id="f-service-type">
           </div>
           <div class="form-group">
             <label class="form-label">*️⃣ Молдинг (Резинка)</label>
@@ -494,123 +524,161 @@
             <label class="form-label">🚛 Доставка</label>
             <input class="form-input" type="number" id="f-delivery" placeholder="0">
           </div>
+
+          <!-- Итоговые поля -->
           <div class="form-group span-2">
-            <label class="form-label">👥 Менеджер</label>
-            <div id="f-author-checkboxes" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;"></div>
-            <input type="hidden" id="f-author">
+            <div class="order-totals-bar">
+              <div class="order-total-item order-total-item--glass">
+                <div class="order-total-label">💎 Продажа стекла</div>
+                <div class="order-total-value" id="display-total-glass">0 ₴</div>
+              </div>
+              <div class="order-total-divider">+</div>
+              <div class="order-total-item order-total-item--works">
+                <div class="order-total-label">🔧 Сумма работ</div>
+                <div class="order-total-value" id="display-total-works">0 ₴</div>
+              </div>
+              <div class="order-total-divider order-total-divider--eq">=</div>
+              <div class="order-total-item order-total-item--sum">
+                <div class="order-total-label">📌 Всего по заказу</div>
+                <div class="order-total-value order-total-value--big" id="display-total-all">0 ₴</div>
+              </div>
+            </div>
           </div>
+
+          <!-- Скрытое поле total (используется при сохранении) -->
+          <input type="hidden" id="f-total">
         </div>
       </div>
 
+      <!-- ── СЕКЦИЯ 4: МЕНЕДЖЕР ── -->
       <div class="form-section">
-        <div class="form-section-title">💸 Финансы</div>
-        <div class="form-grid col-3">
-          <div class="form-group">
-            <label class="form-label">Расчёт долга клиента</label>
-            <select class="form-select" id="f-payment-status">
-              <option value="">—</option>
-              <option>Оплачено</option>
-              <option>Не оплачено</option>
-              <option>Частично оплачено</option>
-            </select>
+        <div class="form-section-title form-section-title--amber">
+          <i data-lucide="users" style="width:13px;height:13px;"></i>
+          Менеджер
+        </div>
+        <div id="f-author-checkboxes" class="manager-checkboxes"></div>
+        <input type="hidden" id="f-author">
+      </div>
+
+      <!-- ── СЕКЦИЯ 5: ФИНАНСЫ (свёрнута по умолчанию) ── -->
+      <div class="form-section form-section--collapsible" id="finance-section">
+        <div class="form-section-title form-section-title--finance form-section-title--toggle"
+             onclick="toggleFinanceSection()">
+          <span style="display:flex;align-items:center;gap:6px;">
+            <i data-lucide="trending-up" style="width:13px;height:13px;"></i>
+            Финансы
+          </span>
+          <i data-lucide="chevron-down" id="finance-chevron" style="width:14px;height:14px;transition:transform 0.2s;"></i>
+        </div>
+        <div class="form-section-body" id="finance-section-body" style="display:none;">
+          <div class="form-grid col-3" style="margin-top:14px;">
+            <div class="form-group">
+              <label class="form-label">Расчёт долга клиента</label>
+              <select class="form-select" id="f-payment-status">
+                <option value="">—</option>
+                <option>Оплачено</option>
+                <option>Не оплачено</option>
+                <option>Частично оплачено</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Расчёт долга (сумма)</label>
+              <input class="form-input" type="number" id="f-debt" placeholder="0">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Дата расчёта долга</label>
+              <input class="form-input" type="date" id="f-debt-date">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Молдинг Автор (Підгонка)</label>
+              <select class="form-select" id="f-molding-author">
+                <option value="">— выбрать —</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">🤝 Партнер (постачальник)</label>
+              <select class="form-select" id="f-partner">
+                <option value="">— выбрать —</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">📦 Статус оплати постачальнику</label>
+              <select class="form-select" id="f-supplier-status">
+                <option value="">—</option>
+                <option>Оплачено</option>
+                <option>Не оплачено</option>
+                <option>Долг</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Сумма оплаты постачальнику</label>
+              <input class="form-input" type="number" id="f-check" placeholder="0">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Сумма покупки стекла</label>
+              <input class="form-input" type="number" id="f-purchase" placeholder="0" oninput="recalcMargin()">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Сумма продажи стекла</label>
+              <input class="form-input" type="number" id="f-income" placeholder="0" oninput="recalcMargin()">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Маржа с продажи стекла</label>
+              <input class="form-input" type="number" id="f-remainder" placeholder="0" readonly>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Внешний специалист (тонировка)</label>
+              <label class="checkbox" style="gap:8px;margin-top:4px;">
+                <input type="checkbox" id="f-toning-external" style="width:18px;height:18px;accent-color:#00e5a0;">
+                <span style="font-size:13px;">Не начислять Лёше 20%</span>
+              </label>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Дропшиппер</label>
+              <select class="form-select" id="f-dropshipper">
+                <option value="">— выбрать —</option>
+              </select>
+            </div>
+            <div class="form-group span-3">
+              <label class="form-label">Способ оплаты</label>
+              <select class="form-select" id="f-payment-method">
+                <option value="">— выбрать —</option>
+                <option>Наличные</option>
+                <option>ФОП</option>
+                <option>Карта 1</option>
+                <option>Карта 2</option>
+                <option>Карта 3</option>
+                <option>Карта 4</option>
+                <option>Карта 5</option>
+              </select>
+            </div>
           </div>
-          <div class="form-group">
-            <label class="form-label">Расчёт долга (сумма)</label>
-            <input class="form-input" type="number" id="f-debt" placeholder="0">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Дата расчёта долга</label>
-            <input class="form-input" type="date" id="f-debt-date">
-          </div>
-          <div class="form-group">
-            <label class="form-label">📌 Общая сумма работ</label>
-            <input class="form-input" type="number" id="f-total" placeholder="0">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Молдинг Автор (Підгонка)</label>
-            <select class="form-select" id="f-molding-author">
-              <option value="">— выбрать —</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">🤝 Партнер (постачальник)</label>
-            <select class="form-select" id="f-partner">
-              <option value="">— выбрать —</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">📦 Статус оплати постачальнику</label>
-            <select class="form-select" id="f-supplier-status">
-              <option value="">—</option>
-              <option>Оплачено</option>
-              <option>Не оплачено</option>
-              <option>Долг</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Сумма оплаты постачальнику</label>
-            <input class="form-input" type="number" id="f-check" placeholder="0">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Сумма покупки стекла</label>
-            <input class="form-input" type="number" id="f-purchase" placeholder="0" oninput="recalcMargin()">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Сумма продажи стекла</label>
-            <input class="form-input" type="number" id="f-income" placeholder="0" oninput="recalcMargin()">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Маржа с продажи стекла</label>
-            <input class="form-input" type="number" id="f-remainder" placeholder="0" readonly>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Внешний специалист (тонировка)</label>
-            <label class="checkbox" style="gap:8px;">
-              <input type="checkbox" id="f-toning-external" style="width:18px;height:18px;accent-color:#00e5a0;">
-              <span>Не начислять Лёше 20% за тонировку</span>
-            </label>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Дропшиппер</label>
-            <select class="form-select" id="f-dropshipper">
-              <option value="">— выбрать —</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Способ оплаты</label>
-            <select class="form-select" id="f-payment-method">
-              <option value="">— выбрать —</option>
-              <option>Наличные</option>
-              <option>ФОП</option>
-              <option>Карта 1</option>
-              <option>Карта 2</option>
-              <option>Карта 3</option>
-              <option>Карта 4</option>
-              <option>Карта 5</option>
-            </select>
-          </div>
-          <!-- скрытые поля для маржи/выплат -->
-          <input type="hidden" id="f-margin-total">
-          <input type="hidden" id="f-payout-dropshipper">
-          <input type="hidden" id="f-payout-manager-glass">
-          <input type="hidden" id="f-payout-resp-glass">
-          <input type="hidden" id="f-payout-lesha">
-          <input type="hidden" id="f-payout-roma">
-          <input type="hidden" id="f-payout-extra-resp">
-          <input type="hidden" id="f-payout-extra-assist">
-          <input type="hidden" id="f-payout-molding-resp">
-          <input type="hidden" id="f-payout-molding-assist">
         </div>
       </div>
 
     </div>
-    <div class="modal-footer">
+
+    <!-- STICKY FOOTER -->
+    <div class="modal-footer modal-footer--sticky">
       <button class="btn-secondary" onclick="closeOrderModal()">Отмена</button>
       <button class="btn-primary" id="order-save-btn" style="display:flex;align-items:center;gap:6px;" onclick="saveOrder()">
         <i data-lucide="save" style="width:14px;height:14px;"></i>
         Сохранить
       </button>
     </div>
+
+    <!-- скрытые поля для маржи/выплат -->
+    <input type="hidden" id="f-margin-total">
+    <input type="hidden" id="f-payout-dropshipper">
+    <input type="hidden" id="f-payout-manager-glass">
+    <input type="hidden" id="f-payout-resp-glass">
+    <input type="hidden" id="f-payout-lesha">
+    <input type="hidden" id="f-payout-roma">
+    <input type="hidden" id="f-payout-extra-resp">
+    <input type="hidden" id="f-payout-extra-assist">
+    <input type="hidden" id="f-payout-molding-resp">
+    <input type="hidden" id="f-payout-molding-assist">
+
   </div>
 </div>
 

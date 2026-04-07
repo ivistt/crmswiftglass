@@ -1505,3 +1505,214 @@ input[type="datetime-local"] {
 .client-avatar {
   display: none !important;
 }
+
+/* ===== ORDER MODAL — REDESIGN ===== */
+
+.modal-order { max-width: 660px; }
+
+/* Live-total в хедере */
+.modal-live-total {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.modal-live-chip {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 2px 10px;
+  border-radius: 20px;
+}
+.modal-live-chip-glass {
+  background: rgba(0,180,216,0.12);
+  color: #00b4d8;
+}
+.modal-live-chip-works {
+  background: rgba(0,229,160,0.12);
+  color: var(--accent);
+}
+.modal-live-total-sum {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--accent);
+  letter-spacing: -0.3px;
+}
+
+/* Цветные заголовки секций */
+.form-section-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.form-section-title--blue {
+  background: rgba(59,130,246,0.08);
+  color: #60a5fa;
+  border-left: 3px solid #3b82f6;
+}
+.form-section-title--teal {
+  background: rgba(0,229,160,0.07);
+  color: var(--accent);
+  border-left: 3px solid var(--accent);
+}
+.form-section-title--amber {
+  background: rgba(251,191,36,0.08);
+  color: #fbbf24;
+  border-left: 3px solid #f59e0b;
+}
+.form-section-title--finance {
+  background: rgba(139,92,246,0.08);
+  color: #a78bfa;
+  border-left: 3px solid #8b5cf6;
+}
+.form-section-title--toggle {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  user-select: none;
+  transition: opacity 0.15s;
+}
+.form-section-title--toggle:hover { opacity: 0.8; }
+
+/* Чекбоксы услуг */
+.service-checkboxes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.service-checkboxes label.checkbox {
+  border: 1px solid var(--border);
+  padding: 8px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: border-color 0.15s, background 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.service-checkboxes label.checkbox:hover {
+  border-color: var(--accent);
+  background: rgba(0,229,160,0.05);
+}
+.service-checkboxes label.checkbox:has(input:checked) {
+  border-color: var(--accent);
+  background: rgba(0,229,160,0.08);
+}
+
+/* Чекбоксы менеджера */
+.manager-checkboxes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.manager-checkboxes label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--surface2);
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  border: 1.5px solid transparent;
+  transition: border-color 0.15s, background 0.15s;
+}
+.manager-checkboxes label:hover { background: var(--card); }
+
+/* Итоги работ */
+.order-totals-bar {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  background: var(--surface2);
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  overflow: hidden;
+  padding: 0;
+}
+.order-total-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 14px 10px;
+  text-align: center;
+}
+.order-total-item--glass { border-right: 1px solid var(--border); }
+.order-total-item--works { border-right: 1px solid var(--border); }
+.order-total-item--sum {
+  background: rgba(0,229,160,0.06);
+  flex: 1.2;
+}
+.order-total-divider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  flex-shrink: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text3);
+  background: var(--surface2);
+}
+.order-total-divider--eq { color: var(--accent); }
+.order-total-label {
+  font-size: 11px;
+  color: var(--text3);
+  font-weight: 500;
+  margin-bottom: 4px;
+  white-space: nowrap;
+}
+.order-total-value {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--text);
+}
+.order-total-value--big {
+  font-size: 20px;
+  color: var(--accent);
+}
+
+/* In-work toggle */
+.inwork-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 10px 14px;
+  background: rgba(255,209,102,0.08);
+  border-radius: 10px;
+  border: 1px solid rgba(255,209,102,0.2);
+  transition: background 0.15s;
+}
+.inwork-toggle:hover { background: rgba(255,209,102,0.12); }
+.inwork-toggle:has(input:checked) {
+  background: rgba(255,209,102,0.14);
+  border-color: rgba(255,209,102,0.4);
+}
+.inwork-toggle-icon { font-size: 16px; }
+.inwork-toggle-label { color: var(--text); }
+.inwork-toggle-hint { font-size: 12px; font-weight: 400; color: var(--text3); margin-left: 4px; }
+
+/* Sticky footer */
+.modal-footer--sticky {
+  position: sticky;
+  bottom: 0;
+  background: var(--surface);
+  z-index: 2;
+}
+
+@media (max-width: 600px) {
+  .service-checkboxes,
+  .manager-checkboxes { grid-template-columns: 1fr; }
+  .order-totals-bar { flex-direction: column; }
+  .order-total-item--glass,
+  .order-total-item--works { border-right: none; border-bottom: 1px solid var(--border); }
+  .order-total-divider { display: none; }
+}
