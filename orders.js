@@ -37,7 +37,6 @@ function renderOrderCard(o) {
         <div style="display:flex;gap:8px;align-items:center;">
           ${o.isCancelled ? '<span class="status-badge" style="background:var(--red,#DC2626);color:#fff;">Отменен</span>' : ''}
           ${statusBadge(o.paymentStatus)}
-          ${mountBadge(o.mount)}
           ${canMark ? `
             <button
               class="btn-check-done ${o.workerDone ? 'done' : ''}"
@@ -56,7 +55,7 @@ function renderOrderCard(o) {
         <span class="order-meta-item">☎️ ${o.phone || '—'}</span>
         <span class="order-meta-item">🗓️ ${formatDate(o.date)}</span>
         <span class="order-meta-item">🚧 ${o.responsible || '—'}${o.assistant ? ' + ' + o.assistant : ''}</span>
-        ${o.total ? `<span class="order-meta-item" style="font-weight:700;color:var(--accent);">💰 ${Number(o.total).toLocaleString('ru')} ₴</span>` : ''}
+        ${((Number(o.total) || 0) + (Number(o.income) || 0) + (Number(o.delivery) || 0)) > 0 ? `<span class="order-meta-item" style="font-weight:700;color:var(--accent);">💰 ${((Number(o.total) || 0) + (Number(o.income) || 0) + (Number(o.delivery) || 0)).toLocaleString('ru')} ₴</span>` : ''}
       </div>
     </div>
   `;
@@ -268,9 +267,10 @@ function populateRefSelects() {
   const svcBox = document.getElementById('service-type-checkboxes');
   if (svcBox) {
     const cur = (document.getElementById('f-service-type')?.value || '').split(',').map(s => s.trim()).filter(Boolean);
-    svcBox.innerHTML = refServices.map(s => `
+    const validServices = refServices.filter(s => s.name.toLowerCase() !== 'калибровка');
+    svcBox.innerHTML = validServices.map(s => `
       <label class="checkbox">
-        <input type="checkbox" value="${s.name}" ${cur.includes(s.name) ? 'checked' : ''} onchange="syncServiceTypes()" style="accent-color:var(--accent);width:15px;height:15px;flex-shrink:0;">
+        <input type="checkbox" value="${s.name}" ${cur.includes(s.name) ? 'checked' : ''} onchange="syncServiceTypes()">
         ${s.name}
       </label>
     `).join('');
@@ -316,7 +316,7 @@ function populateRefSelects() {
   const ssSel = document.getElementById('f-supplier-status');
   if (ssSel) {
     const cur = ssSel.value;
-    const opts = ['Оплачено','Не оплачено','Долг'];
+    const opts = ['Оплачено','Не оплачено','Частично оплачено'];
     ssSel.innerHTML = '<option value="">—</option>' + opts.map(s => `<option value="${s}">${s}</option>`).join('');
     if (cur) ssSel.value = cur;
   }
@@ -347,49 +347,11 @@ function populateRefSelects() {
       applyAssistantForResponsible(respSel.value);
     };
   }
-
-  const authorSel = document.getElementById('f-author');
-  if (authorSel) {
-    const cur = authorSel.value;
-    authorSel.innerHTML = '<option value="">— выбрать —</option>' +
-      workers.map(w => `<option value="${w.name}">${w.name}</option>`).join('');
-    if (cur) authorSel.value = cur;
-  }
 }
-
-// Список вариантов менеджера (из скриншота)
-const MANAGER_OPTIONS = [
-  '📌 Подбор Саня Шепель',
-  '✅📄 Занёс',
-  '✅ Отгрузка Саня Шепель',
-  '💳 Безнал',
-  '📌 Подбор Макс',
-  '✅ Отгрузка Макс',
-  '💳 На оплату',
-  '✅ Отгрузка Рома',
-];
-
-function populateAuthorCheckboxes() {
-  const box = document.getElementById('f-author-checkboxes');
-  if (!box) return;
-  const cur = (document.getElementById('f-author')?.value || '').split(',').map(s => s.trim()).filter(Boolean);
-  box.innerHTML = MANAGER_OPTIONS.map(opt => `
-    <label style="border-color:${cur.includes(opt) ? 'var(--accent)' : 'transparent'};">
-      <input type="checkbox" value="${opt}" ${cur.includes(opt) ? 'checked' : ''}
-        onchange="syncAuthorField()" style="accent-color:var(--accent);width:15px;height:15px;flex-shrink:0;">
-      ${opt}
-    </label>
-  `).join('');
-}
-
-function syncAuthorField() {
-  const checked = [...document.querySelectorAll('#f-author-checkboxes input:checked')].map(el => el.value);
-  document.getElementById('f-author').value = checked.join(', ');
-  // обновить border чекбоксов
-  document.querySelectorAll('#f-author-checkboxes label').forEach(lbl => {
-    const cb = lbl.querySelector('input');
-    lbl.style.borderColor = cb.checked ? 'var(--accent)' : 'transparent';
-  });
+function syncConfiguration() {
+  const checked = [...document.querySelectorAll('#f-configuration-checkboxes input:checked')].map(el => el.value);
+  const hidden = document.getElementById('f-configuration');
+  if (hidden) hidden.value = checked.join(',');
 }
 
 // Клиенты — datalist
@@ -430,7 +392,6 @@ function openOrderModal(id) {
 
   populateRefSelects();
   populateClientDatalist();
-  populateAuthorCheckboxes();
 
   const cancelWrap = document.getElementById('cancel-toggle-wrap');
   if (cancelWrap) {
@@ -461,6 +422,7 @@ function openOrderModal(id) {
     clearOrderForm();
     setPriceFieldsLocked(false);
     document.getElementById('f-date').value = todayStr();
+    document.getElementById('f-time').value = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 
     // Если текущий пользователь — senior, автоподставляем его и его помощника
     if (currentRole === 'senior' && currentWorkerName) {
@@ -486,13 +448,20 @@ function openOrderModal(id) {
   // f-code теперь управляется через acFilter/acSelect (автокомплит)
 
   // Авторасчёт total из полей работ
-  ['f-mount','f-molding','f-extra-work','f-tatu','f-toning','f-delivery'].forEach(fid => {
+  ['f-mount','f-molding','f-extra-work','f-tatu','f-toning'].forEach(fid => {
     const el = document.getElementById(fid);
     if (!el) return;
     const newEl = el.cloneNode(true);
     el.parentNode.replaceChild(newEl, el);
-    newEl.addEventListener('input', recalcTotal);
+    newEl.addEventListener('input', () => recalcTotal('fromComponent'));
   });
+
+  const dEl = document.getElementById('f-delivery');
+  if (dEl) {
+    const newD = dEl.cloneNode(true);
+    dEl.parentNode.replaceChild(newD, dEl);
+    newD.addEventListener('input', () => recalcTotal('init'));
+  }
 
   // Автопересчёт финансов
   const totalEl = document.getElementById('f-total');
@@ -513,11 +482,11 @@ function openOrderModal(id) {
   const tonExtEl = document.getElementById('f-toning-external');
   if (tonExtEl) tonExtEl.addEventListener('change', () => { recalcFullMargins(); recalcTotal(); });
 
-  // Сворачиваем финансовый блок при открытии
+  // Разворачиваем финансовый блок при открытии
   const finBody = document.getElementById('finance-section-body');
   const finChevron = document.getElementById('finance-chevron');
-  if (finBody) finBody.style.display = 'none';
-  if (finChevron) finChevron.style.transform = '';
+  if (finBody) finBody.style.display = 'block';
+  if (finChevron) finChevron.style.transform = 'rotate(180deg)';
 
   // Прячем live-total пока нет данных
   const liveTotalEl = document.getElementById('modal-live-total');
@@ -551,14 +520,14 @@ function fillOrderForm(o) {
   set('f-tatu', o.tatu);
   set('f-toning', o.toning);
   set('f-delivery', o.delivery);
-  set('f-author', o.author);
+  set('f-warehouse', o.warehouse || '');
+  set('f-warehouse-code', o.warehouseCode || '');
+  set('f-configuration', o.configuration || '');
   set('f-manager', o.manager || '');
   set('f-check', o.check);
   set('f-debt', o.debt);
   set('f-debt-date', o.debtDate);
   set('f-total', o.total);
-  set('f-molding-author', o.moldingAuthor);
-  set('f-partner', o.partner);
   set('f-supplier-status', o.supplierStatus);
   set('f-purchase', o.purchase);
   set('f-income', o.income);
@@ -588,18 +557,20 @@ function fillOrderForm(o) {
   const cancelEl = document.getElementById('f-cancelled');
   if (cancelEl) cancelEl.checked = !!o.isCancelled;
   const asEl = document.getElementById('f-assistant');
-  if (asEl) asEl.value = o.assistant || '';
-  // перерисовать чекбоксы менеджера с текущим значением
-  populateAuthorCheckboxes();
+  // перерисовать чекбоксы комплектации
+  const confArr = (o.configuration || '').split(',');
+  document.querySelectorAll('#f-configuration-checkboxes input[type="checkbox"]').forEach(el => {
+    el.checked = confArr.includes(el.value);
+  });
 }
 
 function clearOrderForm() {
   const ids = [
     'f-date','f-time','f-responsible','f-client','f-phone','f-address','f-car','f-code',
     'f-notes','f-mount','f-service-type','f-molding',
-    'f-extra-work','f-tatu','f-toning','f-delivery','f-author',
+    'f-extra-work','f-tatu','f-toning','f-delivery','f-warehouse','f-warehouse-code','f-configuration',
     'f-payment-status','f-check','f-debt','f-debt-date','f-total',
-    'f-molding-author','f-partner','f-supplier-status','f-purchase','f-income',
+    'f-supplier-status','f-purchase','f-income',
     'f-remainder','f-payment-method','f-dropshipper','f-margin-total',
     'f-payout-dropshipper','f-payout-manager-glass','f-payout-resp-glass',
     'f-payout-lesha','f-payout-roma','f-payout-extra-resp','f-payout-extra-assist',
@@ -613,21 +584,18 @@ function clearOrderForm() {
   const tonExtEl = document.getElementById('f-toning-external');
   if (tonExtEl) tonExtEl.checked = false;
   document.querySelectorAll('#service-type-checkboxes input[type="checkbox"]').forEach(el => el.checked = false);
-  document.querySelectorAll('#f-author-checkboxes input[type="checkbox"]').forEach(el => {
-    el.checked = false;
-    const lbl = el.closest('label');
-    if (lbl) lbl.style.borderColor = 'transparent';
-  });
+  document.querySelectorAll('#f-configuration-checkboxes input[type="checkbox"]').forEach(el => el.checked = false);
 }
 
 function setPriceFieldsLocked(locked) {
-  const priceFields = ['f-total','f-check','f-debt','f-debt-date','f-payment-status','f-payment-method','f-purchase','f-income','f-partner','f-supplier-status'];
+  const priceFields = ['f-total','f-check','f-debt','f-debt-date','f-payment-status','f-payment-method','f-purchase','f-income','f-supplier-status'];
   priceFields.forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
     if (id === 'f-payment-status') return; // Now fully automated
     if (id === 'f-debt-date' && currentRole === 'senior') return;
     if (id === 'f-supplier-status' && currentRole === 'senior') return;
+    if (id === 'f-check' && currentRole === 'senior') return;
 
     const forceUnlock = (currentRole === 'owner' || currentRole === 'manager' || currentRole === 'extra');
     if (locked && !forceUnlock) {
@@ -656,9 +624,15 @@ function recalcMargin() {
   recalcTotal(); // обновляем итог стекла в шапке
 }
 
-function recalcTotal() {
-  const worksSum = ['f-mount','f-molding','f-extra-work','f-tatu','f-toning']
-    .reduce((s, id) => s + (Number(document.getElementById(id)?.value) || 0), 0);
+function recalcTotal(mode = 'init') {
+  let worksSum = 0;
+  if (mode === 'fromComponent') {
+    worksSum = ['f-mount','f-molding','f-extra-work','f-tatu','f-toning']
+      .reduce((s, id) => s + (Number(document.getElementById(id)?.value) || 0), 0);
+  } else {
+    // 'init', 'manualTotal' или любое другое (например, вызов без аргументов из других частей кода)
+    worksSum = Number(document.getElementById('f-total')?.value) || 0;
+  }
 
   // Сумма продажи стекла из финансового блока
   const glassSum = Number(document.getElementById('f-income')?.value) || 0;
@@ -666,24 +640,19 @@ function recalcTotal() {
   const deliverySum = Number(document.getElementById('f-delivery')?.value) || 0;
   const totalAll = worksSum + glassSum + deliverySum;
 
-  // Скрытое поле (для сохранения — только работы, как было)
+  // Скрытое поле (для сохранения — только работы, как было), или видимый инпут
   const totalEl = document.getElementById('f-total');
-  if (totalEl) totalEl.value = worksSum;
+  if (totalEl && mode === 'fromComponent') totalEl.value = worksSum;
 
-  // Обновляем визуальные итоги в секции работ
   const fmt = v => v.toLocaleString('ru') + ' \u20B4';
-  const dispGlass = document.getElementById('display-total-glass');
-  const dispWorks = document.getElementById('display-total-works');
-  const dispAll   = document.getElementById('display-total-all');
-  if (dispGlass) dispGlass.textContent = fmt(glassSum);
-  if (dispWorks) dispWorks.textContent = fmt(worksSum);
-  if (dispAll)   dispAll.textContent   = fmt(totalAll);
+  const glassPurchase = Number(document.getElementById('f-purchase')?.value) || 0;
 
   // Обновляем live-счётчик в хедере модала
   const liveTotal = document.getElementById('modal-live-total');
   const liveGlass = document.getElementById('modal-total-glass');
   const liveWorks = document.getElementById('modal-total-works');
   const liveAll   = document.getElementById('modal-total-all');
+  
   if (liveTotal) liveTotal.style.display = totalAll > 0 ? 'flex' : 'none';
   if (liveGlass) liveGlass.textContent = fmt(glassSum);
   if (liveWorks) liveWorks.textContent = fmt(worksSum);
@@ -700,6 +669,22 @@ function recalcTotal() {
       paymentStatusSel.value = 'Оплачено';
     } else {
       paymentStatusSel.value = 'Частично оплачено';
+    }
+  }
+
+  // Авторасчет статуса поставщика
+  const checkInput = document.getElementById('f-check');
+  const supplierStatusSel = document.getElementById('f-supplier-status');
+  if (checkInput && supplierStatusSel) {
+    const checkVal = Number(checkInput.value) || 0;
+    if (checkVal === 0) {
+      supplierStatusSel.value = 'Не оплачено';
+    } else if (checkVal >= glassPurchase && glassPurchase > 0) {
+      supplierStatusSel.value = 'Оплачено';
+    } else if (checkVal >= 1 && checkVal < glassPurchase) {
+      supplierStatusSel.value = 'Частично оплачено';
+    } else {
+      supplierStatusSel.value = 'Не оплачено';
     }
   }
 
@@ -735,14 +720,14 @@ async function saveOrder() {
     tatu:            getN('f-tatu'),
     toning:          getN('f-toning'),
     delivery:        getN('f-delivery'),
-    author:          get('f-author'),
+    warehouse:       get('f-warehouse'),
+    warehouseCode:   get('f-warehouse-code'),
+    configuration:   get('f-configuration'),
     paymentStatus:   get('f-payment-status'),
     check:           getN('f-check'),
     debt:            getN('f-debt'),
     debtDate:        get('f-debt-date'),
     total:           getN('f-total'),
-    moldingAuthor:   get('f-molding-author'),
-    partner:         get('f-partner'),
     supplierStatus:  get('f-supplier-status'),
     purchase:        getN('f-purchase'),
     income:          getN('f-income'),
@@ -782,6 +767,10 @@ async function saveOrder() {
   const saveBtn = document.getElementById('order-save-btn');
   if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '⏳ Сохранение...'; }
 
+  const oldCheck = Number(existingOrder ? existingOrder.check : 0) || 0;
+  const newCheck = Number(data.check) || 0;
+  const checkDiff = newCheck - oldCheck;
+
   try {
     if (isNew) {
       const saved = await sbInsertOrder(data);
@@ -793,6 +782,34 @@ async function saveOrder() {
       if (idx !== -1) orders[idx] = saved;
       showToast('Запись обновлена ✓');
     }
+
+    // Автоматическое списание/возврат средств за оплату стекла из кассы ответственного
+    if (currentRole === 'senior' && checkDiff !== 0) {
+      const amount = -checkDiff; // если увеличилась сумма поставщику, баланс кассы уменьшается
+      const typeStr = checkDiff > 0 ? 'Списание' : 'Возврат';
+      const fDate = data.date ? formatDate(data.date) : '—';
+      const fTime = data.time || '—';
+      const fCar = data.car || '—';
+      const targetWorker = data.responsible || currentWorkerName;
+      
+      const cashComment = `${typeStr} за стекло ${data.id}, ${fDate} ${fTime}, авто: ${fCar}, склад: ${data.warehouse || '—'}`;
+
+      await sbInsertCashEntry({
+        worker_name: targetWorker,
+        amount: amount,
+        comment: cashComment,
+      });
+      if (typeof workerCashLog !== 'undefined' && targetWorker === currentWorkerName) {
+        workerCashLog.unshift({
+          worker_name: targetWorker,
+          amount: amount,
+          comment: cashComment,
+          created_at: new Date().toISOString()
+        });
+      }
+      showToast(`${checkDiff > 0 ? 'Списано' : 'Возвращено'} ${Math.abs(checkDiff)} ₴ в кассу мастера ${targetWorker}`);
+    }
+
     closeOrderModal();
     if (currentMonthFilter) {
       renderOrdersForMonth(currentMonthFilter);
@@ -833,9 +850,9 @@ function mountBadge(mount) {
 function field(label, value, cls = '') {
   const empty = !value || value === '0' || value === '' || value === 0;
   return `
-    <div class="detail-field">
-      <label>${label}</label>
-      <div class="field-value ${cls} ${empty ? 'empty' : ''}">${empty ? '—' : value}</div>
+    <div class="detail-item">
+      <div class="detail-item-label">${label}</div>
+      <div class="detail-item-value ${cls}" ${empty ? 'style="color:var(--text3);font-weight:400;"' : ''}>${empty ? '—' : value}</div>
     </div>
   `;
 }
@@ -859,6 +876,51 @@ const MONTH_NAMES_RU = [
   'Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'
 ];
 
+function renderYears() {
+  const map = {};
+  for (const o of orders) {
+    if (!o.date) continue;
+    const year = o.date.slice(0, 4);
+    if (!map[year]) map[year] = [];
+    map[year].push(o);
+  }
+
+  const keys = Object.keys(map).sort((a, b) => b.localeCompare(a));
+  const container = document.getElementById('years-list');
+
+  if (!keys.length) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state-icon">📅</div>
+        <h3>Записей не найдено</h3>
+      </div>`;
+    return;
+  }
+
+  container.innerHTML = keys.map(year => {
+    const list = map[year];
+    const displayList = (currentRole === 'owner' || currentRole === 'manager') ? list : list.filter(o => o.inWork);
+    const totalSum = list.reduce((s, o) => s + ((Number(o.total) || 0) + (Number(o.income) || 0) + (Number(o.delivery) || 0)), 0);
+    return `
+      <div class="home-card" style="display:flex;flex-direction:column;min-height:110px;" onclick="openYear('${year}')">
+        <div style="font-size:12px;color:var(--text3);font-weight:600;letter-spacing:0.04em;">${displayList.length} зап.${canViewFinance() ? ` &middot; ${totalSum.toLocaleString('ru')} &#x20B4;` : ''}</div>
+        <div style="margin-top:auto;padding-top:12px;">
+          <div style="font-size:26px;font-weight:800;line-height:1.1;">${year} год</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function openYear(year) {
+  window.currentYearFilter = year;
+  const titleEl = document.getElementById('months-page-title');
+  if (titleEl) titleEl.textContent = `Записи за ${year} год`;
+  renderMonths();
+  setupMonthsActions();
+  showScreen('months');
+}
+
 function renderMonths() {
   const search = (document.getElementById('filter-month-search')?.value || '').toLowerCase();
   const filterVal = document.getElementById('filter-month')?.value || '';
@@ -866,6 +928,9 @@ function renderMonths() {
   const map = {};
   for (const o of orders) {
     if (!o.date) continue;
+    const year = o.date.slice(0, 4);
+    if (window.currentYearFilter && year !== window.currentYearFilter) continue;
+    
     const ym = o.date.slice(0, 7);
     if (filterVal && ym !== filterVal) continue;
     if (search) {
@@ -897,7 +962,7 @@ function renderMonths() {
     const monthName = MONTH_NAMES_RU[parseInt(month) - 1];
     const list = map[ym];
     const displayList = (currentRole === 'owner' || currentRole === 'manager') ? list : list.filter(o => o.inWork);
-    const totalSum = list.reduce((s, o) => s + (Number(o.total) || 0), 0);
+    const totalSum = list.reduce((s, o) => s + ((Number(o.total) || 0) + (Number(o.income) || 0) + (Number(o.delivery) || 0)), 0);
     return `
       <div class="home-card" style="display:flex;flex-direction:column;min-height:110px;" onclick="openMonthOrders('${ym}')">
         <div style="font-size:12px;color:var(--text3);font-weight:600;letter-spacing:0.04em;">${displayList.length} зап.${canViewFinance() ? ` &middot; ${totalSum.toLocaleString('ru')} &#x20B4;` : ''}</div>
@@ -930,16 +995,20 @@ function renderOrdersForMonth(ym) {
 
   if (currentRole === 'owner' || currentRole === 'manager') {
     if (currentOrderTab === 'planner') {
-      list = list.filter(o => o.inWork && !o.workerDone);
+      list = list.filter(o => o.inWork && !o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'selection') {
-      list = list.filter(o => !o.inWork && !o.workerDone);
+      list = list.filter(o => !o.inWork && !o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'done') {
-      list = list.filter(o => o.workerDone);
+      list = list.filter(o => o.workerDone && !o.isCancelled);
+    } else if (currentOrderTab === 'debt') {
+      list = list.filter(o => !o.isCancelled && (o.paymentStatus === 'Не оплачено' || o.paymentStatus === 'Частично оплачено'));
+    } else if (currentOrderTab === 'cancelled') {
+      list = list.filter(o => o.isCancelled);
     }
   } else {
     // Специалисты: только свои заказы
     list = list.filter(o =>
-      o.responsible === currentWorkerName || o.assistant === currentWorkerName
+      (o.responsible === currentWorkerName || o.assistant === currentWorkerName) && !o.isCancelled
     );
     if (currentWorkerTab === 'relevant') {
       list = list.filter(o => o.inWork && !o.workerDone);

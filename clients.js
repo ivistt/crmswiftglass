@@ -1,4 +1,4 @@
-﻿// ============================================================
+// ============================================================
 // CLIENTS.JS — экран клиентов и детальный экран клиента
 // ============================================================
 
@@ -68,13 +68,12 @@ function openClientDetail(key) {
               </div>
               <div style="display:flex;gap:8px;">
                 ${statusBadge(o.paymentStatus)}
-                ${mountBadge(o.mount)}
               </div>
             </div>
             <div class="order-card-meta">
               <span class="order-meta-item">🗓️ ${formatDate(o.date)}</span>
               <span class="order-meta-item">🚧 ${o.responsible || '—'}</span>
-              ${o.total ? `<span class="order-meta-item" style="font-weight:700;color:var(--accent);">💰 ${Number(o.total).toLocaleString('ru')} ₴</span>` : ''}
+              ${((Number(o.total) || 0) + (Number(o.income) || 0) + (Number(o.delivery) || 0)) > 0 ? `<span class="order-meta-item" style="font-weight:700;color:var(--accent);">💰 ${((Number(o.total) || 0) + (Number(o.income) || 0) + (Number(o.delivery) || 0)).toLocaleString('ru')} ₴</span>` : ''}
             </div>
           </div>
         `).join('')}

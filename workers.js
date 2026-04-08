@@ -445,7 +445,7 @@ function openAddProblemModal(workerName, callback) {
   document.getElementById('pm-desc').value    = '';
   document.getElementById('pm-order').value   = '';
   document.getElementById('pm-partner').value = '';
-  document.getElementById('pm-date').value    = new Date().toISOString().slice(0, 10);
+  document.getElementById('pm-date').value    = getLocalDateString();
 
   modal.classList.add('active');
   initIcons();
@@ -577,7 +577,7 @@ function _renderWorkerCashModal() {
     return;
   }
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getLocalDateString();
   const todayLog   = log.filter(e => _cashEntryDate(e) === today);
   const archiveLog = log.filter(e => _cashEntryDate(e) !== today);
 

@@ -1,4 +1,4 @@
-﻿// ============================================================
+// ============================================================
 // APP.JS — навигация, главный экран
 // ============================================================
 
@@ -11,7 +11,13 @@ if (typeof carDirectory === 'undefined') {
 
 async function initApp() {
   const minDelay = new Promise(r => setTimeout(r, 2000));
-  await Promise.all([loadOrders(), loadWorkers(), loadRefData(), loadWorkerSalaries(), minDelay]);
+  const tasks = [loadOrders(), loadWorkers(), loadRefData(), loadWorkerSalaries(), minDelay];
+  if (currentRole === 'owner') {
+    tasks.push((async () => {
+      try { window.allCashLog = await sbFetchAllCashLog(); } catch(e) { window.allCashLog = []; }
+    })());
+  }
+  await Promise.all(tasks);
   updateNavbarVisibility();
   if (currentRole === 'owner') {
     renderHome();
@@ -107,6 +113,7 @@ function showScreen(name) {
 
   const crumbMap = {
     home: null,
+    years: 'Записи по годам',
     months: 'Записи',
     orders: 'Записи',
     clients: 'Клиенты',
@@ -116,6 +123,8 @@ function showScreen(name) {
     'order-detail': 'Детали заказа',
     'client-detail': 'Детали клиента',
     'car-directory': 'Справочник авто',
+    warehouses: 'Склады (Долги)',
+    'warehouse-detail': 'Детали склада',
   };
   const crumb = document.getElementById('breadcrumb');
   const crumbText = document.getElementById('breadcrumb-text');
@@ -204,9 +213,38 @@ function renderHome() {
         <div class="home-card-count" style="font-size:22px;">${totalSum.toLocaleString('ru')} ₴</div>
       </div>
     `;
+
+    const debtOrders = orders.filter(o => !o.isCancelled && (o.supplierStatus === 'Не оплачено' || o.supplierStatus === 'Частично оплачено'));
+    const debtSum = debtOrders.reduce((sum, o) => {
+      const debt = (Number(o.purchase) || 0) - (Number(o.check) || 0);
+      return sum + (debt > 0 ? debt : 0);
+    }, 0);
+
+    container.innerHTML += `
+      <div class="home-card" onclick="openWarehousesScreen()">
+        <div class="home-card-icon-wrap home-card-icon-dim">
+          <i data-lucide="package" style="width:22px;height:22px;"></i>
+        </div>
+        <h3>Склады</h3>
+        <p>Долги поставщикам</p>
+        <div class="home-card-count" style="font-size:20px; color: var(--red);">${debtSum.toLocaleString('ru')} ₴</div>
+      </div>
+    `;
   }
 
   if (currentRole === 'owner') {
+    const totalCash = (window.allCashLog || []).reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+    container.innerHTML += `
+      <div class="home-card">
+        <div class="home-card-icon-wrap home-card-icon-dim">
+          <i data-lucide="wallet" style="width:22px;height:22px;"></i>
+        </div>
+        <h3>Касса</h3>
+        <p>Сумма на руках</p>
+        <div class="home-card-count" style="font-size:22px; color: var(--accent);">${totalCash.toLocaleString('ru')} ₴</div>
+      </div>
+    `;
+
     container.innerHTML += `
       <div class="home-card" onclick="openCarDirectoryScreen()">
         <div class="home-card-icon-wrap home-card-icon-dim">
@@ -224,11 +262,24 @@ function renderHome() {
 
 // --- ОТКРЫТИЕ РАЗДЕЛОВ ---
 function openOrdersScreen() {
+  window.currentYearFilter = null;
   currentMonthFilter = null;
   initOrderTabs();
-  renderMonths();
-  setupMonthsActions();
-  showScreen('months');
+  if (typeof renderYears === 'function') renderYears();
+  setupYearsActions();
+  showScreen('years');
+}
+
+function setupYearsActions() {
+  const el = document.getElementById('years-actions');
+  if (el) {
+    if (canCreateOrder()) {
+      el.innerHTML = `<button class="btn-primary" style="display:flex;align-items:center;gap:6px;" onclick="openOrderModal(null)"><i data-lucide="plus" style="width:14px;height:14px;"></i> Добавить запись</button>`;
+      initIcons();
+    } else {
+      el.innerHTML = '';
+    }
+  }
 }
 
 function setupMonthsActions() {

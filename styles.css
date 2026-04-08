@@ -1,4 +1,4 @@
-﻿/* ===== CSS VARIABLES ===== */
+/* ===== CSS VARIABLES ===== */
 :root {
   --bg: #0a0a0a;
   --bg2: #0f0f0f;
@@ -610,10 +610,10 @@ body {
 
 .order-id {
   font-size: 10px;
-  font-weight: 700;
-  color: var(--text3);
+  font-weight: 800;
+  color: #000;
   font-family: 'JetBrains Mono', monospace;
-  background: var(--surface3);
+  background: var(--accent);
   padding: 2px 7px;
   border-radius: 5px;
 }
@@ -1579,29 +1579,67 @@ input[type="datetime-local"] {
 
 /* Чекбоксы услуг */
 .service-checkboxes {
-  display: grid;
-  grid-template-columns: 1fr;
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 .service-checkboxes label.checkbox {
   border: 1px solid var(--border);
-  padding: 8px 12px;
-  border-radius: 10px;
+  padding: 6px 14px;
+  border-radius: 100px;
   cursor: pointer;
   font-size: 13px;
-  font-weight: 500;
-  transition: border-color 0.15s, background 0.15s;
-  display: flex;
+  font-weight: 600;
+  color: var(--text2);
+  transition: all 0.2s;
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 .service-checkboxes label.checkbox:hover {
   border-color: var(--accent);
-  background: rgba(0,229,160,0.05);
+  color: var(--text);
+  background: var(--surface2);
 }
 .service-checkboxes label.checkbox:has(input:checked) {
   border-color: var(--accent);
-  background: rgba(0,229,160,0.08);
+  background: var(--accent);
+  color: #000;
+}
+.service-checkboxes label.checkbox input {
+  display: none;
+}
+
+/* Чекбоксы комплектации (капсулы) */
+#f-configuration-checkboxes label.checkbox {
+  border: 1px solid var(--border);
+  padding: 6px 14px;
+  border-radius: 100px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text2);
+  transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  background: var(--surface);
+  margin: 0; 
+}
+#f-configuration-checkboxes label.checkbox:hover {
+  border-color: var(--accent);
+  color: var(--text);
+  background: var(--surface2);
+}
+#f-configuration-checkboxes label.checkbox:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #000;
+}
+#f-configuration-checkboxes label.checkbox input {
+  display: none;
 }
 
 /* Чекбоксы менеджера */

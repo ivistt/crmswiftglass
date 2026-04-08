@@ -59,20 +59,11 @@ function renderProfile() {
     return;
   }
 
-  const _now = new Date();
-  const today = _now.getFullYear() + '-'
-    + String(_now.getMonth() + 1).padStart(2, '0') + '-'
-    + String(_now.getDate()).padStart(2, '0');
+  const today = getLocalDateString();
   const currentYear  = today.slice(0, 4);
   const currentMonth = today.slice(0, 7);
 
-  const monthTotal = workerSalaries
-    .filter(s => s.date.startsWith(currentMonth))
-    .reduce((sum, s) => sum + Number(s.amount), 0);
-
-  const yearTotal = workerSalaries
-    .filter(s => s.date.startsWith(currentYear))
-    .reduce((sum, s) => sum + Number(s.amount), 0);
+  const accTotal = workerSalaries.reduce((sum, s) => sum + Number(s.amount), 0);
 
   const todayAmount = workerSalaries
     .filter(s => s.date === today)
@@ -151,10 +142,9 @@ function renderProfile() {
     + '</div>'
 
     + '<div class="profile-summary">'
-    + '<div class="profile-summary-card"><div class="profile-summary-label">За этот месяц</div>'
-    + '<div class="profile-summary-value">' + monthTotal.toLocaleString('ru') + ' \u20B4</div></div>'
-    + '<div class="profile-summary-card"><div class="profile-summary-label">За этот год</div>'
-    + '<div class="profile-summary-value">' + yearTotal.toLocaleString('ru') + ' \u20B4</div></div>'
+    + '<div class="profile-summary-card" style="flex:1;"><div class="profile-summary-label" style="text-align:left;">Накопления</div>'
+    + '<div class="profile-summary-value" style="text-align:left;">' + accTotal.toLocaleString('ru') + ' \u20B4</div></div>'
+    + '<button class="btn-primary" style="padding:0 24px; border-radius:14px; font-weight:800;" onclick="withdrawSalary()" ' + (accTotal <= 0 ? 'disabled' : '') + '>Снять ЗП</button>'
     + '</div>'
 
     + cashHtml
@@ -204,7 +194,6 @@ function renderCashSection(balance, today) {
     + '</div>'
     + '<div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">'
     + '<button class="btn-secondary" style="font-size:12px;padding:6px 10px;" onclick="openCashEntryModal()">+ Запись</button>'
-    + '<button class="btn-secondary" style="font-size:12px;padding:6px 10px;color:#ef4444;border-color:#ef4444;" onclick="submitCash()">Сдать кассу</button>'
     + '</div>'
     + '</div>'
 
@@ -480,29 +469,104 @@ async function saveCashEntry() {
   }
 }
 
-// ── СДАТЬ КАССУ ──────────────────────────────────────────────
+// ── СНЯТЬ ЗАРПЛАТУ ───────────────────────────────────────────
 
-async function submitCash() {
-  const balance = calcCashBalance(workerCashLog);
-  if (balance === 0) {
-    showToast('Касса уже пустая', 'error');
+async function withdrawSalary() {
+  const accTotal = workerSalaries.reduce((sum, s) => sum + Number(s.amount), 0);
+  if (accTotal <= 0) {
+    showToast('Нет накоплений для снятия', 'error');
     return;
   }
-  if (!confirm(`Сдать кассу? Текущий баланс ${balance.toLocaleString('ru')} ₴ будет обнулён.`)) return;
 
-  try {
-    const entry = await sbInsertCashEntry({
-      worker_name: currentWorkerName,
-      amount: -balance,
-      comment: 'Сдача кассы',
-    });
-    workerCashLog.unshift(entry);
-    renderProfile();
-    showToast('Касса сдана ✓');
-  } catch (e) {
-    showToast('Ошибка: ' + e.message, 'error');
+  if (currentRole === 'senior') {
+    if (!confirm(`Снять ЗП на сумму ${accTotal.toLocaleString('ru')} ₴ из вашей кассы?`)) return;
+    await performSalaryWithdrawal(currentWorkerName, currentWorkerName, accTotal);
+  } else {
+    // Для помощника открываем модалку выбора старшего
+    showSeniorSelectionModal(accTotal);
   }
 }
+
+function showSeniorSelectionModal(amount) {
+  let modal = document.getElementById('salary-senior-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'salary-senior-modal';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+
+  // Собираем старших специалистов
+  const seniors = (window.workers || []).filter(w => w.role === 'senior' && w.name !== currentWorkerName);
+  let optionsHtml = seniors.map(s => `<option value="${s.name}">${s.name}</option>`).join('');
+  if (!optionsHtml) optionsHtml = '<option value="">Нет старших в штате</option>';
+
+  modal.innerHTML = `
+    <div class="modal" style="max-width:320px;">
+      <div class="modal-header">
+        <div class="modal-title">Снятие ЗП: ${amount} ₴</div>
+        <button class="modal-close" onclick="document.getElementById('salary-senior-modal').classList.remove('active')"><i data-lucide="x" style="width:16px;height:16px;"></i></button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label" style="font-size:12px;margin-bottom:8px;">Из кассы какого старшего списать деньги?</label>
+          <select class="form-select" id="salary-senior-select">${optionsHtml}</select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-primary" style="width:100%;" onclick="confirmJuniorWithdrawal(${amount})">Подтвердить снятие</button>
+      </div>
+    </div>
+  `;
+  modal.classList.add('active');
+  initIcons();
+}
+
+window.confirmJuniorWithdrawal = async function(amount) {
+  const select = document.getElementById('salary-senior-select');
+  if (!select || !select.value) {
+    showToast('Выберите старшего специалиста', 'error');
+    return;
+  }
+  const seniorName = select.value;
+  await performSalaryWithdrawal(currentWorkerName, seniorName, amount);
+  const modal = document.getElementById('salary-senior-modal');
+  if (modal) modal.classList.remove('active');
+}
+
+async function performSalaryWithdrawal(recipient, sourceSenior, amount) {
+  try {
+    const today = getLocalDateString();
+    
+    // 1. Снимаем сумму из кассы старшего (sourceSenior)
+    const cashEntry = await sbInsertCashEntry({
+      worker_name: sourceSenior,
+      amount: -amount,
+      comment: recipient === sourceSenior ? 'Снятие ЗП' : `Снятие ЗП - ${recipient}`
+    });
+    
+    // 2. Добавляем отрицательную запись в зарплату получателя (recipient)
+    const salaryEntry = await sbInsertWorkerSalary({
+      worker_name: recipient,
+      amount: -amount,
+      date: today,
+      order_id: 'Выплата'
+    });
+    
+    if (recipient === currentWorkerName) {
+      workerSalaries.unshift(salaryEntry);
+    }
+    if (sourceSenior === currentWorkerName && typeof workerCashLog !== 'undefined') {
+      workerCashLog.unshift(cashEntry);
+    }
+    
+    renderProfile();
+    showToast('Зарплата успешно снята ✓');
+  } catch (e) {
+    showToast('Ошибка при снятии ЗП: ' + e.message, 'error');
+  }
+}
+
 
 // ── АВТОЗАЧИСЛЕНИЕ В КАССУ ПРИ ВЫПОЛНЕНИИ ЗАКАЗА ─────────────
 // Вызывается из orders.js после toggleWorkerDone
@@ -527,6 +591,14 @@ async function addCashFromOrder(order) {
 }
 
 // ── УТИЛИТЫ ──────────────────────────────────────────────────
+
+// Возвращает дату по локальному времени (не UTC!) в формате YYYY-MM-DD
+function getLocalDateString() {
+  const d = new Date();
+  return d.getFullYear() + '-'
+    + String(d.getMonth() + 1).padStart(2, '0') + '-'
+    + String(d.getDate()).padStart(2, '0');
+}
 
 function entries_count(dayMap) {
   return Object.values(dayMap).reduce((s, arr) => s + arr.length, 0);
