@@ -38,10 +38,18 @@ function renderWorkers() {
           <div class="worker-order-count">📋 ${orderCount} заказов</div>
         </div>
         ${currentRole === 'owner' ? `
-          <button class="btn-edit-worker" onclick="openWorkerEditModal('${w.id}')" title="Редактировать">
-            <i data-lucide="pencil" style="width:14px;height:14px;"></i>
-            <span>Edit</span>
-          </button>
+          <div style="display:flex;gap:8px;align-items:center;">
+            ${w.systemRole === 'senior' ? `
+              <button class="btn-secondary" style="font-size:12px;padding:6px 10px;display:flex;align-items:center;gap:4px;"
+                onclick="openWorkerCashModal('${escapeAttr(w.name)}')">
+                <i data-lucide="wallet" style="width:13px;height:13px;"></i> Касса
+              </button>
+            ` : ''}
+            <button class="btn-edit-worker" onclick="openWorkerEditModal('${w.id}')" title="Редактировать">
+              <i data-lucide="pencil" style="width:14px;height:14px;"></i>
+              <span>Edit</span>
+            </button>
+          </div>
         ` : ''}
       </div>
     `;
@@ -501,4 +509,113 @@ async function deleteWorkerProblem(problemId, workerId) {
   } catch (e) {
     showToast('Ошибка: ' + e.message, 'error');
   }
+}
+
+// ── МОДАЛ КАССЫ СОТРУДНИКА (для owner) ───────────────────────
+
+let _cashModalWorkerName = null;
+let _ownerCashLog = [];
+
+async function openWorkerCashModal(workerName) {
+  if (currentRole !== 'owner') return;
+  _cashModalWorkerName = workerName;
+
+  let modal = document.getElementById('worker-cash-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'worker-cash-modal';
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+      <div class="modal" style="max-width:480px;max-height:85vh;display:flex;flex-direction:column;">
+        <div class="modal-header" style="flex-shrink:0;">
+          <div>
+            <div class="modal-title" id="wcm-title">Касса</div>
+            <div id="wcm-balance" style="font-size:22px;font-weight:800;margin-top:4px;"></div>
+          </div>
+          <button class="modal-close" onclick="closeWorkerCashModal()">
+            <i data-lucide="x" style="width:16px;height:16px;"></i>
+          </button>
+        </div>
+        <div class="modal-body" id="wcm-body" style="overflow-y:auto;flex:1;">
+          <div style="text-align:center;color:var(--text3);padding:24px;">Загрузка...</div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+  }
+
+  document.getElementById('wcm-title').textContent = `Касса — ${workerName}`;
+  document.getElementById('wcm-balance').textContent = '...';
+  document.getElementById('wcm-body').innerHTML = '<div style="text-align:center;color:var(--text3);padding:24px;">Загрузка...</div>';
+  modal.classList.add('active');
+  initIcons();
+
+  try {
+    _ownerCashLog = await sbFetchCashLog(workerName);
+    _renderWorkerCashModal();
+  } catch (e) {
+    document.getElementById('wcm-body').innerHTML =
+      `<div style="color:#ef4444;padding:16px;">Ошибка: ${e.message}</div>`;
+  }
+}
+
+function _renderWorkerCashModal() {
+  const log = _ownerCashLog || [];
+  const balance = log.reduce((s, e) => s + Number(e.amount), 0);
+
+  const balEl = document.getElementById('wcm-balance');
+  if (balEl) {
+    balEl.textContent = balance.toLocaleString('ru') + ' ₴';
+    balEl.style.color = balance >= 0 ? 'var(--accent)' : '#ef4444';
+  }
+
+  const body = document.getElementById('wcm-body');
+  if (!body) return;
+
+  if (!log.length) {
+    body.innerHTML = '<div style="text-align:center;color:var(--text3);font-size:13px;padding:24px;">Записей нет</div>';
+    return;
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const todayLog   = log.filter(e => _cashEntryDate(e) === today);
+  const archiveLog = log.filter(e => _cashEntryDate(e) !== today);
+
+  const todayBalance = todayLog.reduce((s, e) => s + Number(e.amount), 0);
+  const todayColor   = todayBalance >= 0 ? 'var(--accent)' : '#ef4444';
+
+  const todayRowsHtml = todayLog.length
+    ? '<div style="background:var(--surface2);border-radius:10px;padding:0 12px;">'
+      + todayLog.map(e => _cashEntryRow(e)).join('')
+      + '</div>'
+    : '<div style="text-align:center;color:var(--text3);font-size:13px;padding:10px 0;">Сегодня записей нет</div>';
+
+  const archiveHtml = archiveLog.length
+    ? _buildCashArchive(archiveLog)
+    : '<div style="text-align:center;color:var(--text3);font-size:13px;padding:10px 0;">Архив пуст</div>';
+
+  body.innerHTML = ''
+    // Сегодня
+    + '<div style="margin-bottom:16px;">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">'
+    + '<div style="font-size:12px;font-weight:700;color:var(--text3);letter-spacing:0.04em;">📅 СЕГОДНЯ</div>'
+    + '<div style="font-size:15px;font-weight:800;color:' + todayColor + ';">'
+    + (todayBalance >= 0 ? '+' : '') + todayBalance.toLocaleString('ru') + ' ₴</div>'
+    + '</div>'
+    + todayRowsHtml
+    + '</div>'
+    // Архив
+    + '<div>'
+    + '<div style="font-size:12px;font-weight:700;color:var(--text3);letter-spacing:0.04em;margin-bottom:8px;">🗂 АРХИВ</div>'
+    + archiveHtml
+    + '</div>';
+
+  initIcons();
+}
+
+function closeWorkerCashModal() {
+  const modal = document.getElementById('worker-cash-modal');
+  if (modal) modal.classList.remove('active');
+  _cashModalWorkerName = null;
+  _ownerCashLog = [];
 }

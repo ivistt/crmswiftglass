@@ -443,17 +443,13 @@
           Основная информация
         </div>
         <div class="form-grid col-1">
-          <div class="form-group" style="display:flex; flex-wrap:wrap; gap:12px;">
-            <label class="inwork-toggle">
-              <input type="checkbox" id="f-in-work" style="width:18px;height:18px;accent-color:#ffd166;">
-              <span class="inwork-toggle-icon">🔨</span>
-              <span class="inwork-toggle-label" style="margin-right:0;">В работу</span>
-            </label>
-            <label class="inwork-toggle" id="cancel-toggle-wrap" style="background:var(--surface2);">
-              <input type="checkbox" id="f-cancelled" style="width:18px;height:18px;accent-color:#ef4444;">
-              <span class="inwork-toggle-icon">❌</span>
-              <span class="inwork-toggle-label">Отменен</span>
-            </label>
+          <div class="form-group" id="cancel-toggle-wrap">
+            <label class="form-label">📌 Статус записи</label>
+            <select class="form-select" id="f-order-status" style="width:100%;">
+              <option value="">📋 Подборка</option>
+              <option value="inWork">🔨 В работу (Планёрка)</option>
+              <option value="cancelled">❌ Отменен</option>
+            </select>
           </div>
           <div class="form-group">
             <label class="form-label">🗓️ Дата</label>
@@ -626,7 +622,7 @@
               <label class="form-label">Способ оплаты</label>
               <select class="form-select" id="f-payment-method">
                 <option value="">— выбрать —</option>
-                <option>Наличные</option>
+                <option>Наличка</option>
                 <option>ФОП</option>
                 <option>Карта 1</option>
                 <option>Карта 2</option>

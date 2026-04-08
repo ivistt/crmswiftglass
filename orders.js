@@ -794,6 +794,11 @@ async function saveOrder() {
       showToast('Запись обновлена ✓');
     }
     closeOrderModal();
+    if (currentMonthFilter) {
+      renderOrdersForMonth(currentMonthFilter);
+    } else {
+      renderMonths();
+    }
     renderOrders();
     renderHome();
   } catch (e) {
@@ -974,12 +979,15 @@ function renderOrdersForMonth(ym) {
 async function toggleWorkerDone(orderId) {
   const o = orders.find(x => x.id === orderId);
   if (!o) return;
-  // Только ответственный (responsible) может менять статус
   if (o.responsible !== currentWorkerName) return;
   o.workerDone = !o.workerDone;
   try {
     await sbUpdateOrder(o);
     await _upsertOrderSalaries(o);
+    // Автозачисление в кассу если наличка и заказ отмечен выполненным
+    if (o.workerDone && typeof addCashFromOrder === 'function') {
+      await addCashFromOrder(o);
+    }
     currentMonthFilter ? renderOrdersForMonth(currentMonthFilter) : renderOrders();
     showToast(o.workerDone ? '✓ Выполнено — ЗП начислена' : 'Отметка снята');
     if (document.getElementById('screen-profile')?.classList.contains('active')) {

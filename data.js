@@ -225,6 +225,34 @@ async function sbDeleteWorkerSalary(id) {
   if (!res.ok) throw new Error(await res.text());
 }
 
+// ── CASH LOG ─────────────────────────────────────────────────
+
+async function sbFetchCashLog(workerName) {
+  const res = await fetch(
+    `${WORKER_URL}/api/cash?worker=${encodeURIComponent(workerName)}`,
+    { headers: getHeaders() }
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+async function sbFetchAllCashLog() {
+  const res = await fetch(`${WORKER_URL}/api/cash/all`, { headers: getHeaders() });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+async function sbInsertCashEntry(entry) {
+  const res = await fetch(`${WORKER_URL}/api/cash`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(entry),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const rows = await res.json();
+  return rows[0];
+}
+
 // ── REF DATA ─────────────────────────────────────────────────
 
 async function sbFetchRef(table) {
