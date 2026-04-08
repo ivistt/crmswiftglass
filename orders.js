@@ -167,6 +167,7 @@ function openOrderDetail(id) {
         ${field('🔢 Єврокод', o.code, 'mono')}
         ${field('🕐 Время', o.time)}
         ${field('👥 Менеджер', o.author)}
+        ${field('📋 Отв. менеджер', o.manager)}
       </div>
       ${o.notes ? `<div style="margin-top:14px;padding:12px;background:var(--surface2);border-radius:8px;font-size:13px;color:var(--text2);">📝 ${o.notes}</div>` : ''}
     </div>
@@ -551,7 +552,7 @@ function fillOrderForm(o) {
   set('f-toning', o.toning);
   set('f-delivery', o.delivery);
   set('f-author', o.author);
-  set('f-payment-status', o.paymentStatus);
+  set('f-manager', o.manager || '');
   set('f-check', o.check);
   set('f-debt', o.debt);
   set('f-debt-date', o.debtDate);
@@ -602,7 +603,7 @@ function clearOrderForm() {
     'f-remainder','f-payment-method','f-dropshipper','f-margin-total',
     'f-payout-dropshipper','f-payout-manager-glass','f-payout-resp-glass',
     'f-payout-lesha','f-payout-roma','f-payout-extra-resp','f-payout-extra-assist',
-    'f-payout-molding-resp','f-payout-molding-assist','f-assistant'
+    'f-payout-molding-resp','f-payout-molding-assist','f-assistant','f-manager'
   ];
   ids.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   const iwEl = document.getElementById('f-in-work');
@@ -758,6 +759,7 @@ async function saveOrder() {
       : (existingOrder ? !!existingOrder.isCancelled : false),
     workerDone:      isNew ? false : (orders.find(x => x.id === editingOrderId)?.workerDone || false),
     assistant:       document.getElementById('f-assistant')?.value || '',
+    manager:         document.getElementById('f-manager')?.value || '',
     priceLocked:     (currentRole === 'senior') ? true : (existingOrder ? existingOrder.priceLocked : false),
     toningExternal:  document.getElementById('f-toning-external')?.checked || false,
     marginTotal:     getN('f-margin-total'),
@@ -990,9 +992,24 @@ async function toggleWorkerDone(orderId) {
   }
 }
 
-// Начислить / удалить записи ЗП для responsible + assistant по конкретному заказу
+// Начислить / удалить записи ЗП для всех участников заказа
 async function _upsertOrderSalaries(order) {
   const participants = [order.responsible, order.assistant].filter(Boolean);
+
+  // Рома получает тату-бонус по всем заказам с tatu > 0 — даже если его нет в заказе
+  const romaName = 'Рома';
+  const hasRoma = participants.includes(romaName);
+  const tatuBonus = (Number(order.tatu) || 0) > 0 ? Math.round((Number(order.tatu) || 0) * 0.20) : 0;
+  if (!hasRoma && tatuBonus > 0) {
+    participants.push('__roma_tatu__'); // виртуальный участник для тату-бонуса Роме
+  }
+
+  // Менеджер (Саша Менеджер или Макс) — если указан в поле manager заказа
+  const managerName = order.manager || '';
+  const SASHA_MANAGER = 'Саша Менеджер';
+  if (managerName === SASHA_MANAGER && !participants.includes(SASHA_MANAGER)) {
+    participants.push('__manager__'); // виртуальный участник
+  }
 
   // Всегда берём актуальные записи ЗП по этому заказу из БД
   let existingInDb = [];
@@ -1000,15 +1017,38 @@ async function _upsertOrderSalaries(order) {
     existingInDb = await sbFetchSalariesByOrder(order.id) || [];
   } catch (e) { /* если упало — продолжаем с пустым массивом */ }
 
-  for (const workerName of participants) {
+  for (const participant of participants) {
+    // Определяем реальное имя и сумму
+    let workerName, amount;
+
+    if (participant === '__roma_tatu__') {
+      workerName = romaName;
+      amount = order.workerDone ? tatuBonus : 0;
+    } else if (participant === '__manager__') {
+      workerName = SASHA_MANAGER;
+      const glassMargin = Math.max(0, (Number(order.income) || 0) - (Number(order.purchase) || 0));
+      amount = order.workerDone ? (800 + Math.round(glassMargin * 0.10)) : 0;
+    } else {
+      workerName = participant;
+      // Для Ромы если он в заказе — его обычная ЗП (без тату, тату уже в __roma_tatu__ или добавляем сюда)
+      if (workerName === romaName && tatuBonus > 0) {
+        // Рома в заказе + есть тату: обычная ЗП уже включает услуги (tatu в services),
+        // но тату-бонус = дополнительные 20% сверх стандартного расчёта
+        // calcOrderSalary уже считает 20% от всех услуг включая tatu,
+        // значит тату-бонус НЕ удваиваем — просто используем стандартный calcOrderSalary
+        amount = order.workerDone ? calcOrderSalary(workerName, order) : 0;
+      } else {
+        amount = order.workerDone ? calcOrderSalary(workerName, order) : 0;
+      }
+    }
+
+    console.log('[salary]', workerName, '| amount:', amount);
+
+    // Ищем существующую запись по worker_name
     const existingEntry = existingInDb.find(s => s.worker_name === workerName);
 
-    if (order.workerDone) {
-      const amount = calcOrderSalary(workerName, order);
-      console.log('[salary] workerName:', workerName, '| total:', order.total, '| purchase:', order.purchase, '| amount:', amount);
-      if (amount <= 0) continue;
+    if (order.workerDone && amount > 0) {
       if (!existingEntry) {
-        // Дата ЗП = дата самого заказа, а не сегодня
         await sbInsertWorkerSalary({ worker_name: workerName, date: order.date, amount, order_id: order.id });
       } else {
         await sbUpdateWorkerSalary(existingEntry.id, amount);
@@ -1105,18 +1145,25 @@ function recalcFullMargins() {
   const costToning  = toningSum * 0.4;
 
   const payoutDropshipper = document.getElementById('f-dropshipper')?.value ? marginGlass : 0;
-  // Менеджер с маржи стекла — только сотрудник с именем 'Sasha Manager'
-  const authorValue = document.getElementById('f-author')?.value || '';
-  const managerWorker = workers.find(w => w.name === 'Sasha Manager');
-  const payoutManagerGlass = (managerWorker && authorValue.includes('Sasha Manager')) ? Math.round(marginGlass * 0.10) : 0;
+
+  // Менеджер — только Саша Менеджер через поле f-manager
+  const managerValue = document.getElementById('f-manager')?.value || '';
+  const payoutManagerGlass = (managerValue === 'Саша Менеджер' && marginGlass > 0)
+    ? Math.round(marginGlass * 0.10) : 0;
+
+  // Старший responsible — Костя или Саша Смоков: 10% от маржи стекла
   const responsibleName = document.getElementById('f-responsible')?.value || '';
-  const payoutRespGlass = (['Костя','Саша Смоков'].includes(responsibleName) && incomeGlass > 0) ? marginGlass * 0.10 : 0;
-  const payoutLesha = toningExternal ? 0 : toningSum * 0.20;
-  const payoutRoma  = tatuSum > 0 ? 500 : 0;
-  const payoutExtraResp   = extraSum * 0.20;
-  const payoutExtraAssist = extraSum * 0.20;
-  const payoutMoldingResp   = moldingSum * 0.20;
-  const payoutMoldingAssist = moldingSum * 0.20;
+  const payoutRespGlass = (['Костя', 'Саша Смоков'].includes(responsibleName) && incomeGlass > 0)
+    ? Math.round(marginGlass * 0.10) : 0;
+
+  // Рома: 20% от tatu (всегда, если tatu > 0)
+  const payoutRoma = tatuSum > 0 ? Math.round(tatuSum * 0.20) : 0;
+
+  const payoutLesha       = toningExternal ? 0 : Math.round(toningSum * 0.20);
+  const payoutExtraResp   = Math.round(extraSum * 0.20);
+  const payoutExtraAssist = Math.round(extraSum * 0.20);
+  const payoutMoldingResp   = Math.round(moldingSum * 0.20);
+  const payoutMoldingAssist = Math.round(moldingSum * 0.20);
 
   const costs = purchaseGlass + costMolding + costToning;
   const payouts = payoutDropshipper + payoutManagerGlass + payoutRespGlass + payoutLesha + payoutRoma +
@@ -1124,19 +1171,18 @@ function recalcFullMargins() {
 
   const marginTotal = total - costs - payouts;
 
-  // сохранить в скрытых полях (или существующих инпутах)
-  const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = Math.round(val); };
-  setVal('f-remainder', marginGlass);
-  setVal('f-margin-total', marginTotal);
-  setVal('f-payout-dropshipper', payoutDropshipper);
-  setVal('f-payout-manager-glass', payoutManagerGlass);
-  setVal('f-payout-resp-glass', payoutRespGlass);
-  setVal('f-payout-lesha', payoutLesha);
-  setVal('f-payout-roma', payoutRoma);
-  setVal('f-payout-extra-resp', payoutExtraResp);
+  const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.value = Math.round(v); };
+  setVal('f-remainder',           marginGlass);
+  setVal('f-margin-total',        marginTotal);
+  setVal('f-payout-dropshipper',  payoutDropshipper);
+  setVal('f-payout-manager-glass',payoutManagerGlass);
+  setVal('f-payout-resp-glass',   payoutRespGlass);
+  setVal('f-payout-lesha',        payoutLesha);
+  setVal('f-payout-roma',         payoutRoma);
+  setVal('f-payout-extra-resp',   payoutExtraResp);
   setVal('f-payout-extra-assist', payoutExtraAssist);
   setVal('f-payout-molding-resp', payoutMoldingResp);
-  setVal('f-payout-molding-assist', payoutMoldingAssist);
+  setVal('f-payout-molding-assist',payoutMoldingAssist);
 }
 
 // синхронизация чекбоксов услуг с hidden-полем
