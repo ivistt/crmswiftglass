@@ -55,6 +55,7 @@ function renderOrderCard(o) {
         <span class="order-meta-item">☎️ ${o.phone || '—'}</span>
         <span class="order-meta-item">🗓️ ${formatDate(o.date)}</span>
         <span class="order-meta-item">🚧 ${o.responsible || '—'}${o.assistant ? ' + ' + o.assistant : ''}</span>
+        ${o.warehouse ? `<span class="order-meta-item">🏭 ${o.warehouse}</span>` : ''}
         ${((Number(o.total) || 0) + (Number(o.income) || 0) + (Number(o.delivery) || 0)) > 0 ? `<span class="order-meta-item" style="font-weight:700;color:var(--accent);">💰 ${((Number(o.total) || 0) + (Number(o.income) || 0) + (Number(o.delivery) || 0)).toLocaleString('ru')} ₴</span>` : ''}
       </div>
     </div>
@@ -138,7 +139,6 @@ function openOrderDetail(id) {
   const actionsEl = document.getElementById('order-detail-actions');
   if (actionsEl) {
     actionsEl.innerHTML = `
-      <button class="icon-action-btn" title="Копировать данные заказа" onclick="copyOrderSummary('${o.id}')">📋</button>
       ${canEdit   ? `<button class="icon-action-btn" title="Редактировать" onclick="openOrderModal('${o.id}')">✏️</button>` : ''}
       ${canDelete ? `<button class="icon-action-btn icon-action-danger" title="Удалить" onclick="deleteOrder('${o.id}')">🗑️</button>` : ''}
     `;
@@ -220,71 +220,6 @@ function openOrderDetail(id) {
   `;
 
   showScreen('order-detail');
-}
-
-// ---------- КОПИРОВАНИЕ ДАННЫХ ЗАКАЗА ----------
-function copyOrderSummary(id) {
-  const o = orders.find(x => x.id === id);
-  if (!o) return;
-
-  const fmt = (val) => val ? Number(val).toLocaleString('ru') + ' ₴' : '—';
-
-  const mount    = Number(o.mount)    || 0;
-  const molding  = Number(o.molding)  || 0;
-  const extra    = Number(o.extraWork)|| 0;
-  const tatu     = Number(o.tatu)     || 0;
-  const income   = Number(o.income)   || 0;
-  const delivery = Number(o.delivery) || 0;
-
-  const totalServices = mount + molding + extra + tatu;
-  const totalGlass    = income;
-  const totalAll      = totalServices + totalGlass + delivery;
-
-  const lines = [
-    `📋 Заказ ${o.id}`,
-    `🚗 ${o.car || '—'}`,
-    ``,
-    `📞 Телефон клиента: ${o.phone || '—'}`,
-    ``,
-    `💼 Стоимость монтажа: ${fmt(o.mount)}`,
-    `🔩 Стоимость молдинга: ${fmt(o.molding)}`,
-    `🔧 Стоимость доп. работ: ${fmt(o.extraWork)}`,
-    `🎨 Стоимость доп. услуги: ${fmt(o.tatu)}`,
-    `🪟 Стоимость стекла: ${fmt(o.income)}`,
-    `🚚 Стоимость доставки: ${fmt(o.delivery)}`,
-    ``,
-    `📊 Итого услуги: ${totalServices.toLocaleString('ru')} ₴`,
-    `📊 Итого стекло: ${totalGlass.toLocaleString('ru')} ₴`,
-    `💰 Итого весь заказ: ${totalAll.toLocaleString('ru')} ₴`,
-  ];
-
-  const text = lines.join('\n');
-
-  if (navigator.clipboard?.writeText) {
-    navigator.clipboard.writeText(text).then(() => {
-      showToast('Данные скопированы ✓');
-    }).catch(() => {
-      _fallbackCopy(text);
-    });
-  } else {
-    _fallbackCopy(text);
-  }
-}
-
-function _fallbackCopy(text) {
-  const ta = document.createElement('textarea');
-  ta.value = text;
-  ta.style.position = 'fixed';
-  ta.style.opacity = '0';
-  document.body.appendChild(ta);
-  ta.select();
-  try {
-    document.execCommand('copy');
-    showToast('Данные скопированы ✓');
-  } catch {
-    showToast('Не удалось скопировать', 'error');
-  }
-  document.body.removeChild(ta);
 }
 
 // ---------- УДАЛЕНИЕ ----------
