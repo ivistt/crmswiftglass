@@ -37,26 +37,34 @@ function updateNavbarVisibility() {
   const navClients = document.getElementById('nav-clients');
   const navWorkers = document.getElementById('nav-workers');
   const navHome    = document.getElementById('nav-home');
+  const navAdd     = document.getElementById('nav-add');
   const bottomNav  = document.getElementById('bottom-navbar');
-
-  if (navClients) navClients.style.display = canViewClients() ? '' : 'none';
-  if (navWorkers) navWorkers.style.display = canViewWorkers() ? '' : 'none';
 
   const navProfile = document.getElementById('nav-profile');
 
   if (currentRole === 'owner') {
-    if (bottomNav) bottomNav.style.display = '';
-    if (navHome)   navHome.style.display   = '';
+    // Владелец: Главная + Записи + Добавить (без клиентов и команды)
+    if (bottomNav)  bottomNav.style.display  = '';
+    if (navHome)    navHome.style.display    = '';
+    if (navAdd)     navAdd.style.display     = '';
     if (navProfile) navProfile.style.display = 'none';
+    if (navClients) navClients.style.display = 'none';
+    if (navWorkers) navWorkers.style.display = 'none';
     document.getElementById('app')?.classList.remove('no-navbar');
   } else if (currentRole === 'manager') {
-    // Менеджер: Записи + Клиенты + Профиль
-    if (bottomNav) bottomNav.style.display = '';
-    if (navHome)   navHome.style.display   = 'none';
-    if (navProfile) navProfile.style.display = '';
+    // Менеджер: Записи + Добавить
+    if (bottomNav)  bottomNav.style.display  = '';
+    if (navHome)    navHome.style.display    = 'none';
+    if (navAdd)     navAdd.style.display     = '';
+    if (navProfile) navProfile.style.display = 'none';
+    if (navClients) navClients.style.display = canViewClients() ? '' : 'none';
+    if (navWorkers) navWorkers.style.display = 'none';
     document.getElementById('app')?.classList.remove('no-navbar');
   } else {
-    // Специалисты видят навбар с кнопками: Записи + Профиль
+    // Специалисты: Записи + Профиль (без кнопки добавить)
+    if (navAdd)     navAdd.style.display     = 'none';
+    if (navClients) navClients.style.display = 'none';
+    if (navWorkers) navWorkers.style.display = 'none';
     if (bottomNav) bottomNav.style.display = '';
     if (navHome)   navHome.style.display   = 'none';
     if (navProfile) navProfile.style.display = '';

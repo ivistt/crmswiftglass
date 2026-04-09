@@ -25,7 +25,7 @@ function setupOrderActions() {
 
 // ---------- РЕНДЕР КАРТОЧКИ ЗАКАЗА ----------
 function renderOrderCard(o) {
-  const canMark = canMarkWorkerDone() && !o.statusDone &&
+  const canMark = canMarkWorkerDone() &&
     o.responsible === currentWorkerName;
   return `
     <div class="order-card" onclick="openOrderDetail('${o.id}')">
@@ -83,15 +83,17 @@ function renderOrders() {
       list = list.filter(o => o.isCancelled);
     }
   } else {
-    // Специалисты: только свои заказы
+    // Специалисты: только свои заказы в планёрке (inWork)
     list = list.filter(o =>
-      (o.responsible === currentWorkerName || o.assistant === currentWorkerName) && !o.isCancelled
+      (o.responsible === currentWorkerName || o.assistant === currentWorkerName) &&
+      !o.isCancelled &&
+      o.inWork
     );
     if (currentWorkerTab === 'relevant') {
-      // Актуальные = inWork и ещё не отмечены выполненными
-      list = list.filter(o => o.inWork && !o.workerDone);
+      // Актуальные = планёрка + ещё не отмечены выполненными
+      list = list.filter(o => !o.workerDone);
     }
-    // 'all' — все свои без фильтра
+    // 'all' — все свои в планёрке без доп. фильтра
   }
 
   if (search) list = list.filter(o =>
@@ -136,6 +138,7 @@ function openOrderDetail(id) {
   const actionsEl = document.getElementById('order-detail-actions');
   if (actionsEl) {
     actionsEl.innerHTML = `
+      <button class="icon-action-btn" title="Копировать данные заказа" onclick="copyOrderSummary('${o.id}')">📋</button>
       ${canEdit   ? `<button class="icon-action-btn" title="Редактировать" onclick="openOrderModal('${o.id}')">✏️</button>` : ''}
       ${canDelete ? `<button class="icon-action-btn icon-action-danger" title="Удалить" onclick="deleteOrder('${o.id}')">🗑️</button>` : ''}
     `;
@@ -217,6 +220,71 @@ function openOrderDetail(id) {
   `;
 
   showScreen('order-detail');
+}
+
+// ---------- КОПИРОВАНИЕ ДАННЫХ ЗАКАЗА ----------
+function copyOrderSummary(id) {
+  const o = orders.find(x => x.id === id);
+  if (!o) return;
+
+  const fmt = (val) => val ? Number(val).toLocaleString('ru') + ' ₴' : '—';
+
+  const mount    = Number(o.mount)    || 0;
+  const molding  = Number(o.molding)  || 0;
+  const extra    = Number(o.extraWork)|| 0;
+  const tatu     = Number(o.tatu)     || 0;
+  const income   = Number(o.income)   || 0;
+  const delivery = Number(o.delivery) || 0;
+
+  const totalServices = mount + molding + extra + tatu;
+  const totalGlass    = income;
+  const totalAll      = totalServices + totalGlass + delivery;
+
+  const lines = [
+    `📋 Заказ ${o.id}`,
+    `🚗 ${o.car || '—'}`,
+    ``,
+    `📞 Телефон клиента: ${o.phone || '—'}`,
+    ``,
+    `💼 Стоимость монтажа: ${fmt(o.mount)}`,
+    `🔩 Стоимость молдинга: ${fmt(o.molding)}`,
+    `🔧 Стоимость доп. работ: ${fmt(o.extraWork)}`,
+    `🎨 Стоимость доп. услуги: ${fmt(o.tatu)}`,
+    `🪟 Стоимость стекла: ${fmt(o.income)}`,
+    `🚚 Стоимость доставки: ${fmt(o.delivery)}`,
+    ``,
+    `📊 Итого услуги: ${totalServices.toLocaleString('ru')} ₴`,
+    `📊 Итого стекло: ${totalGlass.toLocaleString('ru')} ₴`,
+    `💰 Итого весь заказ: ${totalAll.toLocaleString('ru')} ₴`,
+  ];
+
+  const text = lines.join('\n');
+
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).then(() => {
+      showToast('Данные скопированы ✓');
+    }).catch(() => {
+      _fallbackCopy(text);
+    });
+  } else {
+    _fallbackCopy(text);
+  }
+}
+
+function _fallbackCopy(text) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    document.execCommand('copy');
+    showToast('Данные скопированы ✓');
+  } catch {
+    showToast('Не удалось скопировать', 'error');
+  }
+  document.body.removeChild(ta);
 }
 
 // ---------- УДАЛЕНИЕ ----------
@@ -552,10 +620,8 @@ function fillOrderForm(o) {
   set('f-payout-extra-assist', o.payoutExtraAssist);
   set('f-payout-molding-resp', o.payoutMoldingResp);
   set('f-payout-molding-assist', o.payoutMoldingAssist);
-  const iwEl = document.getElementById('f-in-work');
-  if (iwEl) iwEl.checked = !!o.inWork;
-  const cancelEl = document.getElementById('f-cancelled');
-  if (cancelEl) cancelEl.checked = !!o.isCancelled;
+  const statusEl = document.getElementById('f-order-status');
+  if (statusEl) { if (o.isCancelled) statusEl.value = 'cancelled'; else if (o.inWork) statusEl.value = 'inWork'; else statusEl.value = ''; }
   const asEl = document.getElementById('f-assistant');
   // перерисовать чекбоксы комплектации
   const confArr = (o.configuration || '').split(',');
@@ -577,10 +643,8 @@ function clearOrderForm() {
     'f-payout-molding-resp','f-payout-molding-assist','f-assistant','f-manager'
   ];
   ids.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
-  const iwEl = document.getElementById('f-in-work');
-  if (iwEl) iwEl.checked = false;
-  const cancelEl = document.getElementById('f-cancelled');
-  if (cancelEl) cancelEl.checked = false;
+  const orderStatusEl = document.getElementById('f-order-status');
+  if (orderStatusEl) orderStatusEl.value = '';
   const tonExtEl = document.getElementById('f-toning-external');
   if (tonExtEl) tonExtEl.checked = false;
   document.querySelectorAll('#service-type-checkboxes input[type="checkbox"]').forEach(el => el.checked = false);
@@ -737,10 +801,10 @@ async function saveOrder() {
     dropshipperPayout: getN('f-payout-dropshipper'),
     statusDone:      existingOrder ? existingOrder.statusDone : false,
     inWork:          (currentRole === 'owner' || currentRole === 'manager')
-      ? (document.getElementById('f-in-work')?.checked || false)
+      ? (document.getElementById('f-order-status')?.value === 'inWork')
       : (existingOrder ? existingOrder.inWork : false),
     isCancelled:     (currentRole === 'owner' || currentRole === 'manager')
-      ? (document.getElementById('f-cancelled')?.checked || false)
+      ? (document.getElementById('f-order-status')?.value === 'cancelled')
       : (existingOrder ? !!existingOrder.isCancelled : false),
     workerDone:      isNew ? false : (orders.find(x => x.id === editingOrderId)?.workerDone || false),
     assistant:       document.getElementById('f-assistant')?.value || '',

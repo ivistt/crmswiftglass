@@ -66,27 +66,10 @@
       transition:opacity 0.4s ease;
     }
     #app-loading.hiding { opacity:0; pointer-events:none; }
-    .loader-ring { width:64px;height:64px;position:relative; }
-    .loader-ring svg { width:64px;height:64px;transform:rotate(-90deg); }
-    .loader-ring-track { fill:none;stroke:rgba(0,229,160,0.12);stroke-width:4; }
-    .loader-ring-arc {
-      fill:none;stroke:#00e5a0;stroke-width:4;stroke-linecap:round;
-      stroke-dasharray:120;stroke-dashoffset:120;
-      animation:loader-spin 1.2s cubic-bezier(0.4,0,0.2,1) infinite;
-    }
+    .loader-logo { width:80px;height:80px;animation:loader-spin 3s ease infinite; }
     @keyframes loader-spin {
-      0%   { stroke-dashoffset:120;opacity:1; }
-      60%  { stroke-dashoffset:10; opacity:1; }
-      100% { stroke-dashoffset:120;opacity:0.3; }
-    }
-    .loader-glow {
-      position:absolute;inset:0;border-radius:50%;
-      background:radial-gradient(circle,rgba(0,229,160,0.15) 0%,transparent 70%);
-      animation:loader-pulse 1.2s ease-in-out infinite;
-    }
-    @keyframes loader-pulse {
-      0%,100%{transform:scale(0.8);opacity:0.4;}
-      50%{transform:scale(1.2);opacity:1;}
+      0%   { transform:rotate(0deg); }
+      100% { transform:rotate(1080deg); }
     }
     .loader-greeting {
       font-family:'Manrope',sans-serif;font-size:20px;font-weight:700;
@@ -133,10 +116,7 @@
 <!-- ==================== APP ==================== -->
 <div id="app" style="display:none;">
   <div id="app-loading">
-    <div class="loader-ring">
-      <div class="loader-glow"></div>
-      <svg viewBox="0 0 64 64"><circle class="loader-ring-track" cx="32" cy="32" r="28"/><circle class="loader-ring-arc" cx="32" cy="32" r="28"/></svg>
-    </div>
+    <img src="images/logo-loader.svg" class="loader-logo" alt="">
     <div class="loader-greeting">Привет, <span id="loader-name">...</span>!</div>
     <div class="loader-sub">Загружаем данные</div>
   </div>
@@ -173,6 +153,10 @@
     <button class="nav-item" id="nav-orders" onclick="navTo('orders')">
       <span class="nav-icon ico"><i data-lucide="clipboard-list" style="width:20px;height:20px;"></i></span>
       <span class="nav-label">Записи</span>
+    </button>
+    <button class="nav-item nav-item-add" id="nav-add" onclick="openOrderModal(null)">
+      <span class="nav-icon ico"><i data-lucide="plus" style="width:22px;height:22px;"></i></span>
+      <span class="nav-label">Добавить</span>
     </button>
     <button class="nav-item" id="nav-profile" onclick="navTo('profile')" style="display:none;">
       <span class="nav-icon ico"><i data-lucide="user-round" style="width:20px;height:20px;"></i></span>

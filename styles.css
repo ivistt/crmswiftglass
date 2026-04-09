@@ -283,6 +283,15 @@ body {
 }
 
 .nav-item:hover { color: rgba(255,255,255,0.8); background: var(--surface3); }
+.nav-item-add {
+  background: var(--accent);
+  color: #0a0a0f;
+  border-radius: 18px;
+  flex: 0 0 auto;
+  padding: 8px 18px;
+}
+.nav-item-add:hover { background: var(--accent); opacity: 0.85; color: #0a0a0f; }
+
 
 .nav-item.active {
   color: #0a0a0f;

@@ -98,10 +98,7 @@ function _showApp(role, workerName) {
     loader = document.createElement('div');
     loader.id = 'app-loading';
     loader.innerHTML = `
-      <div class="loader-ring">
-        <div class="loader-glow"></div>
-        <svg viewBox="0 0 64 64"><circle class="loader-ring-track" cx="32" cy="32" r="28"/><circle class="loader-ring-arc" cx="32" cy="32" r="28"/></svg>
-      </div>
+      <img src="images/logo-loader.svg" class="loader-logo" alt="">
       <div class="loader-greeting">Привет, <span id="loader-name">...</span>!</div>
       <div class="loader-sub">Загружаем данные</div>
     `;
