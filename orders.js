@@ -4,7 +4,9 @@
 
 let editingOrderId  = null;      // null = новый, иначе id редактируемого
 let currentOrderTab = 'selection';  // 'selection' | 'planner' | 'done' — для owner/manager
-let currentWorkerTab = 'relevant'; // 'relevant' | 'all' — для специалистов
+let currentWorkerTab = 'today'; // 'today' | 'done' | 'future' | 'past' | 'all' — для специалистов
+let ordersVisibleCount = 10;
+let lastOrdersListSignature = '';
 
 function canMarkWorkerDone() {
   // Галочка доступна только специалисту (senior) для своих заказов
@@ -12,7 +14,7 @@ function canMarkWorkerDone() {
 }
 
 function canQuickConfirmOrderAmounts(order) {
-  return currentRole === 'senior' && order?.responsible === currentWorkerName && !order?.isCancelled;
+  return currentRole === 'senior' && order?.responsible === currentWorkerName && !order?.isCancelled && !order?.workerDone;
 }
 
 function _dailyBaseOrderId() {
@@ -23,6 +25,42 @@ function _moneyInputValue(value) {
   return Number(value) || 0;
 }
 
+function _escapeAttr(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function calcClientPaymentStatus(totalPaid, totalAmount) {
+  const paid = Number(totalPaid) || 0;
+  const total = Number(totalAmount) || 0;
+  if (paid <= 0) return 'Не оплачено';
+  if (total > 0 && paid >= total) return 'Оплачено';
+  return 'Частично оплачено';
+}
+
+function calcSupplierPaymentStatus(totalPaid, glassPurchase) {
+  const paid = Number(totalPaid) || 0;
+  const purchase = Number(glassPurchase) || 0;
+  if (paid <= 0) return 'Не оплачено';
+  if (purchase > 0 && paid >= purchase) return 'Оплачено';
+  return 'Частично оплачено';
+}
+
+function getOrderClientTotal(order) {
+  return (Number(order?.total) || 0) + (Number(order?.income) || 0) + (Number(order?.delivery) || 0);
+}
+
+function getEffectivePaymentStatus(order) {
+  return calcClientPaymentStatus(Number(order?.debt) || 0, getOrderClientTotal(order));
+}
+
+function getEffectiveSupplierStatus(order) {
+  return calcSupplierPaymentStatus(Number(order?.check) || 0, Number(order?.purchase) || 0);
+}
+
 async function confirmSeniorOrderAmounts(orderId) {
   const order = orders.find(x => x.id === orderId);
   if (!order || !canQuickConfirmOrderAmounts(order)) return;
@@ -31,12 +69,46 @@ async function confirmSeniorOrderAmounts(orderId) {
   const debtEl = document.getElementById(`quick-client-${orderId}`);
   const btnEl = document.getElementById(`quick-confirm-${orderId}`);
 
-  const nextCheck = _moneyInputValue(checkEl?.value);
-  const nextDebt = _moneyInputValue(debtEl?.value);
+  const newSupplierPaymentAmount = _moneyInputValue(checkEl?.value);
+  const newClientPaymentAmount = _moneyInputValue(debtEl?.value);
 
   const oldCheck = Number(order.check) || 0;
-  const checkDiff = nextCheck - oldCheck;
-  const updatedOrder = { ...order, check: nextCheck, debt: nextDebt };
+  const nextSupplierPayments = Array.isArray(order.supplierPayments)
+    ? JSON.parse(JSON.stringify(order.supplierPayments))
+    : [];
+  const nextClientPayments = Array.isArray(order.clientPayments)
+    ? JSON.parse(JSON.stringify(order.clientPayments))
+    : [];
+
+  if (newSupplierPaymentAmount > 0) {
+    nextSupplierPayments.push({
+      amount: newSupplierPaymentAmount,
+      date: todayStr(),
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  if (newClientPaymentAmount > 0) {
+    nextClientPayments.push({
+      amount: newClientPaymentAmount,
+      date: todayStr(),
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  const totalSupplierPaid = nextSupplierPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  const totalClientPaid = nextClientPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  const checkDiff = totalSupplierPaid - oldCheck;
+  const totalClientAmount = (Number(order.total) || 0) + (Number(order.income) || 0) + (Number(order.delivery) || 0);
+  const updatedOrder = {
+    ...order,
+    check: totalSupplierPaid,
+    debt: totalClientPaid,
+    paymentStatus: calcClientPaymentStatus(totalClientPaid, totalClientAmount),
+    supplierStatus: calcSupplierPaymentStatus(totalSupplierPaid, order.purchase),
+    clientPayments: nextClientPayments,
+    supplierPayments: nextSupplierPayments,
+  };
 
   if (btnEl) {
     btnEl.disabled = true;
@@ -45,8 +117,12 @@ async function confirmSeniorOrderAmounts(orderId) {
 
   try {
     const saved = await sbUpdateOrder(updatedOrder);
+    const mergedOrder = { ...saved, ...updatedOrder };
     const idx = orders.findIndex(x => x.id === orderId);
-    if (idx !== -1) orders[idx] = saved;
+    if (idx !== -1) orders[idx] = mergedOrder;
+
+    if (checkEl) checkEl.value = '';
+    if (debtEl) debtEl.value = '';
 
     if (checkDiff !== 0) {
       const amount = -checkDiff;
@@ -109,11 +185,12 @@ function renderOrderCard(o) {
         <div class="order-card-left">
           <span class="order-id">${o.id}</span>
           <span class="order-name">${o.car || '—'}</span>
+          ${getOrderClientTotal(o) > 0 ? `<span class="order-meta-item" style="font-weight:700;"><span style="color:var(--yellow);">${(Number(o.debt) || 0).toLocaleString('ru')}</span><span style="color:var(--text3);font-weight:600;">/</span><span style="color:var(--accent);">${getOrderClientTotal(o).toLocaleString('ru')}</span></span>` : ''}
         </div>
         <div style="display:flex;gap:8px;align-items:center;">
           ${o.isCancelled ? '<span class="status-badge" style="background:var(--red,#DC2626);color:#fff;">Отменен</span>' : ''}
           ${o.workerDone && !o.isCancelled ? '<span class="status-badge status-done">✓ Выполнен</span>' : ''}
-          ${statusBadge(o.paymentStatus)}
+          ${statusBadge(getEffectivePaymentStatus(o))}
           ${canMark ? `
             <button
               class="btn-check-done ${o.workerDone ? 'done' : ''}"
@@ -128,31 +205,96 @@ function renderOrderCard(o) {
         </div>
       </div>
       <div class="order-card-meta">
-        <span class="order-meta-item">👤 ${o.client || '—'}</span>
         <span class="order-meta-item">☎️ ${o.phone || '—'}</span>
         <span class="order-meta-item">🗓️ ${formatDate(o.date)}</span>
         <span class="order-meta-item">🚧 ${o.responsible || '—'}${o.assistant ? ' + ' + o.assistant : ''}</span>
         ${o.warehouse ? `<span class="order-meta-item">🏭 ${o.warehouse}</span>` : ''}
-        ${((Number(o.total) || 0) + (Number(o.income) || 0) + (Number(o.delivery) || 0)) > 0 ? `<span class="order-meta-item" style="font-weight:700;color:var(--accent);">💰 ${((Number(o.total) || 0) + (Number(o.income) || 0) + (Number(o.delivery) || 0)).toLocaleString('ru')} ₴</span>` : ''}
+        ${(Number(o.check) > 0 || Number(o.purchase) > 0) ? `<span class="order-meta-item" style="font-weight:700;color:var(--text2);">${(Number(o.check) || 0).toLocaleString('ru')}/${(Number(o.purchase) || 0).toLocaleString('ru')}</span>` : ''}
+        <span class="order-meta-item">${o.client || '—'}</span>
       </div>
       ${canQuickConfirm ? `
         <div onclick="event.stopPropagation()" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:10px;">
           <div style="font-size:12px;font-weight:700;color:var(--text3);letter-spacing:0.04em;">ПОДТВЕРЖДЕНИЕ СУММ</div>
-          <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
-            <label style="display:flex;flex-direction:column;gap:6px;">
-              <span style="font-size:12px;color:var(--text3);">Сумма поставщику</span>
-              <input id="quick-supplier-${o.id}" type="number" inputmode="decimal" class="form-input" value="${Number(o.check) || 0}" onclick="event.stopPropagation()">
+          <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:10px;align-items:end;">
+            <label style="display:flex;flex-direction:column;gap:6px;min-width:0;">
+              <span style="font-size:12px;color:var(--text3);">Складу</span>
+              <input id="quick-supplier-${o.id}" type="number" inputmode="decimal" class="form-input" value="" placeholder="0" onclick="event.stopPropagation()">
             </label>
-            <label style="display:flex;flex-direction:column;gap:6px;">
-              <span style="font-size:12px;color:var(--text3);">Сумма принятия с клиента</span>
-              <input id="quick-client-${o.id}" type="number" inputmode="decimal" class="form-input" value="${Number(o.debt) || 0}" onclick="event.stopPropagation()">
+            <label style="display:flex;flex-direction:column;gap:6px;min-width:0;">
+              <span style="font-size:12px;color:var(--text3);">Клиент оплатил</span>
+              <input id="quick-client-${o.id}" type="number" inputmode="decimal" class="form-input" value="" placeholder="0" onclick="event.stopPropagation()">
             </label>
+            <button id="quick-confirm-${o.id}" class="btn-primary" style="white-space:nowrap;height:44px;" onclick="event.stopPropagation(); confirmSeniorOrderAmounts('${o.id}')">Подтвердить</button>
           </div>
-          <button id="quick-confirm-${o.id}" class="btn-primary" style="width:100%;" onclick="event.stopPropagation(); confirmSeniorOrderAmounts('${o.id}')">Подтвердить</button>
         </div>
       ` : ''}
     </div>
   `;
+}
+
+function _isCurrentWorkerOrder(order) {
+  return order && (order.responsible === currentWorkerName || order.assistant === currentWorkerName);
+}
+
+function _filterSpecialistOrdersByTab(list) {
+  const today = todayStr();
+  const ownOrders = list.filter(o => _isCurrentWorkerOrder(o) && !o.isCancelled);
+
+  if (currentWorkerTab === 'today') {
+    return ownOrders.filter(o => o.inWork && !o.workerDone && o.date === today);
+  }
+  if (currentWorkerTab === 'done') {
+    return ownOrders.filter(o => o.workerDone);
+  }
+  if (currentWorkerTab === 'future') {
+    return ownOrders.filter(o => o.date && o.date > today);
+  }
+  if (currentWorkerTab === 'past') {
+    return ownOrders.filter(o => !o.workerDone && o.date && o.date < today);
+  }
+  return ownOrders;
+}
+
+function _getOrdersListSignature(scope, { search, dateF = '', statF = '', sort = '', ym = '' }) {
+  return [
+    scope,
+    currentRole || '',
+    currentOrderTab || '',
+    currentWorkerTab || '',
+    search || '',
+    dateF || '',
+    statF || '',
+    sort || '',
+    ym || '',
+  ].join('|');
+}
+
+function _prepareVisibleOrders(list, signature) {
+  if (lastOrdersListSignature !== signature) {
+    ordersVisibleCount = 10;
+    lastOrdersListSignature = signature;
+  }
+  return list.slice(0, ordersVisibleCount);
+}
+
+function loadMoreOrders() {
+  ordersVisibleCount += 10;
+  if (currentMonthFilter) {
+    renderOrdersForMonth(currentMonthFilter);
+  } else {
+    renderOrders();
+  }
+}
+
+function _renderOrdersListWithLoadMore(container, list, signature) {
+  const visibleList = _prepareVisibleOrders(list, signature);
+  const hasMore = visibleList.length < list.length;
+  container.innerHTML = visibleList.map(o => renderOrderCard(o)).join('')
+    + (hasMore ? `
+      <div style="display:flex;justify-content:center;margin-top:14px;">
+        <button class="btn-secondary" onclick="loadMoreOrders()">Подгрузить еще</button>
+      </div>
+    ` : '');
 }
 
 // ---------- РЕНДЕР СПИСКА ----------
@@ -172,22 +314,12 @@ function renderOrders() {
     } else if (currentOrderTab === 'done') {
       list = list.filter(o => o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'debt') {
-      list = list.filter(o => !o.isCancelled && (o.paymentStatus === 'Не оплачено' || o.paymentStatus === 'Частично оплачено'));
+      list = list.filter(o => !o.isCancelled && ['Не оплачено', 'Частично оплачено'].includes(getEffectivePaymentStatus(o)));
     } else if (currentOrderTab === 'cancelled') {
       list = list.filter(o => o.isCancelled);
     }
   } else {
-    // Специалисты: только свои заказы в планёрке (inWork)
-    list = list.filter(o =>
-      (o.responsible === currentWorkerName || o.assistant === currentWorkerName) &&
-      !o.isCancelled &&
-      o.inWork
-    );
-    if (currentWorkerTab === 'relevant') {
-      // Актуальные = планёрка + ещё не отмечены выполненными
-      list = list.filter(o => !o.workerDone);
-    }
-    // 'all' — все свои в планёрке без доп. фильтра
+    list = _filterSpecialistOrdersByTab(list);
   }
 
   if (search) list = list.filter(o =>
@@ -197,7 +329,7 @@ function renderOrders() {
     (o.id      || '').toLowerCase().includes(search)
   );
   if (dateF) list = list.filter(o => o.date === dateF);
-  if (statF) list = list.filter(o => o.paymentStatus === statF);
+  if (statF) list = list.filter(o => getEffectivePaymentStatus(o) === statF);
 
   list.sort((a, b) => {
     const ad = a.date || '';
@@ -206,16 +338,26 @@ function renderOrders() {
   });
 
   const container = document.getElementById('orders-list');
+  const signature = _getOrdersListSignature('all', { search, dateF, statF, sort });
 
   if (!list.length) {
-    const msg = (currentRole !== 'owner' && currentRole !== 'manager' && currentWorkerTab === 'relevant')
-      ? '<h3>Нет актуальных записей</h3><p>Все задачи выполнены 🎉</p>'
+    lastOrdersListSignature = signature;
+    ordersVisibleCount = 10;
+    const specialistEmptyMap = {
+      today: '<h3>Нет сегодняшних записей</h3><p>На сегодня задач нет</p>',
+      done: '<h3>Нет выполненных записей</h3><p>Пока ничего не завершено</p>',
+      future: '<h3>Нет будущих записей</h3><p>Будущих задач пока нет</p>',
+      past: '<h3>Нет прошедших записей</h3><p>Просроченных задач нет</p>',
+      all: '<h3>Записей не найдено</h3><p>У вас пока нет заказов</p>',
+    };
+    const msg = (currentRole !== 'owner' && currentRole !== 'manager')
+      ? (specialistEmptyMap[currentWorkerTab] || specialistEmptyMap.all)
       : '<h3>Записей не найдено</h3><p>Попробуйте изменить фильтры или добавьте новую запись</p>';
     container.innerHTML = `<div class="empty-state"><div class="empty-state-icon">📋</div>${msg}</div>`;
     return;
   }
 
-  container.innerHTML = list.map(o => renderOrderCard(o)).join('');
+  _renderOrdersListWithLoadMore(container, list, signature);
 }
 
 // ---------- ДЕТАЛЬНЫЙ ЭКРАН ЗАКАЗА ----------
@@ -225,7 +367,7 @@ function openOrderDetail(id) {
 
   const el = document.getElementById('order-detail-content');
 
-  const canEdit   = currentRole === 'owner' || currentRole === 'senior' || currentRole === 'manager';
+  const canEdit   = currentRole === 'owner' || currentRole === 'manager';
   const canDelete = canDeleteOrder();
 
   // Кнопки в топ-баре рядом с "назад"
@@ -248,7 +390,7 @@ function openOrderDetail(id) {
         </div>
         <div class="detail-badges">
           ${o.inWork ? '<span class="status-badge" style="background:#F59E0B;color:#fff;">🔨 Планёрка</span>' : ''}
-          ${statusBadge(o.paymentStatus)}
+          ${statusBadge(getEffectivePaymentStatus(o))}
         </div>
       </div>
     </div>
@@ -285,14 +427,14 @@ function openOrderDetail(id) {
     <div class="detail-section">
       <div class="detail-section-title">💸 Финансы</div>
       <div class="detail-grid">
-    ${field('Расчёт долга клиента', o.paymentStatus)}
+    ${field('Расчёт долга клиента', getEffectivePaymentStatus(o))}
     ${field('Сумма поставщику', o.check ? o.check + ' ₴' : '')}
     ${field('Расчёт долга', o.debt ? o.debt + ' ₴' : '')}
     ${field('Дата расчёта долга', formatDate(o.debtDate))}
     ${field('📌 Общая сумма работ', o.total ? o.total + ' ₴' : '', 'mono')}
         ${field('Молдинг Автор', o.moldingAuthor)}
         ${field('🤝 Партнер', o.partner)}
-        ${field('📦 Статус оплати постачальнику', o.supplierStatus)}
+        ${field('📦 Статус оплати постачальнику', getEffectiveSupplierStatus(o))}
         ${field('Сумма покупки стекла', o.purchase ? o.purchase + ' ₴' : '')}
         ${field('Сумма продажи стекла', o.income ? o.income + ' ₴' : '')}
         ${field('Маржа с продажи стекла', o.remainder !== undefined ? o.remainder + ' ₴' : '')}
@@ -335,30 +477,20 @@ function copyOrderSummary(id) {
   if (!o) return;
 
   const lines = [];
+  const worksTotal = Number(o.total) || 0;
+  const glassTotal = Number(o.income) || 0;
+  const fullTotal = worksTotal + glassTotal + (Number(o.delivery) || 0);
 
-  // 1. Автомобиль
-  if (o.car) lines.push(`🚗 Автомобіль: ${o.car}`);
-
-  // 2. Номер телефона
-  if (o.phone) lines.push(`☎️ Телефон: ${o.phone}`);
-
-  // 3. Услуги кроме тату (тату = Доп услуги) + цена
-  const services = [];
-  if (o.serviceType) services.push(o.serviceType);
-  if (o.mount)       services.push(`Монтаж: ${o.mount} ₴`);
-  if (o.molding)     services.push(`Молдинг: ${o.molding}`);
-  if (o.extraWork)   services.push(`Доп. роботи: ${o.extraWork}`);
-  if (o.toning)      services.push(`Тонування: ${o.toning}`);
-  if (o.delivery)    services.push(`Доставка: ${o.delivery} ₴`);
-  if (o.tatu)        services.push(`Доп послуги: ${o.tatu}`);
-  if (services.length) lines.push(`⚙️ Послуги: ${services.join(', ')}`);
-
-  // 4. Цена продажи стекла
-  if (o.income) lines.push(`💰 Продаж скла: ${Number(o.income).toLocaleString('ru')} ₴`);
-
-  // 5. Общая сумма оплаты клиента
-  const clientTotal = (Number(o.total) || 0) + (Number(o.income) || 0) + (Number(o.delivery) || 0);
-  if (clientTotal > 0) lines.push(`💳 Загальна сума: ${clientTotal.toLocaleString('ru')} ₴`);
+  if (o.phone)      lines.push(`Номер клиента: ${o.phone}`);
+  if (o.mount)      lines.push(`Стоимость монтажа: ${Number(o.mount).toLocaleString('ru')} ₴`);
+  if (o.molding)    lines.push(`Стоимость молдинга: ${Number(o.molding).toLocaleString('ru')} ₴`);
+  if (o.extraWork)  lines.push(`Стоимость доп работа: ${Number(o.extraWork).toLocaleString('ru')} ₴`);
+  if (o.tatu)       lines.push(`Доп услуга: ${Number(o.tatu).toLocaleString('ru')} ₴`);
+  if (o.income)     lines.push(`Стоимость стекла: ${glassTotal.toLocaleString('ru')} ₴`);
+  if (o.delivery)   lines.push(`Стоимость доставки: ${Number(o.delivery).toLocaleString('ru')} ₴`);
+  if (worksTotal)   lines.push(`Общая стоимость услуг: ${worksTotal.toLocaleString('ru')} ₴`);
+  if (glassTotal)   lines.push(`Общая стоимость стекла: ${glassTotal.toLocaleString('ru')} ₴`);
+  if (fullTotal)    lines.push(`Общая стоимость всего заказа: ${fullTotal.toLocaleString('ru')} ₴`);
 
   const text = lines.join('\n');
 
@@ -524,6 +656,7 @@ function populateRefSelects() {
 }
 
 let currentClientPayments = [];
+let currentSupplierPayments = [];
 
 // ---------- ФУНКЦИИ ИСТОРИИ ОПЛАТ И ДОРАБОТКИ ----------
 
@@ -557,6 +690,41 @@ function renderClientPayments() {
   initIcons();
 }
 
+function renderSupplierPayments() {
+  const listEl = document.getElementById('supplier-payments-list');
+  if (!listEl) return;
+  if (!currentSupplierPayments.length) {
+    listEl.innerHTML = '<div style="font-size:11px;color:var(--text3);">Нет оплат поставщику</div>';
+    return;
+  }
+  listEl.innerHTML = currentSupplierPayments.map((p, idx) => `
+    <div style="display:flex;align-items:center;justify-content:space-between;background:var(--surface2);padding:6px 10px;border-radius:6px;border:1px solid var(--border);">
+      <div>
+        <div style="font-size:13px;font-weight:700;color:var(--text2);">${Number(p.amount).toLocaleString('ru')} ₴</div>
+        <div style="font-size:11px;color:var(--text3);">${formatDate(p.date)}</div>
+      </div>
+      <button type="button" class="icon-btn" style="width:20px;height:20px;" onclick="removeSupplierPayment(${idx})">
+        <i data-lucide="trash-2" style="width:10px;height:10px;color:var(--red);"></i>
+      </button>
+    </div>
+  `).join('');
+  initIcons();
+}
+
+function syncClientPaidFromPayments() {
+  const debtEl = document.getElementById('f-debt');
+  if (!debtEl) return;
+  const totalPaid = currentClientPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  debtEl.value = String(totalPaid || 0);
+}
+
+function syncSupplierPaidFromPayments() {
+  const checkEl = document.getElementById('f-check');
+  if (!checkEl) return;
+  const totalPaid = currentSupplierPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  checkEl.value = String(totalPaid || 0);
+}
+
 function addClientPayment() {
   const amtEl = document.getElementById('f-new-payment-amount');
   const dateEl = document.getElementById('f-new-payment-date');
@@ -567,6 +735,21 @@ function addClientPayment() {
   currentClientPayments.push({ amount, date, timestamp: new Date().toISOString() });
   amtEl.value = '';
   renderClientPayments();
+  syncClientPaidFromPayments();
+  recalcTotal();
+}
+
+function addSupplierPayment() {
+  const amtEl = document.getElementById('f-new-supplier-payment-amount');
+  const dateEl = document.getElementById('f-new-supplier-payment-date');
+  const amount = Number(amtEl.value);
+  if (!amount || amount <= 0) return showToast('Введите сумму поставщику', 'error');
+  const date = dateEl.value || todayStr();
+
+  currentSupplierPayments.push({ amount, date, timestamp: new Date().toISOString() });
+  amtEl.value = '';
+  renderSupplierPayments();
+  syncSupplierPaidFromPayments();
   recalcTotal();
 }
 
@@ -574,6 +757,15 @@ function removeClientPayment(idx) {
   if (!confirm('Удалить этот платеж из истории?')) return;
   currentClientPayments.splice(idx, 1);
   renderClientPayments();
+  syncClientPaidFromPayments();
+  recalcTotal();
+}
+
+function removeSupplierPayment(idx) {
+  if (!confirm('Удалить этот платеж поставщику из истории?')) return;
+  currentSupplierPayments.splice(idx, 1);
+  renderSupplierPayments();
+  syncSupplierPaidFromPayments();
   recalcTotal();
 }
 
@@ -581,6 +773,7 @@ function removeClientPayment(idx) {
 function openOrderModal(id) {
   editingOrderId = id;
   currentClientPayments = [];
+  currentSupplierPayments = [];
 
   populateRefSelects();
   populateClientDatalist();
@@ -597,6 +790,9 @@ function openOrderModal(id) {
     
     if (o.clientPayments) {
       currentClientPayments = JSON.parse(JSON.stringify(o.clientPayments));
+    }
+    if (o.supplierPayments) {
+      currentSupplierPayments = JSON.parse(JSON.stringify(o.supplierPayments));
     }
     
     document.getElementById('order-modal-title').textContent = `Редактировать ${o.id}`;
@@ -619,7 +815,7 @@ function openOrderModal(id) {
     clearOrderForm();
     setPriceFieldsLocked(false);
     document.getElementById('f-date').value = todayStr();
-    document.getElementById('f-time').value = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+    document.getElementById('f-time').value = nowTimeStr();
 
     // Если текущий пользователь — senior, автоподставляем его и его помощника
     if (currentRole === 'senior' && currentWorkerName) {
@@ -691,7 +887,11 @@ function openOrderModal(id) {
   const liveTotalEl = document.getElementById('modal-live-total');
   if (liveTotalEl) liveTotalEl.style.display = 'none';
 
+  applyOrderFormDateTimeDefaults();
+  renderSupplierPayments();
   renderClientPayments(); // рендерим историю оплат (изначально)
+  syncSupplierPaidFromPayments();
+  syncClientPaidFromPayments();
 
   document.getElementById('order-modal').classList.add('active');
 
@@ -702,6 +902,17 @@ function openOrderModal(id) {
 function closeOrderModal() {
   document.getElementById('order-modal').classList.remove('active');
   editingOrderId = null;
+}
+
+function applyOrderFormDateTimeDefaults() {
+  const defaultDateIds = ['f-date', 'f-new-supplier-payment-date', 'f-new-payment-date', 'f-debt-date'];
+  defaultDateIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (el && !el.value) el.value = todayStr();
+  });
+
+  const timeEl = document.getElementById('f-time');
+  if (timeEl && !timeEl.value) timeEl.value = nowTimeStr();
 }
 
 function fillOrderForm(o) {
@@ -790,9 +1001,11 @@ function clearOrderForm() {
     'f-payout-molding-resp','f-payout-molding-assist','f-assistant','f-manager',
     'f-rework-responsible','f-rework-assistant','f-rework-mount','f-rework-molding',
     'f-rework-extra','f-rework-tatu','f-rework-toning',
-    'f-new-payment-amount','f-new-payment-date'
+    'f-new-payment-amount','f-new-payment-date','f-new-supplier-payment-amount','f-new-supplier-payment-date'
   ];
   ids.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  currentClientPayments = [];
+  currentSupplierPayments = [];
   const orderStatusEl = document.getElementById('f-order-status');
   if (orderStatusEl) orderStatusEl.value = '';
   const onlyCutEl = document.getElementById('f-only-cut');
@@ -879,13 +1092,7 @@ function recalcTotal(mode = 'init') {
   const paymentStatusSel = document.getElementById('f-payment-status');
   if (debtInput && paymentStatusSel) {
     const debtVal = Number(debtInput.value) || 0;
-    if (debtInput.value.trim() === '' || debtVal === 0) {
-      paymentStatusSel.value = 'Не оплачено';
-    } else if (debtVal >= totalAll && totalAll > 0) {
-      paymentStatusSel.value = 'Оплачено';
-    } else {
-      paymentStatusSel.value = 'Частично оплачено';
-    }
+    paymentStatusSel.value = calcClientPaymentStatus(debtVal, totalAll);
   }
 
   // Авторасчет статуса поставщика
@@ -893,15 +1100,7 @@ function recalcTotal(mode = 'init') {
   const supplierStatusSel = document.getElementById('f-supplier-status');
   if (checkInput && supplierStatusSel) {
     const checkVal = Number(checkInput.value) || 0;
-    if (checkVal === 0) {
-      supplierStatusSel.value = 'Не оплачено';
-    } else if (checkVal >= glassPurchase && glassPurchase > 0) {
-      supplierStatusSel.value = 'Оплачено';
-    } else if (checkVal >= 1 && checkVal < glassPurchase) {
-      supplierStatusSel.value = 'Частично оплачено';
-    } else {
-      supplierStatusSel.value = 'Не оплачено';
-    }
+    supplierStatusSel.value = calcSupplierPaymentStatus(checkVal, glassPurchase);
   }
 
   recalcFullMargins();
@@ -984,6 +1183,7 @@ async function saveOrder() {
       toning: getN('f-rework-toning'),
     },
     clientPayments: currentClientPayments,
+    supplierPayments: currentSupplierPayments,
   };
 
   if (!data.date || !data.client) {
@@ -1095,6 +1295,12 @@ function todayStr() {
   return d.getFullYear() + '-'
     + String(d.getMonth() + 1).padStart(2, '0') + '-'
     + String(d.getDate()).padStart(2, '0');
+}
+
+function nowTimeStr() {
+  const d = new Date();
+  return String(d.getHours()).padStart(2, '0') + ':'
+    + String(d.getMinutes()).padStart(2, '0');
 }
 
 // ---------- ЭКРАН МЕСЯЦЕВ ----------
@@ -1228,18 +1434,12 @@ function renderOrdersForMonth(ym) {
     } else if (currentOrderTab === 'done') {
       list = list.filter(o => o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'debt') {
-      list = list.filter(o => !o.isCancelled && (o.paymentStatus === 'Не оплачено' || o.paymentStatus === 'Частично оплачено'));
+      list = list.filter(o => !o.isCancelled && ['Не оплачено', 'Частично оплачено'].includes(getEffectivePaymentStatus(o)));
     } else if (currentOrderTab === 'cancelled') {
       list = list.filter(o => o.isCancelled);
     }
   } else {
-    // Специалисты: только свои заказы
-    list = list.filter(o =>
-      (o.responsible === currentWorkerName || o.assistant === currentWorkerName) && !o.isCancelled
-    );
-    if (currentWorkerTab === 'relevant') {
-      list = list.filter(o => o.inWork && !o.workerDone);
-    }
+    list = _filterSpecialistOrdersByTab(list);
   }
 
   if (search) list = list.filter(o =>
@@ -1248,7 +1448,7 @@ function renderOrdersForMonth(ym) {
     (o.phone   || '').toLowerCase().includes(search) ||
     (o.id      || '').toLowerCase().includes(search)
   );
-  if (statF) list = list.filter(o => o.paymentStatus === statF);
+  if (statF) list = list.filter(o => getEffectivePaymentStatus(o) === statF);
   list.sort((a, b) => {
     const ad = a.date || '';
     const bd = b.date || '';
@@ -1256,8 +1456,11 @@ function renderOrdersForMonth(ym) {
   });
 
   const container = document.getElementById('orders-list');
+  const signature = _getOrdersListSignature('month', { search, statF, sort, ym });
 
   if (!list.length) {
+    lastOrdersListSignature = signature;
+    ordersVisibleCount = 10;
     container.innerHTML = `
       <div class="empty-state">
         <div class="empty-state-icon">📋</div>
@@ -1267,7 +1470,7 @@ function renderOrdersForMonth(ym) {
     return;
   }
 
-  container.innerHTML = list.map(o => renderOrderCard(o)).join('');
+  _renderOrdersListWithLoadMore(container, list, signature);
 }
 
 // ---------- WORKER DONE — СПЕЦИАЛИСТ ОТМЕЧАЕТ ВЫПОЛНЕНИЕ ----------
@@ -1279,13 +1482,12 @@ async function toggleWorkerDone(orderId) {
   o.workerDone = !o.workerDone;
   try {
     await sbUpdateOrder(o);
-    await _upsertOrderSalaries(o);
     // Автозачисление в кассу если наличка и заказ отмечен выполненным
     if (o.workerDone && typeof addCashFromOrder === 'function') {
       await addCashFromOrder(o);
     }
     currentMonthFilter ? renderOrdersForMonth(currentMonthFilter) : renderOrders();
-    showToast(o.workerDone ? '✓ Выполнено — ЗП начислена' : 'Отметка снята');
+    showToast(o.workerDone ? '✓ Выполнено' : 'Отметка снята');
     if (document.getElementById('screen-profile')?.classList.contains('active')) {
       await loadWorkerSalaries();
       renderProfile();
@@ -1433,17 +1635,18 @@ function initOrderTabs() {
     }
     setOrderTab('selection');
   } else {
-    // Специалисты: Актуальные | Все мои
+    // Специалисты: сегодняшние, выполненные, будущие, прошедшие, все мои
     if (tabsEl) {
       tabsEl.style.display = 'flex';
       tabsEl.innerHTML = `
-        <button class="orders-tab orders-tab-relevant active" id="tab-relevant" onclick="setWorkerTab('relevant')">
-          <span class="tab-dot"></span> Актуальные
-        </button>
+        <button class="orders-tab orders-tab-relevant active" id="tab-today" onclick="setWorkerTab('today')"><span class="tab-dot"></span> Сегодняшние</button>
+        <button class="orders-tab" id="tab-done-worker" onclick="setWorkerTab('done')">Выполненные</button>
+        <button class="orders-tab" id="tab-future" onclick="setWorkerTab('future')">Будущие</button>
+        <button class="orders-tab" id="tab-past" onclick="setWorkerTab('past')">Прошедшие</button>
         <button class="orders-tab" id="tab-my-all" onclick="setWorkerTab('all')">Все мои</button>
       `;
     }
-    currentWorkerTab = 'relevant';
+    currentWorkerTab = 'today';
     if (currentMonthFilter) {
       renderOrdersForMonth(currentMonthFilter);
     } else {
@@ -1455,7 +1658,14 @@ function initOrderTabs() {
 function setWorkerTab(tab) {
   currentWorkerTab = tab;
   document.querySelectorAll('.orders-tab').forEach(b => b.classList.remove('active'));
-  const el = document.getElementById(tab === 'relevant' ? 'tab-relevant' : 'tab-my-all');
+  const tabMap = {
+    today: 'tab-today',
+    done: 'tab-done-worker',
+    future: 'tab-future',
+    past: 'tab-past',
+    all: 'tab-my-all',
+  };
+  const el = document.getElementById(tabMap[tab] || 'tab-my-all');
   if (el) el.classList.add('active');
   if (currentMonthFilter) {
     renderOrdersForMonth(currentMonthFilter);
@@ -1566,7 +1776,7 @@ function acGetItems(type, query) {
   if (type === 'client') {
     const clients = getClients();
     return clients
-      .filter(c => !q || c.name.toLowerCase().startsWith(q))
+      .filter(c => !q || (c.name || '').toLowerCase().includes(q))
       .slice(0, 40)
       .map(c => ({
         label:   c.name,

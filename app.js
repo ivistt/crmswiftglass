@@ -16,6 +16,13 @@ async function initApp() {
     tasks.push((async () => {
       try { window.allCashLog = await sbFetchAllCashLog(); } catch(e) { window.allCashLog = []; }
     })());
+    tasks.push((async () => {
+      try {
+        if (typeof loadAllSalaries === 'function') await loadAllSalaries();
+      } catch (e) {
+        if (typeof allSalaries !== 'undefined') allSalaries = [];
+      }
+    })());
   }
   await Promise.all(tasks);
   updateNavbarVisibility();
@@ -93,6 +100,12 @@ function openFinanceScreen() {
   showScreen('finance');
 }
 
+function openOwnerCashScreen() {
+  if (currentRole !== 'owner') return;
+  renderOwnerCashScreen();
+  showScreen('owner-cash');
+}
+
 // --- ЗАГРУЗКА ЗАКАЗОВ ---
 async function loadOrders() {
   const btn = document.getElementById('refresh-btn');
@@ -107,10 +120,7 @@ async function loadOrders() {
 }
 
 async function refreshOrders() {
-  await loadOrders();
-  renderOrders();
-  renderHome();
-  showToast('Данные обновлены');
+  window.location.reload();
 }
 
 // --- НАВИГАЦИЯ ---
@@ -127,6 +137,7 @@ function showScreen(name) {
     clients: 'Клиенты',
     workers: 'Сотрудники',
     finance: 'Финансы',
+    'owner-cash': 'Касса сотрудников',
     profile: null,
     'order-detail': 'Детали заказа',
     'client-detail': 'Детали клиента',
@@ -243,13 +254,30 @@ function renderHome() {
   if (currentRole === 'owner') {
     const totalCash = (window.allCashLog || []).reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
     container.innerHTML += `
-      <div class="home-card">
+      <div class="home-card" onclick="openOwnerCashScreen()">
         <div class="home-card-icon-wrap home-card-icon-dim">
           <i data-lucide="wallet" style="width:22px;height:22px;"></i>
         </div>
         <h3>Касса</h3>
         <p>Сумма на руках</p>
         <div class="home-card-count" style="font-size:22px; color: var(--accent);">${totalCash.toLocaleString('ru')} ₴</div>
+      </div>
+    `;
+
+    const salaryEntries = (typeof getManualSalaryReports === 'function') ? getManualSalaryReports() : [];
+    const currentYm = getLocalDateString().slice(0, 7);
+    const monthSalaryTotal = salaryEntries
+      .filter(s => s.date && s.date.startsWith(currentYm))
+      .reduce((sum, s) => sum + Number(s.amount), 0);
+    const anomaliesCount = (typeof getSalaryAnomalies === 'function') ? getSalaryAnomalies().length : 0;
+    container.innerHTML += `
+      <div class="home-card" onclick="openSalaryDetail()">
+        <div class="home-card-icon-wrap home-card-icon-dim">
+          <i data-lucide="wallet-cards" style="width:22px;height:22px;"></i>
+        </div>
+        <h3>ЗП</h3>
+        <p>${anomaliesCount > 0 ? `Аномалий: ${anomaliesCount}` : 'Проверка зарплат'}</p>
+        <div class="home-card-count" style="font-size:22px; color: ${anomaliesCount > 0 ? 'var(--red)' : 'var(--yellow)'};">${monthSalaryTotal.toLocaleString('ru')} ₴</div>
       </div>
     `;
 
@@ -264,6 +292,132 @@ function renderHome() {
       </div>
     `;
   }
+
+  initIcons();
+}
+
+function _ownerCashEntryDate(entry) {
+  if (!entry?.created_at) return '';
+  return new Date(entry.created_at).toISOString().slice(0, 10);
+}
+
+function renderOwnerCashScreen() {
+  const container = document.getElementById('owner-cash-content');
+  if (!container) return;
+
+  const seniorNames = (workers || [])
+    .filter(w => w.systemRole === 'senior')
+    .map(w => w.name);
+
+  const logs = [...(window.allCashLog || [])]
+    .filter(entry => seniorNames.includes(entry.worker_name))
+    .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+
+  if (!logs.length) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state-icon">💵</div>
+        <h3>Записей кассы нет</h3>
+        <p>Когда у старших специалистов появятся движения по кассе, они будут показаны здесь</p>
+      </div>
+    `;
+    initIcons();
+    return;
+  }
+
+  const balances = {};
+  const snapshotsByDay = {};
+  for (const entry of logs) {
+    const workerName = entry.worker_name;
+    balances[workerName] = (balances[workerName] || 0) + (Number(entry.amount) || 0);
+    const day = _ownerCashEntryDate(entry);
+    if (!day) continue;
+    if (!snapshotsByDay[day]) snapshotsByDay[day] = {};
+    snapshotsByDay[day][workerName] = balances[workerName];
+  }
+
+  const tree = {};
+  Object.keys(snapshotsByDay).forEach(day => {
+    const year = day.slice(0, 4);
+    const month = day.slice(0, 7);
+    if (!tree[year]) tree[year] = {};
+    if (!tree[year][month]) tree[year][month] = [];
+    tree[year][month].push(day);
+  });
+
+  const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+  const years = Object.keys(tree).sort((a, b) => b.localeCompare(a));
+
+  container.innerHTML = years.map(year => {
+    const yearKey = `owner-cash-year-${year}`;
+    const monthsHtml = Object.keys(tree[year]).sort((a, b) => b.localeCompare(a)).map(monthKey => {
+      const monthToggleKey = `owner-cash-month-${monthKey}`;
+      const [, month] = monthKey.split('-');
+      const days = tree[year][monthKey].sort((a, b) => b.localeCompare(a));
+
+      const daysHtml = days.map(day => {
+        const dayToggleKey = `owner-cash-day-${day}`;
+        const snapshot = snapshotsByDay[day] || {};
+        const rows = seniorNames.map(name => ({
+          workerName: name,
+          balance: Number(snapshot[name] || 0),
+        }));
+        const total = rows.reduce((sum, row) => sum + row.balance, 0);
+
+        return `
+          <div style="border-bottom:1px solid var(--border);">
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;cursor:pointer;" onclick="toggleProfileMonth('${dayToggleKey}')">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <i data-lucide="chevron-right" style="width:13px;height:13px;color:var(--text3);transition:transform 0.2s;" id="pchevron-${dayToggleKey}"></i>
+                <div style="font-size:13px;color:var(--text2);font-weight:600;">${formatDate(day)}</div>
+              </div>
+              <div style="font-size:13px;font-weight:800;color:${total >= 0 ? 'var(--accent)' : '#ef4444'};">${total.toLocaleString('ru')} ₴</div>
+            </div>
+            <div id="profile-month-body-${dayToggleKey}" style="display:none;padding:0 12px 8px 28px;">
+              <div style="display:flex;flex-direction:column;gap:8px;">
+                ${rows.map(row => `
+                  <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;">
+                    <div style="font-size:13px;font-weight:600;color:var(--text2);">${row.workerName}</div>
+                    <div style="font-size:14px;font-weight:800;color:${row.balance >= 0 ? 'var(--accent)' : '#ef4444'};">${row.balance.toLocaleString('ru')} ₴</div>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      return `
+        <div style="border-bottom:1px solid var(--border);">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;cursor:pointer;" onclick="toggleProfileMonth('${monthToggleKey}')">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <i data-lucide="chevron-right" style="width:14px;height:14px;color:var(--text3);transition:transform 0.2s;" id="pchevron-${monthToggleKey}"></i>
+              <div style="font-size:14px;font-weight:700;color:var(--text2);">${monthNames[Number(month) - 1] || monthKey}</div>
+              <div style="font-size:11px;color:var(--text3);">${days.length} дн.</div>
+            </div>
+          </div>
+          <div id="profile-month-body-${monthToggleKey}" style="display:none;padding-left:12px;background:var(--surface2);border-radius:0 0 8px 8px;">
+            ${daysHtml}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    return `
+      <div class="fin-month-card" style="margin-bottom:12px;">
+        <div class="fin-month-header" onclick="toggleProfileMonth('${yearKey}')">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <i data-lucide="chevron-down" style="width:16px;height:16px;color:var(--text3);transition:transform 0.2s;" id="pchevron-${yearKey}"></i>
+            <div>
+              <div class="fin-month-name">${year}</div>
+              <div class="fin-month-sub">${Object.keys(tree[year]).length} мес.</div>
+            </div>
+          </div>
+        </div>
+        <div id="profile-month-body-${yearKey}" style="display:none;padding:0 0 8px;">${monthsHtml}</div>
+      </div>
+    `;
+  }).join('');
 
   initIcons();
 }

@@ -393,6 +393,7 @@ function rowToOrder(r) {
     onlyCut:         r.only_cut || false,
     reworkData:      r.rework_data || {},
     clientPayments:  r.client_payments || [],
+    supplierPayments:r.supplier_payments || [],
   };
 }
 
@@ -453,6 +454,7 @@ function orderToRow(o) {
     only_cut:         o.onlyCut || false,
     rework_data:      o.reworkData || {},
     client_payments:  o.clientPayments || [],
+    supplier_payments:o.supplierPayments || [],
   };
 }
 
@@ -669,6 +671,40 @@ function calcDaySalary(workerName, date) {
         }
         return total;
       }, 0);
+}
+
+const MANUAL_SALARY_REPORT_ORDER_ID = 'DAY_REPORT';
+const SALARY_WITHDRAWAL_ORDER_ID = 'Выплата';
+
+function getOrderClientTotalAmount(order) {
+  return (Number(order?.total) || 0)
+       + (Number(order?.income) || 0)
+       + (Number(order?.delivery) || 0);
+}
+
+function isManualSalaryReportEntry(entry) {
+  return !!entry && entry.order_id === MANUAL_SALARY_REPORT_ORDER_ID && Number(entry.amount) > 0;
+}
+
+function isSalaryWithdrawalEntry(entry) {
+  return !!entry && entry.order_id === SALARY_WITHDRAWAL_ORDER_ID;
+}
+
+function isRelevantSalaryEntry(entry) {
+  return isManualSalaryReportEntry(entry) || isSalaryWithdrawalEntry(entry);
+}
+
+function getWorkerCompletedOrdersSummary(workerName, date) {
+  const dayOrders = _getCompletedOrdersForWorkerDate(workerName, date);
+  return {
+    date,
+    count: dayOrders.length,
+    totalAmount: dayOrders.reduce((sum, order) => sum + getOrderClientTotalAmount(order), 0),
+    orders: dayOrders.map(order => ({
+      id: order.id,
+      car: order.car || order.client || '—',
+    })),
+  };
 }
 
 // ── GLOBAL STATE ─────────────────────────────────────────────

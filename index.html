@@ -133,7 +133,7 @@
       </div>
     </div>
     <div class="topbar-right">
-      <button class="refresh-btn" id="refresh-btn" onclick="refreshOrders()" title="Обновить">
+      <button class="refresh-btn" id="refresh-btn" onclick="refreshOrders()" title="Перезагрузить страницу">
         <i data-lucide="refresh-cw" style="width:15px;height:15px;"></i>
       </button>
       <span class="role-badge" id="role-badge"></span>
@@ -333,6 +333,23 @@
         <div class="page-title">Финансы</div>
       </div>
       <div id="finance-content"></div>
+    </div>
+
+    <!-- OWNER CASH -->
+    <div class="screen" id="screen-owner-cash">
+      <div class="detail-topbar">
+        <button class="back-btn" onclick="goHome()" style="display:flex;align-items:center;gap:6px;">
+          <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
+          Назад
+        </button>
+      </div>
+      <div class="page-header" style="margin-top:-10px;">
+        <div class="page-title" style="display:flex;align-items:center;gap:10px;">
+          <span class="ico page-title-icon"><i data-lucide="wallet" style="width:22px;height:22px;"></i></span>
+          Касса сотрудников
+        </div>
+      </div>
+      <div id="owner-cash-content"></div>
     </div>
 
     <!-- CAR DIRECTORY -->
@@ -698,6 +715,18 @@
             <!-- ГРУППА 2: Стекло/Поставщик -->
             <div class="form-group span-full" style="background:var(--surface3); padding:16px; border-radius:12px; border:1px solid var(--border);">
               <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:12px;text-transform:uppercase;">Стекло / Поставщик</div>
+              <div id="supplier-payments-list" style="margin-bottom:12px;display:flex;flex-direction:column;gap:8px;"></div>
+              <div style="display:flex;align-items:end;gap:8px;margin-bottom:16px;padding:10px;background:var(--surface2);border-radius:8px;border:1px solid var(--border);">
+                <div style="flex:1;">
+                  <label class="form-label" style="font-size:11px;">Сумма поставщику</label>
+                  <input class="form-input" type="number" id="f-new-supplier-payment-amount" placeholder="0">
+                </div>
+                <div style="flex:1;">
+                  <label class="form-label" style="font-size:11px;">Дата</label>
+                  <input class="form-input" type="date" id="f-new-supplier-payment-date">
+                </div>
+                <button type="button" class="btn-secondary" style="padding:10px;" onclick="addSupplierPayment()">Добавить</button>
+              </div>
               <div class="form-grid">
                 <div class="form-group">
                   <label class="form-label">Сумма покупки стекла</label>
@@ -708,12 +737,12 @@
                   <input class="form-input" type="number" id="f-income" placeholder="0" oninput="recalcMargin()">
                 </div>
                 <div class="form-group">
-                  <label class="form-label">Маржа с продажи стекла</label>
-                  <input class="form-input" type="number" id="f-remainder" placeholder="0" readonly>
-                </div>
-                <div class="form-group">
                   <label class="form-label">Сумма поставщику</label>
                   <input class="form-input" type="number" id="f-check" placeholder="0" oninput="recalcTotal()">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Маржа с продажи стекла</label>
+                  <input class="form-input" type="number" id="f-remainder" placeholder="0" readonly>
                 </div>
                 <div class="form-group span-full">
                   <label class="form-label">📦 Статус оплаты поставщику</label>
