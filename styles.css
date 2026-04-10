@@ -595,6 +595,7 @@ body {
   border: 1px solid var(--border);
   cursor: pointer;
   transition: all 0.15s;
+  position: relative;
 }
 .order-card:hover {
   border-color: var(--border2);
@@ -612,9 +613,30 @@ body {
 
 .order-card-left {
   display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.order-card-status-row,
+.order-card-title-row,
+.order-card-actions {
+  display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.order-card-title-row {
+  min-width: 0;
+}
+
+.order-card-actions {
+  align-self: flex-start;
+  justify-content: flex-end;
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
 .order-id {
@@ -631,6 +653,13 @@ body {
   font-size: 15px;
   font-weight: 700;
   color: var(--text);
+  min-width: 0;
+}
+
+.order-card-client-total {
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
 }
 
 .order-card-meta {
@@ -1116,6 +1145,21 @@ input[type="datetime-local"] {
   .orders-tab { font-size: 11px; padding: 7px 12px; }
 
   .order-card { padding: 14px 16px; }
+  .order-card-top {
+    align-items: flex-start;
+  }
+  .order-card-left {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .order-card-actions {
+    flex: 0 0 auto;
+  }
+  .order-card-title-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
   .order-name { font-size: 14px; }
 
   .clients-grid, .workers-grid { gap: 8px; }
@@ -1618,6 +1662,39 @@ input[type="datetime-local"] {
   color: #000;
 }
 .service-checkboxes label.checkbox input {
+  display: none;
+}
+
+/* Отдельные флаги заказа */
+.order-flag-checkbox {
+  border: 1px solid var(--border);
+  padding: 10px 14px;
+  border-radius: 100px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text2);
+  transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  width: 100%;
+  user-select: none;
+  background: var(--surface);
+  -webkit-tap-highlight-color: transparent;
+}
+.order-flag-checkbox:hover {
+  border-color: var(--accent);
+  color: var(--text);
+  background: var(--surface2);
+}
+.order-flag-checkbox:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #000;
+}
+.order-flag-checkbox input {
   display: none;
 }
 

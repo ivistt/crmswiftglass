@@ -263,10 +263,29 @@ async function sbFetchRefOptional(table) {
 
 // -- CAR DIRECTORY --------------------------------------------------
 async function sbFetchCarDirectory() {
-  const res = await fetch(`${WORKER_URL}/api/car-directory`, { headers: getHeaders() });
-  if (!res.ok) throw new Error(await res.text());
-  const body = await res.json();
-  return Array.isArray(body) ? body : (body.data ?? []);
+  const pageSize = 1000;
+  const allRows = [];
+  const seen = new Set();
+
+  for (let offset = 0; ; offset += pageSize) {
+    const res = await fetch(`${WORKER_URL}/api/car-directory?offset=${offset}&limit=${pageSize}`, { headers: getHeaders() });
+    if (!res.ok) throw new Error(await res.text());
+    const body = await res.json();
+    const rows = Array.isArray(body) ? body : (body.data ?? []);
+    let added = 0;
+
+    for (const row of rows) {
+      const key = row.id || row.model || `${row.eurocode}-${allRows.length}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      allRows.push(row);
+      added++;
+    }
+
+    if (rows.length < pageSize || added === 0) break;
+  }
+
+  return allRows;
 }
 
 async function sbUpsertCarDirectory(model, eurocode) {
@@ -299,6 +318,45 @@ async function sbDeleteCarDirectory(id) {
   if (!res.ok) throw new Error(await res.text());
 }
 
+// ── CLIENTS ─────────────────────────────────────────────────
+
+async function sbFetchManualClients() {
+  const pageSize = 1000;
+  const allRows = [];
+  const seen = new Set();
+
+  for (let offset = 0; ; offset += pageSize) {
+    const res = await fetch(`${WORKER_URL}/api/clients?offset=${offset}&limit=${pageSize}`, { headers: getHeaders() });
+    if (!res.ok) throw new Error(await res.text());
+    const body = await res.json();
+    const rows = Array.isArray(body) ? body : (body.data ?? body.clients ?? []);
+    let added = 0;
+
+    for (const row of rows) {
+      const key = row.id || row.phone || `${row.name}-${allRows.length}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      allRows.push(row);
+      added++;
+    }
+
+    if (rows.length < pageSize || added === 0) break;
+  }
+
+  return allRows.map(rowToManualClient);
+}
+
+async function sbInsertManualClient(client) {
+  const res = await fetch(`${WORKER_URL}/api/clients`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(manualClientToRow(client)),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const rows = await res.json();
+  return rowToManualClient(Array.isArray(rows) ? rows[0] : rows);
+}
+
 async function loadRefData() {
   try {
     const [cars, wh, eq, ps, part, ss, carDir, drops] = await Promise.all([
@@ -311,7 +369,7 @@ async function loadRefData() {
       sbFetchCarDirectory().catch(() => []),
       sbFetchRefOptional('ref_dropshippers'),
     ]);
-    refCars             = cars;
+    refCars             = carDir.length ? carDir : cars;
     refWarehouses       = wh;
     refEquipment        = eq;
     refPaymentStatuses  = ps.map(s => s.name === 'Борг' ? { ...s, name: 'Долг' } : s);
@@ -331,6 +389,9 @@ function rowToOrder(r) {
   let paymentStatus = r.payment_status || '';
   if (paymentStatus === 'Борг') paymentStatus = 'Не оплачено';
   if (paymentStatus === 'Рассчитано') paymentStatus = 'Оплачено';
+  if (paymentStatus === 'Частично оплачено') paymentStatus = 'Частично';
+  let supplierStatus = r.supplier_status || '';
+  if (supplierStatus === 'Частично оплачено') supplierStatus = 'Частично';
   return {
     id:              r.id,
     date:            r.date,
@@ -359,13 +420,14 @@ function rowToOrder(r) {
     percent20:       r.percent20      || 0, // legacy
     moldingAuthor:   r.molding_author,
     partner:         r.partner,
-    supplierStatus:  r.supplier_status,
+    supplierStatus:  supplierStatus,
     purchase:        r.purchase       || 0,
     income:          r.income         || 0,
     remainder:       r.remainder      || 0,
     paymentMethod:   r.payment_method,
     warehouse:       r.warehouse,
     warehouseCode:   r.warehouse_code,
+    newPost:         r.new_post || false,
     configuration:   r.configuration,
     warehouseDelta:  r.warehouse_delta,
     dropshipper:     r.drop_shipper,
@@ -389,6 +451,7 @@ function rowToOrder(r) {
     isCancelled:     r.is_cancelled || false,
     manager:         r.manager || '',
     onlyCut:         r.only_cut || false,
+    onlySale:        r.only_sale || false,
     reworkData:      r.rework_data || {},
     clientPayments:  r.client_payments || [],
     supplierPayments:r.supplier_payments || [],
@@ -428,6 +491,7 @@ function orderToRow(o) {
     payment_method:    o.paymentMethod,
     warehouse:         o.warehouse,
     warehouse_code:    o.warehouseCode,
+    new_post:          o.newPost || false,
     configuration:     o.configuration,
     drop_shipper:      o.dropshipper || null,
     drop_shipper_payout: o.dropshipperPayout || 0,
@@ -450,6 +514,7 @@ function orderToRow(o) {
     is_cancelled:     o.isCancelled || false,
     manager:          o.manager    || null,
     only_cut:         o.onlyCut || false,
+    only_sale:        o.onlySale || false,
     rework_data:      o.reworkData || {},
     client_payments:  o.clientPayments || [],
     supplier_payments:o.supplierPayments || [],
@@ -476,6 +541,23 @@ function workerToRow(w) {
     note:           w.note          || '',
     salary_formula: w.salaryFormula || '',
     assistant:      w.assistant     || '',
+  };
+}
+
+function rowToManualClient(r) {
+  if (!r) return {};
+  return {
+    id: r.id,
+    name: r.name || '',
+    phone: r.phone || '',
+    orders: [],
+  };
+}
+
+function manualClientToRow(c) {
+  return {
+    name: c.name || '',
+    phone: c.phone || null,
   };
 }
 
@@ -714,6 +796,22 @@ const ROLE_LABELS = {
   junior:  '👤 Младший специалист',
   extra:   '⭐ Экстра специалист',
 };
+
+const PAYMENT_METHOD_OPTIONS = [
+  '🪙 Наличка',
+  '👤 Шепель Александр 💳 4149 4975 1422 9980 (PRIVAT)',
+  '👤 Киртока Максим 💳 4441 1144 6035 9811 (MONO)',
+  '👤 Киртока Анастасия 💳 4149 6090 2872 4237 (PRIVAT)',
+  '👤 Бабенко Олег 💳 5457 0825 0103 4743 (PRIVAT)',
+  '📂 БЕЗНАЛ БАБЕНКО',
+];
+
+function normalizePaymentMethod(method) {
+  if (!method) return '';
+  const value = String(method).trim();
+  if (value === 'Наличка') return '🪙 Наличка';
+  return value;
+}
 
 let currentRole = null;
 let currentWorkerName = null;

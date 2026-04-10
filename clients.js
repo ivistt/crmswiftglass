@@ -98,6 +98,15 @@ function getInitials(name) {
 // Хранилище локально-созданных клиентов (без заказов)
 let manualClients = [];
 
+async function loadManualClients() {
+  try {
+    manualClients = await sbFetchManualClients();
+  } catch (e) {
+    manualClients = [];
+    showToast('Ошибка загрузки базы клиентов: ' + e.message, 'error');
+  }
+}
+
 function openClientModal() {
   document.getElementById('c-name').value = '';
   document.getElementById('c-phone').value = '';
@@ -131,9 +140,8 @@ async function saveClient() {
   if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '⏳'; }
 
   try {
-    // Сохраняем как пустой заказ-заглушку в Supabase чтобы клиент появился в базе,
-    // либо просто добавляем локально в manualClients
-    manualClients.push({ name, phone, orders: [] });
+    const created = await sbInsertManualClient({ name, phone });
+    manualClients.push(created || { name, phone, orders: [] });
     closeClientModal();
     renderClients();
     showToast('Клиент добавлен ✓');

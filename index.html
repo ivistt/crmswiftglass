@@ -154,10 +154,6 @@
       <span class="nav-icon ico"><i data-lucide="clipboard-list" style="width:20px;height:20px;"></i></span>
       <span class="nav-label">Записи</span>
     </button>
-    <button class="nav-item nav-item-add" id="nav-add" onclick="openOrderModal(null)">
-      <span class="nav-icon ico"><i data-lucide="plus" style="width:22px;height:22px;"></i></span>
-      <span class="nav-label">Добавить</span>
-    </button>
     <button class="nav-item" id="nav-cash" onclick="navTo('cash')" style="display:none;">
       <span class="nav-icon ico"><i data-lucide="wallet" style="width:20px;height:20px;"></i></span>
       <span class="nav-label">Касса</span>
@@ -267,7 +263,7 @@
             <option value="">Все статусы</option>
             <option>Оплачено</option>
             <option>Не оплачено</option>
-            <option>Частично оплачено</option>
+            <option>Частично</option>
           </select>
           <input class="filter-input" type="date" id="filter-date"
             oninput="renderOrders()" style="width:100%;">
@@ -354,6 +350,40 @@
         </div>
       </div>
       <div id="owner-cash-content"></div>
+    </div>
+
+    <!-- OWNER PAYMENTS -->
+    <div class="screen" id="screen-owner-payments">
+      <div class="detail-topbar">
+        <button class="back-btn" onclick="goHome()" style="display:flex;align-items:center;gap:6px;">
+          <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
+          Назад
+        </button>
+      </div>
+      <div class="page-header" style="margin-top:-10px;">
+        <div class="page-title" style="display:flex;align-items:center;gap:10px;">
+          <span class="ico page-title-icon"><i data-lucide="credit-card" style="width:22px;height:22px;"></i></span>
+          Оплаты
+        </div>
+      </div>
+      <div id="owner-payments-content"></div>
+    </div>
+
+    <!-- OWNER TODAY -->
+    <div class="screen" id="screen-owner-today">
+      <div class="detail-topbar">
+        <button class="back-btn" onclick="goHome()" style="display:flex;align-items:center;gap:6px;">
+          <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
+          Назад
+        </button>
+      </div>
+      <div class="page-header" style="margin-top:-10px;">
+        <div class="page-title" style="display:flex;align-items:center;gap:10px;">
+          <span class="ico page-title-icon"><i data-lucide="calendar-days" style="width:22px;height:22px;"></i></span>
+          Сегодня
+        </div>
+      </div>
+      <div id="owner-today-content"></div>
     </div>
 
     <!-- CAR DIRECTORY -->
@@ -499,9 +529,15 @@
             </select>
           </div>
           <div class="form-group">
-            <label class="checkbox" style="gap:8px;margin-top:24px;">
-              <input type="checkbox" id="f-only-cut" style="width:18px;height:18px;accent-color:#00e5a0;">
-              <span style="font-size:14px;font-weight:600;">✂️ Только срезка (ЗП ÷ 2)</span>
+            <label class="checkbox order-flag-checkbox">
+              <input type="checkbox" id="f-only-cut">
+              <span>✂️ Только срезка (ЗП ÷ 2)</span>
+            </label>
+          </div>
+          <div class="form-group">
+            <label class="checkbox order-flag-checkbox">
+              <input type="checkbox" id="f-only-sale">
+              <span>🧾 Только продажа</span>
             </label>
           </div>
           <div class="form-group">
@@ -538,7 +574,11 @@
           </div>
           <div class="form-group">
             <label class="form-label">☎️ Телефон</label>
-            <input class="form-input" type="text" id="f-phone" placeholder="+380...">
+            <div class="ac-wrap" id="ac-phone-wrap">
+              <input class="form-input" type="text" id="f-phone" placeholder="+380..."
+                autocomplete="off" oninput="acFilter('phone')" onfocus="acOpen('phone')" onblur="acBlur('phone')" onkeydown="acKey(event,'phone')">
+              <div class="ac-dropdown" id="ac-phone-list"></div>
+            </div>
           </div>
           <div class="form-group">
             <label class="form-label">📍 Место</label>
@@ -559,6 +599,12 @@
                 autocomplete="off" oninput="acFilter('code')" onfocus="acOpen('code')" onblur="acBlur('code')" onkeydown="acKey(event,'code')">
               <div class="ac-dropdown" id="ac-code-list"></div>
             </div>
+          </div>
+          <div class="form-group">
+            <label class="checkbox order-flag-checkbox">
+              <input type="checkbox" id="f-new-post">
+              <span>📮 Новая почта</span>
+            </label>
           </div>
           <div class="form-group">
             <label class="form-label">🏢 Склад</label>
@@ -728,16 +774,30 @@
             <div class="form-group span-full" style="background:var(--surface3); padding:16px; border-radius:12px; border:1px solid var(--border);">
               <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:12px;text-transform:uppercase;">Стекло / Поставщик</div>
               <div id="supplier-payments-list" style="margin-bottom:12px;display:flex;flex-direction:column;gap:8px;"></div>
-              <div style="display:flex;align-items:end;gap:8px;margin-bottom:16px;padding:10px;background:var(--surface2);border-radius:8px;border:1px solid var(--border);">
-                <div style="flex:1;">
+              <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;margin-bottom:16px;padding:10px;background:var(--surface2);border-radius:8px;border:1px solid var(--border);">
+                <div style="min-width:0;">
                   <label class="form-label" style="font-size:11px;">Сумма поставщику</label>
                   <input class="form-input" type="number" id="f-new-supplier-payment-amount" placeholder="0">
                 </div>
-                <div style="flex:1;">
+                <div style="min-width:0;">
                   <label class="form-label" style="font-size:11px;">Дата</label>
                   <input class="form-input" type="date" id="f-new-supplier-payment-date">
                 </div>
-                <button type="button" class="btn-secondary" style="padding:10px;" onclick="addSupplierPayment()">Добавить</button>
+                <div style="min-width:0;">
+                  <label class="form-label" style="font-size:11px;">Способ оплаты</label>
+                  <select class="form-select" id="f-new-supplier-payment-method">
+                    <option value="">— выбрать —</option>
+                    <option>🪙 Наличка</option>
+                    <option>👤 Шепель Александр 💳 4149 4975 1422 9980 (PRIVAT)</option>
+                    <option>👤 Киртока Максим 💳 4441 1144 6035 9811 (MONO)</option>
+                    <option>👤 Киртока Анастасия 💳 4149 6090 2872 4237 (PRIVAT)</option>
+                    <option>👤 Бабенко Олег 💳 5457 0825 0103 4743 (PRIVAT)</option>
+                    <option>📂 БЕЗНАЛ БАБЕНКО</option>
+                  </select>
+                </div>
+                <div style="display:flex;align-items:end;min-width:0;">
+                  <button type="button" class="btn-secondary" style="width:100%;height:44px;padding:0 16px;font-weight:800;" onclick="addSupplierPayment()">Добавить</button>
+                </div>
               </div>
               <div class="form-grid">
                 <div class="form-group">
@@ -753,7 +813,7 @@
                   <input class="form-input" type="number" id="f-check" placeholder="0" oninput="recalcTotal()">
                 </div>
                 <div class="form-group">
-                  <label class="form-label">Маржа с продажи стекла</label>
+                  <label class="form-label">Маржа стекло</label>
                   <input class="form-input" type="number" id="f-remainder" placeholder="0" readonly>
                 </div>
                 <div class="form-group span-full">
@@ -762,7 +822,7 @@
                     <option value="">—</option>
                     <option>Оплачено</option>
                     <option>Не оплачено</option>
-                    <option>Частично оплачено</option>
+                    <option>Частично</option>
                   </select>
                 </div>
               </div>
@@ -775,16 +835,30 @@
               </div>
               <div id="client-payments-list" style="margin-bottom:12px;display:flex;flex-direction:column;gap:8px;"></div>
               <!-- Добавление платежа -->
-              <div style="display:flex;align-items:end;gap:8px;margin-bottom:16px;padding:10px;background:var(--surface2);border-radius:8px;border:1px solid var(--border);">
-                <div style="flex:1;">
+              <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;margin-bottom:16px;padding:10px;background:var(--surface2);border-radius:8px;border:1px solid var(--border);">
+                <div style="min-width:0;">
                   <label class="form-label" style="font-size:11px;">Сумма платежа</label>
                   <input class="form-input" type="number" id="f-new-payment-amount" placeholder="0">
                 </div>
-                <div style="flex:1;">
+                <div style="min-width:0;">
                   <label class="form-label" style="font-size:11px;">Дата</label>
                   <input class="form-input" type="date" id="f-new-payment-date">
                 </div>
-                <button type="button" class="btn-secondary" style="padding:10px;" onclick="addClientPayment()">Добавить</button>
+                <div style="min-width:0;">
+                  <label class="form-label" style="font-size:11px;">Способ оплаты</label>
+                  <select class="form-select" id="f-payment-method">
+                    <option value="">— выбрать —</option>
+                    <option>🪙 Наличка</option>
+                    <option>👤 Шепель Александр 💳 4149 4975 1422 9980 (PRIVAT)</option>
+                    <option>👤 Киртока Максим 💳 4441 1144 6035 9811 (MONO)</option>
+                    <option>👤 Киртока Анастасия 💳 4149 6090 2872 4237 (PRIVAT)</option>
+                    <option>👤 Бабенко Олег 💳 5457 0825 0103 4743 (PRIVAT)</option>
+                    <option>📂 БЕЗНАЛ БАБЕНКО</option>
+                  </select>
+                </div>
+                <div style="display:flex;align-items:end;min-width:0;">
+                  <button type="button" class="btn-secondary" style="width:100%;height:44px;padding:0 16px;font-weight:800;" onclick="addClientPayment()">Добавить</button>
+                </div>
               </div>
 
               <div class="form-grid">
@@ -793,25 +867,12 @@
                   <select class="form-select" id="f-payment-status" disabled style="background-color: var(--surface2); cursor: not-allowed;">
                     <option value="Оплачено">Оплачено</option>
                     <option value="Не оплачено">Не оплачено</option>
-                    <option value="Частично оплачено">Частично оплачено</option>
+                    <option value="Частично">Частично</option>
                   </select>
                 </div>
                 <div class="form-group">
-                  <label class="form-label">Способ оплаты</label>
-                  <select class="form-select" id="f-payment-method">
-                    <option value="">— выбрать —</option>
-                    <option>Наличка</option>
-                    <option>ФОП</option>
-                    <option>Карта 1</option>
-                    <option>Карта 2</option>
-                    <option>Карта 3</option>
-                    <option>Карта 4</option>
-                    <option>Карта 5</option>
-                  </select>
-                </div>
-                <div class="form-group">
-                  <label class="form-label">Клиент уже оплатил (сумма):</label>
-                  <input class="form-input" type="number" id="f-debt" placeholder="0" readonly style="background-color: var(--surface2); cursor: not-allowed;">
+                  <label class="form-label">Клиент уже оплатил</label>
+                  <input class="form-input" type="number" id="f-debt" placeholder="0" readonly disabled style="background-color: var(--surface2); cursor: not-allowed; opacity:0.75;">
                 </div>
                 <div class="form-group">
                   <label class="form-label">Дата расчёта долга</label>

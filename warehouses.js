@@ -16,7 +16,7 @@ function renderWarehousesScreen() {
   // Ищем все неоплаченные/частично оплаченные заказы
   const debtOrders = orders.filter(o => 
     !o.isCancelled &&
-    (o.supplierStatus === 'Не оплачено' || o.supplierStatus === 'Частично оплачено')
+    (o.supplierStatus === 'Не оплачено' || o.supplierStatus === 'Частично')
   );
 
   if (!debtOrders.length) {
@@ -76,7 +76,7 @@ function renderWarehouseDetail() {
   const debtOrders = orders.filter(o => 
     !o.isCancelled &&
     (o.warehouse || 'Без склада') === w &&
-    (o.supplierStatus === 'Не оплачено' || o.supplierStatus === 'Частично оплачено')
+    (o.supplierStatus === 'Не оплачено' || o.supplierStatus === 'Частично')
   );
 
   if (!debtOrders.length) {
@@ -118,7 +118,7 @@ function renderWarehouseDetail() {
         
         for (const o of dayOrders) {
           const debt = (Number(o.purchase) || 0) - (Number(o.check) || 0);
-          const badgeColor = o.supplierStatus === 'Частично оплачено' ? 'var(--yellow)' : 'var(--red)';
+          const badgeColor = o.supplierStatus === 'Частично' ? 'var(--yellow)' : 'var(--red)';
           html += `
             <div class="order-card" style="margin-left:16px; margin-bottom:8px;" onclick="openOrderDetail('${o.id}')">
               <div class="order-card-top">

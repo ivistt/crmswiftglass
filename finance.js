@@ -852,6 +852,9 @@ function buildBackupPayload(freshProblems) {
                             date: p.date, description: p.description || null,
                             created_at: p.created_at || null,
                           })),
+    clients:              (typeof manualClients !== 'undefined' ? manualClients : []).map(c => ({
+                            id: c.id || null, name: c.name || '', phone: c.phone || null,
+                          })),
     ref_cars:             refCars             || [],
     ref_partners:         refPartners         || [],
     ref_payment_statuses: refPaymentStatuses  || [],
@@ -1067,12 +1070,13 @@ async function exportAllJSON() {
         // 1. Откройте Supabase Dashboard → Table Editor
         // 2. Для каждой таблицы: Insert → Import data → JSON
         //    или используйте SQL: INSERT INTO tablename SELECT * FROM json_populate_recordset(...)
-        // 3. Таблицы: orders, workers, worker_salaries, ref_cars,
+        // 3. Таблицы: orders, workers, clients, worker_salaries, ref_cars,
         //    ref_partners, car_directory и др.
       },
       tables: {
         orders:          { count: orderRows.length,   rows: orderRows  },
         workers:         { count: workerRows.length,  rows: workerRows },
+        clients:         { count: (typeof manualClients !== 'undefined' ? manualClients.length : 0), rows: (typeof manualClients !== 'undefined' ? manualClients : []) },
         worker_salaries: { count: salaryRows.length,  rows: salaryRows },
         ref_cars:             { count: (refCars||[]).length,             rows: refCars||[]             },
         ref_partners:         { count: (refPartners||[]).length,         rows: refPartners||[]         },
