@@ -1080,10 +1080,10 @@ async function _upsertOrderSalaries(order) {
     participants.push('__roma_tatu__'); // виртуальный участник для тату-бонуса Роме
   }
 
-  // Менеджер (Саша Менеджер или Макс) — если указан в поле manager заказа
+  // Менеджер — если указан в поле manager заказа и имеет systemRole === 'manager'
   const managerName = order.manager || '';
-  const SASHA_MANAGER = 'Саша Менеджер';
-  if (managerName === SASHA_MANAGER && !participants.includes(SASHA_MANAGER)) {
+  const managerWorker = managerName ? workers.find(x => x.name === managerName && x.systemRole === 'manager') : null;
+  if (managerWorker && !participants.includes(managerName)) {
     participants.push('__manager__'); // виртуальный участник
   }
 
@@ -1101,9 +1101,8 @@ async function _upsertOrderSalaries(order) {
       workerName = romaName;
       amount = order.workerDone ? tatuBonus : 0;
     } else if (participant === '__manager__') {
-      workerName = SASHA_MANAGER;
-      const glassMargin = Math.max(0, (Number(order.income) || 0) - (Number(order.purchase) || 0));
-      amount = order.workerDone ? (800 + Math.round(glassMargin * 0.10)) : 0;
+      workerName = managerName;
+      amount = order.workerDone ? _calcManagerSalary(order) : 0;
     } else {
       workerName = participant;
       // Для Ромы если он в заказе — его обычная ЗП (без тату, тату уже в __roma_tatu__ или добавляем сюда)

@@ -52,8 +52,9 @@ function renderProfile() {
       + '<div><div style="font-size:20px;font-weight:800;">' + currentWorkerName + '</div>'
       + '<div style="font-size:13px;color:var(--text3);margin-top:2px;">' + (ROLE_LABELS[currentRole] || currentRole) + '</div></div>'
       + '</div>'
-      + '<div style="margin-top:24px;padding:16px;background:var(--surface2);border-radius:14px;text-align:center;color:var(--text3);font-size:14px;">'
-      + 'Зарплата менеджера устанавливается владельцем'
+      + renderSalaryRuleCard(currentWorkerName)
+      + '<div style="margin-top:12px;padding:16px;background:var(--surface2);border-radius:14px;text-align:center;color:var(--text3);font-size:14px;">'
+      + 'Зарплата начисляется владельцем'
       + '</div>';
     initIcons();
     return;
@@ -155,6 +156,8 @@ function renderProfile() {
     + '<div style="font-size:24px;font-weight:800;color:var(--accent);">' + todayAmount.toLocaleString('ru') + ' \u20B4</div>'
     + '<div style="font-size:11px;color:var(--text3);padding:4px 10px;background:var(--surface2);border-radius:8px;">авто</div>'
     + '</div></div>'
+
+    + renderSalaryRuleCard(currentWorkerName)
 
     + '<div style="font-size:13px;font-weight:700;color:var(--text3);margin-top:8px;margin-bottom:4px;letter-spacing:0.04em;">ИСТОРИЯ ЗАРПЛАТ</div>'
     + '<div style="display:flex;flex-direction:column;gap:12px;">' + salaryHistoryHtml + '</div>';
@@ -616,4 +619,61 @@ function toggleProfileMonth(key) {
     // chevron-right поворачивается на 90deg, chevron-down на 180deg
     chevron.style.transform = isOpen ? '' : 'rotate(90deg)';
   }
+}
+
+// ── КАРТОЧКА УСЛОВИЙ ЗП ─────────────────────────────────────
+
+function renderSalaryRuleCard(workerName) {
+  if (typeof SALARY_CONFIG === 'undefined' || typeof getSalaryRule === 'undefined') return '';
+
+  const rule = getSalaryRule(workerName);
+  const parts = [];
+
+  if (rule.base) {
+    parts.push({ label: 'Ставка за заказ', value: rule.base.toLocaleString('ru') + ' ₴' });
+  }
+  if (rule.baseIfResp) {
+    parts.push({ label: 'Ставка (если ответственный)', value: rule.baseIfResp.toLocaleString('ru') + ' ₴' });
+  }
+  if (rule.glassMarginPct) {
+    parts.push({ label: 'Маржа стекла', value: Math.round(rule.glassMarginPct * 100) + '%' });
+  }
+  if (rule.servicesPct) {
+    parts.push({ label: 'Услуги (монтаж и др.)', value: Math.round(rule.servicesPct * 100) + '%' });
+  }
+  if (rule.tatuBonusPct) {
+    parts.push({ label: 'Бонус тату', value: Math.round(rule.tatuBonusPct * 100) + '%' });
+  }
+
+  if (!parts.length) {
+    parts.push({ label: 'Условия не заданы', value: '—' });
+  }
+
+  const rows = parts.map(p =>
+    '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);">'
+    + '<div style="font-size:13px;color:var(--text2);">' + p.label + '</div>'
+    + '<div style="font-size:14px;font-weight:700;color:var(--text);">' + p.value + '</div>'
+    + '</div>'
+  ).join('');
+
+  // Формула одной строкой
+  const formulaParts = [];
+  if (rule.base) formulaParts.push(rule.base + ' ₴');
+  if (rule.baseIfResp) formulaParts.push(rule.baseIfResp + ' ₴ (если отв.)');
+  if (rule.glassMarginPct) formulaParts.push('маржа × ' + Math.round(rule.glassMarginPct * 100) + '%');
+  if (rule.servicesPct) formulaParts.push('услуги × ' + Math.round(rule.servicesPct * 100) + '%');
+  const formulaStr = formulaParts.join(' + ') || '—';
+
+  return '<div style="margin-top:12px;margin-bottom:4px;">'
+    + '<div style="font-size:13px;font-weight:700;color:var(--text3);margin-bottom:8px;letter-spacing:0.04em;">УСЛОВИЯ ЗП</div>'
+    + '<div style="background:var(--surface2);border-radius:14px;padding:0 16px;">'
+    + rows
+    + '<div style="padding:10px 0 4px;">'
+    + '<div style="font-size:11px;color:var(--text3);margin-bottom:4px;">Формула</div>'
+    + '<code style="font-size:12px;color:var(--accent);background:var(--surface);padding:4px 8px;border-radius:6px;display:block;line-height:1.6;">'
+    + escapeHtml(formulaStr)
+    + '</code>'
+    + '</div>'
+    + '</div>'
+    + '</div>';
 }

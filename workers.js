@@ -169,19 +169,11 @@ function openWorkerEditModal(workerId) {
             </div>
           </div>
 
-          <!-- Формула ЗП -->
+          <!-- Условия ЗП (readonly, из SALARY_CONFIG) -->
           <div class="form-group" id="we-formula-group">
-            <label class="form-label">📐 Формула зарплаты</label>
-            <input class="form-input" id="we-formula" type="text"
-              placeholder="напр. mount * 0.20"
-              style="font-family:monospace;font-size:14px;">
-            <div style="font-size:11px;color:var(--text3);margin-top:5px;line-height:1.6;">
-              <b>Старший специалист</b> — переменная: <code style="color:var(--accent);">mount</code> (сумма монтажа)<br>
-              <code style="color:var(--accent);">mount * 0.20</code> — 20% от монтажа (дефолт)<br>
-              <code style="color:var(--accent);">mount * 0.25</code> — 25% от монтажа<br>
-              <b>Младший специалист</b> — фикс. ставка за каждый заказ:<br>
-              <code style="color:var(--accent);">500</code> — 500 ₴ за заказ (дефолт)
-            </div>
+            <label class="form-label">💰 Условия зарплаты</label>
+            <div id="we-salary-rule-display" style="background:var(--surface2);border-radius:10px;padding:10px 14px;"></div>
+            <div style="font-size:11px;color:var(--text3);margin-top:5px;">Условия задаются в <code>SALARY_CONFIG</code> в файле <code>data.js</code></div>
           </div>
 
           <!-- Проблемы -->
@@ -219,7 +211,8 @@ function openWorkerEditModal(workerId) {
   document.getElementById('worker-edit-name-display').textContent = w.name;
   document.getElementById('we-password').value = '';
   document.getElementById('we-role').value = w.systemRole || 'senior';
-  document.getElementById('we-formula').value = w.salaryFormula || DEFAULT_SALARY_FORMULA?.[w.systemRole] || '';
+  // Показываем условия ЗП из SALARY_CONFIG
+  _renderWeSalaryRule(w.name);
   document.getElementById('we-error').style.display = 'none';
 
   // Заполняем список помощников (только junior)
@@ -249,8 +242,53 @@ function _updateWeFormulaVisibility() {
   const group = document.getElementById('we-formula-group');
   const asGroup = document.getElementById('we-assistant-group');
   if (group) group.style.display = (role === 'manager') ? 'none' : '';
-  // Поле помощника — только для senior
   if (asGroup) asGroup.style.display = (role === 'senior') ? '' : 'none';
+  // Перерисовываем условия ЗП при смене роли
+  const w = workers.find(x => x.id === _editWorkerId);
+  if (w) _renderWeSalaryRule(w.name);
+}
+
+function _renderWeSalaryRule(workerName) {
+  const container = document.getElementById('we-salary-rule-display');
+  if (!container || typeof SALARY_CONFIG === 'undefined' || typeof getSalaryRule === 'undefined') return;
+
+  const rule = getSalaryRule(workerName);
+  const rows = [];
+
+  if (rule.base)
+    rows.push(['Ставка за заказ', rule.base.toLocaleString('ru') + ' ₴']);
+  if (rule.baseIfResp)
+    rows.push(['Ставка (если ответственный)', rule.baseIfResp.toLocaleString('ru') + ' ₴']);
+  if (rule.glassMarginPct)
+    rows.push(['Маржа стекла', Math.round(rule.glassMarginPct * 100) + '%']);
+  if (rule.servicesPct)
+    rows.push(['Услуги (монтаж и др.)', Math.round(rule.servicesPct * 100) + '%']);
+  if (rule.tatuBonusPct)
+    rows.push(['Бонус тату', Math.round(rule.tatuBonusPct * 100) + '%']);
+
+  if (!rows.length) {
+    container.innerHTML = '<div style="font-size:13px;color:var(--text3);">Условия не заданы</div>';
+    return;
+  }
+
+  const formulaParts = [];
+  if (rule.base) formulaParts.push(rule.base + ' ₴');
+  if (rule.baseIfResp) formulaParts.push(rule.baseIfResp + ' ₴ (если отв.)');
+  if (rule.glassMarginPct) formulaParts.push('маржа × ' + Math.round(rule.glassMarginPct * 100) + '%');
+  if (rule.servicesPct) formulaParts.push('услуги × ' + Math.round(rule.servicesPct * 100) + '%');
+
+  container.innerHTML =
+    rows.map((r, i) =>
+      '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;' +
+      (i < rows.length - 1 ? 'border-bottom:1px solid var(--border);' : '') + '">' +
+      '<span style="font-size:12px;color:var(--text3);">' + r[0] + '</span>' +
+      '<span style="font-size:13px;font-weight:700;color:var(--text);">' + r[1] + '</span>' +
+      '</div>'
+    ).join('') +
+    '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);">' +
+    '<div style="font-size:10px;color:var(--text3);margin-bottom:3px;letter-spacing:0.04em;">ФОРМУЛА</div>' +
+    '<code style="font-size:12px;color:var(--accent);">' + formulaParts.join(' + ') + '</code>' +
+    '</div>';
 }
 
 function _renderWeProblems(w) {
@@ -300,7 +338,6 @@ async function saveWorkerEdit() {
 
   const password  = document.getElementById('we-password').value.trim();
   const role      = document.getElementById('we-role').value;
-  const formula   = document.getElementById('we-formula').value.trim();
   const assistant = document.getElementById('we-assistant')?.value || '';
 
   const btn = document.getElementById('we-save-btn');
@@ -309,7 +346,6 @@ async function saveWorkerEdit() {
   try {
     const updates = {
       systemRole: role,
-      salaryFormula: formula || null,
       assistant: assistant,
     };
     if (password) updates.password = password;
@@ -319,7 +355,6 @@ async function saveWorkerEdit() {
     // Обновляем локально
     Object.assign(w, updates);
     w.systemRole = role;
-    w.salaryFormula = formula || null;
     w.assistant = assistant;
 
     closeWorkerEditModal();

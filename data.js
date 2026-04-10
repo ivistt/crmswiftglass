@@ -497,39 +497,54 @@ async function sbUpdateWorkerFormula(workerId, formula) {
 
 // ── РАСЧЁТ ЗАРПЛАТ ───────────────────────────────────────────
 //
-// Услуги = mount + molding + extraWork + tatu + toning
-// Маржа стекла = income - purchase  (income = продажная цена стекла)
+// SALARY_CONFIG — единственное место где задаются условия ЗП.
 //
-// Именованные правила (имя сотрудника → логика):
+// Структура записи:
+//   base            — фикс. ставка за каждый заказ (₴)
+//   baseIfResp      — ставка только если сотрудник ответственный (не помощник)
+//   glassMarginPct  — % от маржи стекла (income − purchase), число 0–1
+//   servicesPct     — % от суммы услуг (mount+molding+extraWork+tatu+toning), число 0–1
+//   tatuBonusPct    — % от tatu как отдельный бонус (начисляется поверх)
 //
-//   Костя, Саша Смоков (senior):
-//     800 ставка + 10% от маржи стекла + 20% от услуг
+// Специальные ключи:
+//   _senior  — дефолт для всех senior/extra которых нет в списке
+//   _junior  — дефолт для всех junior которых нет в списке
+//   _manager — дефолт для manager (используется в _calcManagerSalary)
 //
-//   Прочие senior/extra (без ставки):
-//     10% от маржи стекла + 20% от услуг
-//
-//   Рома (junior особый):
-//     500 ставка + 20% от услуг
-//     + если в заказе есть тату → ещё 20% от tatu (даже если его нет в заказе)
-//     ВАЖНО: начисление Роме за тату обрабатывается отдельно в _upsertOrderSalaries
-//
-//   Артём (junior):
-//     500 ставка + 20% от услуг у Артёма (как ответственного)
-//     У других: 20% от услуг (без ставки у Артёма как ассистента)
-//     → по факту: 500 + 20% если он responsible, 20% если assistant
-//
-//   Лёша (junior):
-//     20% от услуг
-//
-//   Серёжа, Витя, Саша Дога (junior):
-//     15% от услуг
-//
-//   Саша Менеджер (manager):
-//     800 ставка + 10% от маржи стекла (если он указан в поле manager заказа)
-//     ВАЖНО: обрабатывается отдельно в _upsertOrderSalaries
-//
-//   Остальные junior (дефолт):
-//     500 ставка
+// ЗП = base + baseIfResp(если responsible) + glassMargin*glassMarginPct + services*servicesPct
+// Тату-бонус (tatuBonusPct) начисляется отдельно через _calcTatuBonus и не входит в calcOrderSalary.
+
+const SALARY_CONFIG = {
+  // ── Старшие специалисты ──────────────────────────────────
+  'Костя':      { base: 800, glassMarginPct: 0.10, servicesPct: 0.20 },
+  'Саша Смоков':{ base: 800, glassMarginPct: 0.10, servicesPct: 0.20 },
+
+  // ── Младшие специалисты ───────────────────────────────────
+  'Рома':       { base: 500, servicesPct: 0.20, tatuBonusPct: 0.20 },
+  'Артём':      { baseIfResp: 500, servicesPct: 0.20 },
+  'Лёша':       { servicesPct: 0.20 },
+  'Серёжа':     { servicesPct: 0.15 },
+  'Витя':       { servicesPct: 0.15 },
+  'Саша Дога':  { servicesPct: 0.15 },
+
+  // ── Менеджеры ─────────────────────────────────────────────
+  'Саша Менеджер': { base: 800, glassMarginPct: 0.10 },
+
+  // ── Дефолты по роли ──────────────────────────────────────
+  _senior:  { glassMarginPct: 0.10, servicesPct: 0.20 },
+  _junior:  { base: 500 },
+  _manager: { base: 800, glassMarginPct: 0.10 },
+};
+
+// Возвращает конфиг ЗП для сотрудника с учётом дефолта по роли
+function getSalaryRule(workerName) {
+  if (SALARY_CONFIG[workerName]) return SALARY_CONFIG[workerName];
+  const w = workers.find(x => x.name === workerName);
+  if (!w) return SALARY_CONFIG._junior;
+  if (w.systemRole === 'senior' || w.systemRole === 'extra') return SALARY_CONFIG._senior;
+  if (w.systemRole === 'manager') return SALARY_CONFIG._manager;
+  return SALARY_CONFIG._junior;
+}
 
 // Вычисляет «услуги» заказа — без стекла и доставки
 function _orderServices(order) {
@@ -548,63 +563,40 @@ function _orderGlassMargin(order) {
 }
 
 // ЗП за заказ для конкретного участника (responsible или assistant).
-// Для Ромы тату-бонус считается отдельно (_calcRomaTatuBonus).
+// Тату-бонус (tatuBonusPct) считается отдельно через _calcTatuBonus.
 function calcOrderSalary(workerName, order) {
+  const rule        = getSalaryRule(workerName);
   const services    = _orderServices(order);
   const glassMargin = _orderGlassMargin(order);
   const isResp      = order.responsible === workerName;
 
-  // ── Старшие специалисты ──────────────────────────────────
-  // Костя и Саша Смоков — ставка 800 + 10% маржа стекла + 20% услуги
-  if (['Костя', 'Саша Смоков'].includes(workerName)) {
-    return 800 + Math.round(glassMargin * 0.10) + Math.round(services * 0.20);
-  }
+  const base        = (rule.base || 0) + (isResp ? (rule.baseIfResp || 0) : 0);
+  const fromGlass   = Math.round(glassMargin * (rule.glassMarginPct || 0));
+  const fromServ    = Math.round(services    * (rule.servicesPct    || 0));
 
-  // Прочие senior/extra — 10% маржа стекла + 20% услуги (без ставки)
-  const w = workers.find(x => x.name === workerName);
-  if (w && (w.systemRole === 'senior' || w.systemRole === 'extra')) {
-    return Math.round(glassMargin * 0.10) + Math.round(services * 0.20);
-  }
-
-  // ── Младшие специалисты ───────────────────────────────────
-
-  // Рома: 500 ставка + 20% от услуг (тату-бонус считается отдельно)
-  if (workerName === 'Рома') {
-    return 500 + Math.round(services * 0.20);
-  }
-
-  // Артём: 500 ставка если responsible, + 20% от услуг у Артёма
-  if (workerName === 'Артём') {
-    const base = isResp ? 500 : 0;
-    return base + Math.round(services * 0.20);
-  }
-
-  // Лёша: 20% от услуг
-  if (workerName === 'Лёша') {
-    return Math.round(services * 0.20);
-  }
-
-  // Серёжа, Витя, Саша Дога: 15% от услуг
-  if (['Серёжа', 'Витя', 'Саша Дога'].includes(workerName)) {
-    return Math.round(services * 0.15);
-  }
-
-  // Дефолт junior: 500 ставка
-  return 500;
+  return base + fromGlass + fromServ;
 }
 
-// Тату-бонус Роме: 20% от tatu, начисляется всегда если tatu > 0
-function _calcRomaTatuBonus(order) {
+// Тату-бонус: начисляется если в конфиге есть tatuBonusPct и в заказе есть tatu
+function _calcTatuBonus(workerName, order) {
+  const rule = getSalaryRule(workerName);
+  if (!rule.tatuBonusPct) return 0;
   const tatu = Number(order.tatu) || 0;
   if (tatu <= 0) return 0;
-  return Math.round(tatu * 0.20);
+  return Math.round(tatu * rule.tatuBonusPct);
 }
 
-// ЗП менеджера (Саша Менеджер): 800 ставка + 10% от маржи стекла
+// Обратная совместимость — старое имя функции
+function _calcRomaTatuBonus(order) {
+  return _calcTatuBonus('Рома', order);
+}
+
+// ЗП менеджера: ставка + % от маржи стекла
 // Начисляется только если он указан в поле order.manager
 function _calcManagerSalary(order) {
+  const rule = SALARY_CONFIG._manager;
   const glassMargin = _orderGlassMargin(order);
-  return 800 + Math.round(glassMargin * 0.10);
+  return (rule.base || 0) + Math.round(glassMargin * (rule.glassMarginPct || 0));
 }
 
 // Итоговая зп за день (используется в profile для совместимости)
