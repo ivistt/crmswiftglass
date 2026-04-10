@@ -630,10 +630,10 @@ function renderSalaryRuleCard(workerName) {
   const parts = [];
 
   if (rule.base) {
-    parts.push({ label: 'Ставка за заказ', value: rule.base.toLocaleString('ru') + ' ₴' });
+    parts.push({ label: 'Ставка за день', value: rule.base.toLocaleString('ru') + ' ₴' });
   }
   if (rule.baseIfResp) {
-    parts.push({ label: 'Ставка (если ответственный)', value: rule.baseIfResp.toLocaleString('ru') + ' ₴' });
+    parts.push({ label: 'Доплата за день (если ответственный)', value: rule.baseIfResp.toLocaleString('ru') + ' ₴' });
   }
   if (rule.glassMarginPct) {
     parts.push({ label: 'Маржа стекла', value: Math.round(rule.glassMarginPct * 100) + '%' });

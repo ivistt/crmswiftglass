@@ -11,6 +11,81 @@ function canMarkWorkerDone() {
   return currentRole === 'senior';
 }
 
+function canQuickConfirmOrderAmounts(order) {
+  return currentRole === 'senior' && order?.responsible === currentWorkerName && !order?.isCancelled;
+}
+
+function _dailyBaseOrderId() {
+  return 'Ставка за день';
+}
+
+function _moneyInputValue(value) {
+  return Number(value) || 0;
+}
+
+async function confirmSeniorOrderAmounts(orderId) {
+  const order = orders.find(x => x.id === orderId);
+  if (!order || !canQuickConfirmOrderAmounts(order)) return;
+
+  const checkEl = document.getElementById(`quick-supplier-${orderId}`);
+  const debtEl = document.getElementById(`quick-client-${orderId}`);
+  const btnEl = document.getElementById(`quick-confirm-${orderId}`);
+
+  const nextCheck = _moneyInputValue(checkEl?.value);
+  const nextDebt = _moneyInputValue(debtEl?.value);
+
+  const oldCheck = Number(order.check) || 0;
+  const checkDiff = nextCheck - oldCheck;
+  const updatedOrder = { ...order, check: nextCheck, debt: nextDebt };
+
+  if (btnEl) {
+    btnEl.disabled = true;
+    btnEl.textContent = 'Сохранение...';
+  }
+
+  try {
+    const saved = await sbUpdateOrder(updatedOrder);
+    const idx = orders.findIndex(x => x.id === orderId);
+    if (idx !== -1) orders[idx] = saved;
+
+    if (checkDiff !== 0) {
+      const amount = -checkDiff;
+      const typeStr = checkDiff > 0 ? 'Списание' : 'Возврат';
+      const fDate = saved.date ? formatDate(saved.date) : '—';
+      const fTime = saved.time || '—';
+      const fCar = saved.car || '—';
+      const targetWorker = saved.responsible || currentWorkerName;
+      const cashComment = `${typeStr} за стекло ${saved.id}, ${fDate} ${fTime}, авто: ${fCar}, склад: ${saved.warehouse || '—'}`;
+
+      const cashEntry = await sbInsertCashEntry({
+        worker_name: targetWorker,
+        amount,
+        comment: cashComment,
+      });
+
+      if (typeof workerCashLog !== 'undefined' && targetWorker === currentWorkerName) {
+        workerCashLog.unshift(cashEntry);
+      }
+    }
+
+    currentMonthFilter ? renderOrdersForMonth(currentMonthFilter) : renderOrders();
+    if (document.getElementById('screen-order-detail')?.classList.contains('active')) {
+      openOrderDetail(orderId);
+    }
+    if (document.getElementById('screen-profile')?.classList.contains('active')) {
+      renderProfile();
+    }
+    showToast('Суммы обновлены ✓');
+  } catch (e) {
+    showToast('Ошибка сохранения: ' + e.message, 'error');
+  } finally {
+    if (btnEl) {
+      btnEl.disabled = false;
+      btnEl.textContent = 'Подтвердить';
+    }
+  }
+}
+
 
 
 // ---------- КНОПКА ДОБАВИТЬ ----------
@@ -27,6 +102,7 @@ function setupOrderActions() {
 function renderOrderCard(o) {
   const canMark = canMarkWorkerDone() &&
     o.responsible === currentWorkerName;
+  const canQuickConfirm = canQuickConfirmOrderAmounts(o);
   return `
     <div class="order-card" onclick="openOrderDetail('${o.id}')">
       <div class="order-card-top">
@@ -36,6 +112,7 @@ function renderOrderCard(o) {
         </div>
         <div style="display:flex;gap:8px;align-items:center;">
           ${o.isCancelled ? '<span class="status-badge" style="background:var(--red,#DC2626);color:#fff;">Отменен</span>' : ''}
+          ${o.workerDone && !o.isCancelled ? '<span class="status-badge status-done">✓ Выполнен</span>' : ''}
           ${statusBadge(o.paymentStatus)}
           ${canMark ? `
             <button
@@ -58,6 +135,22 @@ function renderOrderCard(o) {
         ${o.warehouse ? `<span class="order-meta-item">🏭 ${o.warehouse}</span>` : ''}
         ${((Number(o.total) || 0) + (Number(o.income) || 0) + (Number(o.delivery) || 0)) > 0 ? `<span class="order-meta-item" style="font-weight:700;color:var(--accent);">💰 ${((Number(o.total) || 0) + (Number(o.income) || 0) + (Number(o.delivery) || 0)).toLocaleString('ru')} ₴</span>` : ''}
       </div>
+      ${canQuickConfirm ? `
+        <div onclick="event.stopPropagation()" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:10px;">
+          <div style="font-size:12px;font-weight:700;color:var(--text3);letter-spacing:0.04em;">ПОДТВЕРЖДЕНИЕ СУММ</div>
+          <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
+            <label style="display:flex;flex-direction:column;gap:6px;">
+              <span style="font-size:12px;color:var(--text3);">Сумма поставщику</span>
+              <input id="quick-supplier-${o.id}" type="number" inputmode="decimal" class="form-input" value="${Number(o.check) || 0}" onclick="event.stopPropagation()">
+            </label>
+            <label style="display:flex;flex-direction:column;gap:6px;">
+              <span style="font-size:12px;color:var(--text3);">Сумма принятия с клиента</span>
+              <input id="quick-client-${o.id}" type="number" inputmode="decimal" class="form-input" value="${Number(o.debt) || 0}" onclick="event.stopPropagation()">
+            </label>
+          </div>
+          <button id="quick-confirm-${o.id}" class="btn-primary" style="width:100%;" onclick="event.stopPropagation(); confirmSeniorOrderAmounts('${o.id}')">Подтвердить</button>
+        </div>
+      ` : ''}
     </div>
   `;
 }
@@ -139,6 +232,7 @@ function openOrderDetail(id) {
   const actionsEl = document.getElementById('order-detail-actions');
   if (actionsEl) {
     actionsEl.innerHTML = `
+      <button class="icon-action-btn" title="Скопировать данные" onclick="copyOrderSummary('${o.id}')">📋</button>
       ${canEdit   ? `<button class="icon-action-btn" title="Редактировать" onclick="openOrderModal('${o.id}')">✏️</button>` : ''}
       ${canDelete ? `<button class="icon-action-btn icon-action-danger" title="Удалить" onclick="deleteOrder('${o.id}')">🗑️</button>` : ''}
     `;
@@ -181,7 +275,7 @@ function openOrderDetail(id) {
         ${field('🛠️ Вид послуги', o.serviceType)}
         ${field('*️⃣ Молдинг', o.molding)}
         ${field('⚙️ Доп. работы', o.extraWork)}
-        ${field('*️⃣ Тату', o.tatu)}
+        ${field('*️⃣ Доп услуги', o.tatu)}
         ${field('Тонировка', o.toning)}
         ${field('🚛 Доставка', o.delivery ? o.delivery + ' ₴' : '')}
       </div>
@@ -235,9 +329,74 @@ async function deleteOrder(id) {
   }
 }
 
+// ---------- КОПИРОВАНИЕ ДАННЫХ ЗАКАЗА ----------
+function copyOrderSummary(id) {
+  const o = orders.find(x => x.id === id);
+  if (!o) return;
+
+  const lines = [];
+
+  // 1. Автомобиль
+  if (o.car) lines.push(`🚗 Автомобіль: ${o.car}`);
+
+  // 2. Номер телефона
+  if (o.phone) lines.push(`☎️ Телефон: ${o.phone}`);
+
+  // 3. Услуги кроме тату (тату = Доп услуги) + цена
+  const services = [];
+  if (o.serviceType) services.push(o.serviceType);
+  if (o.mount)       services.push(`Монтаж: ${o.mount} ₴`);
+  if (o.molding)     services.push(`Молдинг: ${o.molding}`);
+  if (o.extraWork)   services.push(`Доп. роботи: ${o.extraWork}`);
+  if (o.toning)      services.push(`Тонування: ${o.toning}`);
+  if (o.delivery)    services.push(`Доставка: ${o.delivery} ₴`);
+  if (o.tatu)        services.push(`Доп послуги: ${o.tatu}`);
+  if (services.length) lines.push(`⚙️ Послуги: ${services.join(', ')}`);
+
+  // 4. Цена продажи стекла
+  if (o.income) lines.push(`💰 Продаж скла: ${Number(o.income).toLocaleString('ru')} ₴`);
+
+  // 5. Общая сумма оплаты клиента
+  const clientTotal = (Number(o.total) || 0) + (Number(o.income) || 0) + (Number(o.delivery) || 0);
+  if (clientTotal > 0) lines.push(`💳 Загальна сума: ${clientTotal.toLocaleString('ru')} ₴`);
+
+  const text = lines.join('\n');
+
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => {
+      showToast('Дані скопійовано 📋');
+    }).catch(() => {
+      _fallbackCopy(text);
+    });
+  } else {
+    _fallbackCopy(text);
+  }
+}
+
+function _fallbackCopy(text) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
+  try {
+    document.execCommand('copy');
+    showToast('Дані скопійовано 📋');
+  } catch (e) {
+    showToast('Не вдалося скопіювати', 'error');
+  }
+  document.body.removeChild(ta);
+}
+
 // ---------- ЗАПОЛНЕНИЕ СЕЛЕКТОВ ИЗ СПРАВОЧНИКОВ ----------
 function populateCarDatalist() {
   // теперь просто инициализируем ac — данные берутся напрямую из refCars
+}
+
+function populateClientDatalist() {
+  // данные клиентов берутся напрямую через acGetItems('client') → getClients()
 }
 
 // Подставляет помощника по умолчанию для выбранного ответственного
@@ -328,70 +487,100 @@ function populateRefSelects() {
   const assistantSel = document.getElementById('f-assistant');
   if (assistantSel) {
     const cur = assistantSel.value;
-    assistantSel.innerHTML = '<option value="">— нет —</option>' +
-      workers
-        .filter(w => w.systemRole === 'senior' || w.systemRole === 'junior' || w.systemRole === 'extra')
-        .map(w => `<option value="${w.name}">${w.name} (${w.role})</option>`).join('');
+    assistantSel.innerHTML = '<option value="">— выбрать / нет —</option>' + 
+      workers.filter(w => ['senior', 'junior', 'extra'].includes(w.systemRole)).map(w => `<option value="${w.name}">${w.name} (${w.role})</option>`).join('');
     if (cur) assistantSel.value = cur;
   }
 
-  // Ответственный — только старшие специалисты
+  // Ответственный — старшие специалисты
   const respSel = document.getElementById('f-responsible');
   if (respSel) {
     const cur = respSel.value;
     respSel.innerHTML = '<option value="">— выбрать —</option>' +
-      workers
-        .filter(w => w.systemRole === 'senior' || w.systemRole === 'extra')
-        .map(w => `<option value="${w.name}">${w.name} (${w.role})</option>`).join('');
+      workers.filter(w => ['senior', 'extra'].includes(w.systemRole)).map(w => `<option value="${w.name}">${w.name} (${w.role})</option>`).join('');
     if (cur) respSel.value = cur;
-
-    // При смене ответственного — всегда подставляем его помощника
-    respSel.onchange = () => {
-      applyAssistantForResponsible(respSel.value);
-    };
+    
+    // При смене ответственного — подставляем помощника
+    respSel.onchange = () => applyAssistantForResponsible(respSel.value);
   }
-}
-function syncConfiguration() {
-  const checked = [...document.querySelectorAll('#f-configuration-checkboxes input:checked')].map(el => el.value);
-  const hidden = document.getElementById('f-configuration');
-  if (hidden) hidden.value = checked.join(',');
-}
 
-// Клиенты — datalist
-function populateClientDatalist() {
-  // теперь просто инициализируем ac — данные берутся напрямую из getClients()
-}
+  // Ответственный — доработка
+  const reworkRespSel = document.getElementById('f-rework-responsible');
+  if (reworkRespSel) {
+    const cur = reworkRespSel.value;
+    reworkRespSel.innerHTML = '<option value="">— выбрать —</option>' +
+      workers.filter(w => ['senior', 'extra'].includes(w.systemRole)).map(w => `<option value="${w.name}">${w.name} (${w.role})</option>`).join('');
+    if (cur) reworkRespSel.value = cur;
+  }
 
-// Автозаполнение кода и кодирования при выборе марки авто
-function onCarSelect() {
-  onCarInputChange(document.getElementById('f-car')?.value || '');
-}
-
-function onCarInputChange(val) {
-  if (!val) return;
-  const found = (refCars || []).find(c => c.model.toLowerCase() === val.toLowerCase());
-  if (found) {
-    const codeEl = document.getElementById('f-code');
-    if (codeEl) codeEl.value = found.eurocode || '';
+  // Помощник — доработка
+  const reworkAsSel = document.getElementById('f-rework-assistant');
+  if (reworkAsSel) {
+    const cur = reworkAsSel.value;
+    reworkAsSel.innerHTML = '<option value="">— нет —</option>' +
+      workers.filter(w => ['senior', 'junior', 'extra'].includes(w.systemRole)).map(w => `<option value="${w.name}">${w.name} (${w.role})</option>`).join('');
+    if (cur) reworkAsSel.value = cur;
   }
 }
 
-// Обратный поиск: при вводе еврокода — заполняем поле авто
-function onCodeInputChange(val) {
-  if (!val) return;
-  const q = val.trim().toLowerCase();
-  const found = (refCars || []).find(c => c.eurocode && c.eurocode.toLowerCase() === q);
-  if (found) {
-    const carEl = document.getElementById('f-car');
-    if (carEl) carEl.value = found.model;
-  }
+let currentClientPayments = [];
+
+// ---------- ФУНКЦИИ ИСТОРИИ ОПЛАТ И ДОРАБОТКИ ----------
+
+function toggleReworkSection() {
+  const body = document.getElementById('rework-section-body');
+  const chevron = document.getElementById('rework-chevron');
+  if (!body) return;
+  const isOpen = body.style.display !== 'none';
+  body.style.display = isOpen ? 'none' : 'block';
+  if (chevron) chevron.style.transform = isOpen ? '' : 'rotate(180deg)';
 }
 
-// toggleCodeLock removed — поле f-code теперь автокомплит без кнопки блокировки
+function renderClientPayments() {
+  const listEl = document.getElementById('client-payments-list');
+  if (!listEl) return;
+  if (!currentClientPayments.length) {
+    listEl.innerHTML = '<div style="font-size:11px;color:var(--text3);">Нет оплат</div>';
+    return;
+  }
+  listEl.innerHTML = currentClientPayments.map((p, idx) => `
+    <div style="display:flex;align-items:center;justify-content:space-between;background:var(--surface2);padding:6px 10px;border-radius:6px;border:1px solid var(--border);">
+      <div>
+        <div style="font-size:13px;font-weight:700;color:var(--text2);">${Number(p.amount).toLocaleString('ru')} ₴</div>
+        <div style="font-size:11px;color:var(--text3);">${formatDate(p.date)}</div>
+      </div>
+      <button type="button" class="icon-btn" style="width:20px;height:20px;" onclick="removeClientPayment(${idx})">
+        <i data-lucide="trash-2" style="width:10px;height:10px;color:var(--red);"></i>
+      </button>
+    </div>
+  `).join('');
+  initIcons();
+}
+
+function addClientPayment() {
+  const amtEl = document.getElementById('f-new-payment-amount');
+  const dateEl = document.getElementById('f-new-payment-date');
+  const amount = Number(amtEl.value);
+  if (!amount || amount <= 0) return showToast('Введите сумму оплаты', 'error');
+  const date = dateEl.value || todayStr();
+  
+  currentClientPayments.push({ amount, date, timestamp: new Date().toISOString() });
+  amtEl.value = '';
+  renderClientPayments();
+  recalcTotal();
+}
+
+function removeClientPayment(idx) {
+  if (!confirm('Удалить этот платеж из истории?')) return;
+  currentClientPayments.splice(idx, 1);
+  renderClientPayments();
+  recalcTotal();
+}
 
 // ---------- МОДАЛ СОЗДАНИЯ / РЕДАКТИРОВАНИЯ ----------
 function openOrderModal(id) {
   editingOrderId = id;
+  currentClientPayments = [];
 
   populateRefSelects();
   populateClientDatalist();
@@ -405,6 +594,11 @@ function openOrderModal(id) {
     // РЕДАКТИРОВАНИЕ
     const o = orders.find(x => x.id === id);
     if (!o) return;
+    
+    if (o.clientPayments) {
+      currentClientPayments = JSON.parse(JSON.stringify(o.clientPayments));
+    }
+    
     document.getElementById('order-modal-title').textContent = `Редактировать ${o.id}`;
     fillOrderForm(o);
 
@@ -450,8 +644,10 @@ function openOrderModal(id) {
 
   // f-code теперь управляется через acFilter/acSelect (автокомплит)
 
-  // Авторасчёт total из полей работ
-  ['f-mount','f-molding','f-extra-work','f-tatu','f-toning'].forEach(fid => {
+  // Авторасчёт total из полей работ и доработки
+  ['f-mount','f-molding','f-extra-work','f-tatu','f-toning',
+   'f-rework-mount','f-rework-molding','f-rework-extra',
+   'f-rework-tatu','f-rework-toning'].forEach(fid => {
     const el = document.getElementById(fid);
     if (!el) return;
     const newEl = el.cloneNode(true);
@@ -494,6 +690,8 @@ function openOrderModal(id) {
   // Прячем live-total пока нет данных
   const liveTotalEl = document.getElementById('modal-live-total');
   if (liveTotalEl) liveTotalEl.style.display = 'none';
+
+  renderClientPayments(); // рендерим историю оплат (изначально)
 
   document.getElementById('order-modal').classList.add('active');
 
@@ -555,6 +753,20 @@ function fillOrderForm(o) {
   set('f-payout-extra-assist', o.payoutExtraAssist);
   set('f-payout-molding-resp', o.payoutMoldingResp);
   set('f-payout-molding-assist', o.payoutMoldingAssist);
+  
+  const onlyCutEl = document.getElementById('f-only-cut');
+  if (onlyCutEl) onlyCutEl.checked = !!o.onlyCut;
+
+  if (o.reworkData) {
+    set('f-rework-responsible', o.reworkData.responsible);
+    set('f-rework-assistant', o.reworkData.assistant);
+    set('f-rework-mount', o.reworkData.mount);
+    set('f-rework-molding', o.reworkData.molding);
+    set('f-rework-extra', o.reworkData.extraWork);
+    set('f-rework-tatu', o.reworkData.tatu);
+    set('f-rework-toning', o.reworkData.toning);
+  }
+
   const statusEl = document.getElementById('f-order-status');
   if (statusEl) { if (o.isCancelled) statusEl.value = 'cancelled'; else if (o.inWork) statusEl.value = 'inWork'; else statusEl.value = ''; }
   const asEl = document.getElementById('f-assistant');
@@ -575,11 +787,16 @@ function clearOrderForm() {
     'f-remainder','f-payment-method','f-dropshipper','f-margin-total',
     'f-payout-dropshipper','f-payout-manager-glass','f-payout-resp-glass',
     'f-payout-lesha','f-payout-roma','f-payout-extra-resp','f-payout-extra-assist',
-    'f-payout-molding-resp','f-payout-molding-assist','f-assistant','f-manager'
+    'f-payout-molding-resp','f-payout-molding-assist','f-assistant','f-manager',
+    'f-rework-responsible','f-rework-assistant','f-rework-mount','f-rework-molding',
+    'f-rework-extra','f-rework-tatu','f-rework-toning',
+    'f-new-payment-amount','f-new-payment-date'
   ];
   ids.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   const orderStatusEl = document.getElementById('f-order-status');
   if (orderStatusEl) orderStatusEl.value = '';
+  const onlyCutEl = document.getElementById('f-only-cut');
+  if (onlyCutEl) onlyCutEl.checked = false;
   const tonExtEl = document.getElementById('f-toning-external');
   if (tonExtEl) tonExtEl.checked = false;
   document.querySelectorAll('#service-type-checkboxes input[type="checkbox"]').forEach(el => el.checked = false);
@@ -756,6 +973,17 @@ async function saveOrder() {
     payoutExtraAssist:     getN('f-payout-extra-assist'),
     payoutMoldingResp:     getN('f-payout-molding-resp'),
     payoutMoldingAssist:   getN('f-payout-molding-assist'),
+    onlyCut:         document.getElementById('f-only-cut')?.checked || false,
+    reworkData: {
+      responsible: get('f-rework-responsible'),
+      assistant: get('f-rework-assistant'),
+      mount: getN('f-rework-mount'),
+      molding: getN('f-rework-molding'),
+      extraWork: getN('f-rework-extra'),
+      tatu: getN('f-rework-tatu'),
+      toning: getN('f-rework-toning'),
+    },
+    clientPayments: currentClientPayments,
   };
 
   if (!data.date || !data.client) {
@@ -1070,22 +1298,50 @@ async function toggleWorkerDone(orderId) {
 
 // Начислить / удалить записи ЗП для всех участников заказа
 async function _upsertOrderSalaries(order) {
-  const participants = [order.responsible, order.assistant].filter(Boolean);
+  const amounts = {};
+  const affectedWorkers = new Set();
 
-  // Рома получает тату-бонус по всем заказам с tatu > 0 — даже если его нет в заказе
-  const romaName = 'Рома';
-  const hasRoma = participants.includes(romaName);
-  const tatuBonus = (Number(order.tatu) || 0) > 0 ? Math.round((Number(order.tatu) || 0) * 0.20) : 0;
-  if (!hasRoma && tatuBonus > 0) {
-    participants.push('__roma_tatu__'); // виртуальный участник для тату-бонуса Роме
+  if (order.workerDone) {
+    // 1. Основные участники
+    [order.responsible, order.assistant].filter(Boolean).forEach(w => {
+      affectedWorkers.add(w);
+      amounts[w] = (amounts[w] || 0) + calcOrderSalary(w, order);
+    });
+
+    // 2. Участники доработки
+    if (order.reworkData) {
+      [order.reworkData.responsible, order.reworkData.assistant].filter(Boolean).forEach(w => {
+        affectedWorkers.add(w);
+        amounts[w] = (amounts[w] || 0) + calcReworkSalary(w, order.reworkData);
+      });
+    }
+
+    // 3. Тату-бонус Ромы
+    const romaName = 'Рома';
+    const mainHasRoma = (order.responsible === romaName || order.assistant === romaName);
+    const reworkHasRoma = (order.reworkData?.responsible === romaName || order.reworkData?.assistant === romaName);
+    
+    // Если Рома не участвовал в основной работе, но там было тату:
+    if (!mainHasRoma && (Number(order.tatu) > 0)) {
+       affectedWorkers.add(romaName);
+       amounts[romaName] = (amounts[romaName] || 0) + Math.round(Number(order.tatu) * 0.20);
+    }
+    // Если Рома не участвовал в доработке, но там было тату:
+    if (!reworkHasRoma && (Number(order.reworkData?.tatu) > 0)) {
+       affectedWorkers.add(romaName);
+       amounts[romaName] = (amounts[romaName] || 0) + Math.round(Number(order.reworkData.tatu) * 0.20);
+    }
+
+    // 4. Менеджер — если указан в поле manager заказа и имеет systemRole === 'manager'
+    const managerName = order.manager || '';
+    if (managerName && workers.find(x => x.name === managerName && x.systemRole === 'manager')) {
+      affectedWorkers.add(managerName);
+      if (!amounts[managerName]) {
+        amounts[managerName] = _calcManagerSalary(order);
+      }
+    }
   }
 
-  // Менеджер — если указан в поле manager заказа и имеет systemRole === 'manager'
-  const managerName = order.manager || '';
-  const managerWorker = managerName ? workers.find(x => x.name === managerName && x.systemRole === 'manager') : null;
-  if (managerWorker && !participants.includes(managerName)) {
-    participants.push('__manager__'); // виртуальный участник
-  }
 
   // Всегда берём актуальные записи ЗП по этому заказу из БД
   let existingInDb = [];
@@ -1093,39 +1349,19 @@ async function _upsertOrderSalaries(order) {
     existingInDb = await sbFetchSalariesByOrder(order.id) || [];
   } catch (e) { /* если упало — продолжаем с пустым массивом */ }
 
-  for (const participant of participants) {
-    // Определяем реальное имя и сумму
-    let workerName, amount;
+  const workerNamesToProcess = new Set([...Object.keys(amounts), ...existingInDb.map(s => s.worker_name)]);
+  existingInDb.forEach(s => affectedWorkers.add(s.worker_name));
 
-    if (participant === '__roma_tatu__') {
-      workerName = romaName;
-      amount = order.workerDone ? tatuBonus : 0;
-    } else if (participant === '__manager__') {
-      workerName = managerName;
-      amount = order.workerDone ? _calcManagerSalary(order) : 0;
-    } else {
-      workerName = participant;
-      // Для Ромы если он в заказе — его обычная ЗП (без тату, тату уже в __roma_tatu__ или добавляем сюда)
-      if (workerName === romaName && tatuBonus > 0) {
-        // Рома в заказе + есть тату: обычная ЗП уже включает услуги (tatu в services),
-        // но тату-бонус = дополнительные 20% сверх стандартного расчёта
-        // calcOrderSalary уже считает 20% от всех услуг включая tatu,
-        // значит тату-бонус НЕ удваиваем — просто используем стандартный calcOrderSalary
-        amount = order.workerDone ? calcOrderSalary(workerName, order) : 0;
-      } else {
-        amount = order.workerDone ? calcOrderSalary(workerName, order) : 0;
-      }
-    }
+  for (const workerName of workerNamesToProcess) {
+    const amount = amounts[workerName] || 0;
+    const existingEntry = existingInDb.find(s => s.worker_name === workerName);
 
     console.log('[salary]', workerName, '| amount:', amount);
 
-    // Ищем существующую запись по worker_name
-    const existingEntry = existingInDb.find(s => s.worker_name === workerName);
-
-    if (order.workerDone && amount > 0) {
+    if (amount > 0) {
       if (!existingEntry) {
         await sbInsertWorkerSalary({ worker_name: workerName, date: order.date, amount, order_id: order.id });
-      } else {
+      } else if (existingEntry.amount !== String(amount)) {
         await sbUpdateWorkerSalary(existingEntry.id, amount);
       }
     } else {
@@ -1135,11 +1371,47 @@ async function _upsertOrderSalaries(order) {
     }
   }
 
+  for (const workerName of affectedWorkers) {
+    await _syncDailyBaseSalaryEntry(workerName, order.date);
+  }
+
   // Обновляем локальный массив workerSalaries (только для текущего пользователя)
   if (typeof workerSalaries !== 'undefined') {
     try {
       workerSalaries = await sbFetchWorkerSalaries(currentWorkerName);
     } catch (e) { /* не критично */ }
+  }
+}
+
+async function _syncDailyBaseSalaryEntry(workerName, date) {
+  if (!workerName || !date) return;
+
+  const amount = calcDailyBaseSalary(workerName, date);
+  const orderId = _dailyBaseOrderId();
+
+  let entries = [];
+  try {
+    entries = await sbFetchWorkerSalaries(workerName) || [];
+  } catch (e) {
+    return;
+  }
+
+  const dayEntries = entries.filter(s => s.date === date && s.order_id === orderId);
+  const primaryEntry = dayEntries[0] || null;
+  const duplicateEntries = dayEntries.slice(1);
+
+  if (amount > 0) {
+    if (!primaryEntry) {
+      await sbInsertWorkerSalary({ worker_name: workerName, date, amount, order_id: orderId });
+    } else if (Number(primaryEntry.amount) !== amount) {
+      await sbUpdateWorkerSalary(primaryEntry.id, amount);
+    }
+  } else if (primaryEntry) {
+    await sbDeleteWorkerSalary(primaryEntry.id);
+  }
+
+  for (const duplicateEntry of duplicateEntries) {
+    await sbDeleteWorkerSalary(duplicateEntry.id);
   }
 }
 

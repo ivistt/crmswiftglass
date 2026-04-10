@@ -256,9 +256,9 @@ function _renderWeSalaryRule(workerName) {
   const rows = [];
 
   if (rule.base)
-    rows.push(['Ставка за заказ', rule.base.toLocaleString('ru') + ' ₴']);
+    rows.push(['Ставка за день', rule.base.toLocaleString('ru') + ' ₴']);
   if (rule.baseIfResp)
-    rows.push(['Ставка (если ответственный)', rule.baseIfResp.toLocaleString('ru') + ' ₴']);
+    rows.push(['Доплата за день (если ответственный)', rule.baseIfResp.toLocaleString('ru') + ' ₴']);
   if (rule.glassMarginPct)
     rows.push(['Маржа стекла', Math.round(rule.glassMarginPct * 100) + '%']);
   if (rule.servicesPct)

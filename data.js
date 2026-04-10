@@ -72,16 +72,7 @@ async function sbFetchWorkers() {
   return rows.map(rowToWorker);
 }
 
-async function sbInsertWorker(w) {
-  const res = await fetch(`${WORKER_URL}/api/workers`, {
-    method: 'POST',
-    headers: getHeaders(),
-    body: JSON.stringify(workerToRow(w)),
-  });
-  if (!res.ok) throw new Error(await res.text());
-  const rows = await res.json();
-  return rowToWorker(rows[0]);
-}
+// sbInsertWorker — см. ниже (единственное определение)
 
 async function sbDeleteWorker(id) {
   const res = await fetch(`${WORKER_URL}/api/workers/${encodeURIComponent(id)}`, {
@@ -399,6 +390,9 @@ function rowToOrder(r) {
     assistant:       r.assistant || '',
     isCancelled:     r.is_cancelled || false,
     manager:         r.manager || '',
+    onlyCut:         r.only_cut || false,
+    reworkData:      r.rework_data || {},
+    clientPayments:  r.client_payments || [],
   };
 }
 
@@ -456,6 +450,9 @@ function orderToRow(o) {
     assistant:        o.assistant  || null,
     is_cancelled:     o.isCancelled || false,
     manager:          o.manager    || null,
+    only_cut:         o.onlyCut || false,
+    rework_data:      o.reworkData || {},
+    client_payments:  o.clientPayments || [],
   };
 }
 
@@ -562,28 +559,82 @@ function _orderGlassMargin(order) {
   return Math.max(0, income - purchase);
 }
 
+function _workerParticipatesInOrder(order, workerName) {
+  if (!order || !workerName) return false;
+  return order.responsible === workerName
+      || order.assistant === workerName
+      || order.manager === workerName
+      || order.reworkData?.responsible === workerName
+      || order.reworkData?.assistant === workerName;
+}
+
+function _workerIsResponsibleInOrder(order, workerName) {
+  if (!order || !workerName) return false;
+  return order.responsible === workerName || order.reworkData?.responsible === workerName;
+}
+
+function _getCompletedOrdersForWorkerDate(workerName, date) {
+  return orders.filter(o =>
+    o.workerDone &&
+    !o.isCancelled &&
+    o.date === date &&
+    _workerParticipatesInOrder(o, workerName)
+  );
+}
+
+function calcDailyBaseSalary(workerName, date) {
+  const rule = getSalaryRule(workerName);
+  const dayOrders = _getCompletedOrdersForWorkerDate(workerName, date);
+  if (!dayOrders.length) return 0;
+
+  let amount = rule.base || 0;
+  if ((rule.baseIfResp || 0) > 0 && dayOrders.some(o => _workerIsResponsibleInOrder(o, workerName))) {
+    amount += rule.baseIfResp || 0;
+  }
+  return amount;
+}
+
 // ЗП за заказ для конкретного участника (responsible или assistant).
 // Тату-бонус (tatuBonusPct) считается отдельно через _calcTatuBonus.
 function calcOrderSalary(workerName, order) {
   const rule        = getSalaryRule(workerName);
   const services    = _orderServices(order);
   const glassMargin = _orderGlassMargin(order);
-  const isResp      = order.responsible === workerName;
-
-  const base        = (rule.base || 0) + (isResp ? (rule.baseIfResp || 0) : 0);
   const fromGlass   = Math.round(glassMargin * (rule.glassMarginPct || 0));
   const fromServ    = Math.round(services    * (rule.servicesPct    || 0));
 
-  return base + fromGlass + fromServ;
+  let finalSalary = fromGlass + fromServ;
+  if (order.onlyCut) finalSalary = Math.round(finalSalary / 2);
+
+  return finalSalary;
+}
+
+// ЗП за доработку
+function calcReworkSalary(workerName, reworkData) {
+  if (!reworkData) return 0;
+  const rule = getSalaryRule(workerName);
+  const services = (Number(reworkData.mount) || 0)
+                 + (Number(reworkData.molding) || 0)
+                 + (Number(reworkData.extraWork) || 0)
+                 + (Number(reworkData.tatu) || 0)
+                 + (Number(reworkData.toning) || 0);
+
+  let finalSalary = Math.round(services * (rule.servicesPct || 0));
+  return finalSalary;
 }
 
 // Тату-бонус: начисляется если в конфиге есть tatuBonusPct и в заказе есть tatu
 function _calcTatuBonus(workerName, order) {
   const rule = getSalaryRule(workerName);
   if (!rule.tatuBonusPct) return 0;
+  
   const tatu = Number(order.tatu) || 0;
-  if (tatu <= 0) return 0;
-  return Math.round(tatu * rule.tatuBonusPct);
+  const tatuBonusMain = (tatu > 0) ? Math.round(tatu * rule.tatuBonusPct) : 0;
+  
+  const reworkTatu = Number(order.reworkData?.tatu) || 0;
+  const tatuBonusRework = (reworkTatu > 0) ? Math.round(reworkTatu * rule.tatuBonusPct) : 0;
+  
+  return tatuBonusMain + tatuBonusRework;
 }
 
 // Обратная совместимость — старое имя функции
@@ -596,14 +647,28 @@ function _calcRomaTatuBonus(order) {
 function _calcManagerSalary(order) {
   const rule = SALARY_CONFIG._manager;
   const glassMargin = _orderGlassMargin(order);
-  return (rule.base || 0) + Math.round(glassMargin * (rule.glassMarginPct || 0));
+  return Math.round(glassMargin * (rule.glassMarginPct || 0));
 }
 
 // Итоговая зп за день (используется в profile для совместимости)
 function calcDaySalary(workerName, date) {
-  return orders
-    .filter(o => o.workerDone && !o.isCancelled && o.date === date && (o.responsible === workerName || o.assistant === workerName))
-    .reduce((sum, o) => sum + calcOrderSalary(workerName, o), 0);
+  return calcDailyBaseSalary(workerName, date)
+    + orders
+      .filter(o => o.workerDone && !o.isCancelled && o.date === date &&
+              (o.responsible === workerName || o.assistant === workerName || o.manager === workerName || o.reworkData?.responsible === workerName || o.reworkData?.assistant === workerName))
+      .reduce((sum, o) => {
+        let total = sum;
+        if (o.responsible === workerName || o.assistant === workerName) {
+          total += calcOrderSalary(workerName, o);
+        }
+        if (o.reworkData?.responsible === workerName || o.reworkData?.assistant === workerName) {
+          total += calcReworkSalary(workerName, o.reworkData);
+        }
+        if (o.manager === workerName) {
+          total += _calcManagerSalary(o);
+        }
+        return total;
+      }, 0);
 }
 
 // ── GLOBAL STATE ─────────────────────────────────────────────

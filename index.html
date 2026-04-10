@@ -473,6 +473,12 @@
             </select>
           </div>
           <div class="form-group">
+            <label class="checkbox" style="gap:8px;margin-top:24px;">
+              <input type="checkbox" id="f-only-cut" style="width:18px;height:18px;accent-color:#00e5a0;">
+              <span style="font-size:14px;font-weight:600;">✂️ Только срезка (ЗП ÷ 2)</span>
+            </label>
+          </div>
+          <div class="form-group">
             <label class="form-label">🗓️ Дата</label>
             <input class="form-input" type="date" id="f-date">
           </div>
@@ -617,6 +623,51 @@
         </div>
       </div>
 
+      <!-- ── СЕКЦИЯ 4: ДОРАБОТКА (свёрнута по умолчанию) ── -->
+      <div class="form-section form-section--collapsible" id="rework-section">
+        <div class="form-section-title form-section-title--toggle" onclick="toggleReworkSection()">
+          <span style="display:flex;align-items:center;gap:6px;">
+            <i data-lucide="tool" style="width:13px;height:13px;"></i>
+            Доработка
+          </span>
+          <i data-lucide="chevron-down" id="rework-chevron" style="width:14px;height:14px;transition:transform 0.2s; transform: rotate(180deg);"></i>
+        </div>
+        <div class="form-section-body" id="rework-section-body" style="display:none;">
+          <div class="form-grid col-1" style="margin-top:14px;">
+            <div class="form-group">
+              <label class="form-label">Ответственный</label>
+              <select class="form-select" id="f-rework-responsible"></select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Помощник</label>
+              <select class="form-select" id="f-rework-assistant"></select>
+            </div>
+          </div>
+          <div class="form-grid" style="margin-top:14px;">
+            <div class="form-group">
+              <label class="form-label">🔩 Монтаж</label>
+              <input class="form-input" type="number" id="f-rework-mount" placeholder="0">
+            </div>
+            <div class="form-group">
+              <label class="form-label">*️⃣ Молдинг (Резинка)</label>
+              <input class="form-input" type="number" id="f-rework-molding" placeholder="0">
+            </div>
+            <div class="form-group">
+              <label class="form-label">⚙️ Доп. работы</label>
+              <input class="form-input" type="number" id="f-rework-extra" placeholder="0">
+            </div>
+            <div class="form-group">
+              <label class="form-label">*️⃣ Тату ⚫</label>
+              <input class="form-input" type="number" id="f-rework-tatu" placeholder="0">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Тонировка</label>
+              <input class="form-input" type="number" id="f-rework-toning" placeholder="0">
+            </div>
+          </div>
+        </div>
+      </div>
+
 
 
       <!-- ── СЕКЦИЯ 5: ФИНАНСЫ (свёрнута по умолчанию) ── -->
@@ -678,7 +729,23 @@
 
             <!-- ГРУППА 1: Клиент -->
             <div class="form-group span-full" style="background:var(--surface3); padding:16px; border-radius:12px; border:1px solid var(--border);">
-              <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:12px;text-transform:uppercase;">Расчёт с клиентом</div>
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+                <div style="font-size:12px;font-weight:700;color:var(--text2);text-transform:uppercase;">Расчёт с клиентом</div>
+              </div>
+              <div id="client-payments-list" style="margin-bottom:12px;display:flex;flex-direction:column;gap:8px;"></div>
+              <!-- Добавление платежа -->
+              <div style="display:flex;align-items:end;gap:8px;margin-bottom:16px;padding:10px;background:var(--surface2);border-radius:8px;border:1px solid var(--border);">
+                <div style="flex:1;">
+                  <label class="form-label" style="font-size:11px;">Сумма платежа</label>
+                  <input class="form-input" type="number" id="f-new-payment-amount" placeholder="0">
+                </div>
+                <div style="flex:1;">
+                  <label class="form-label" style="font-size:11px;">Дата</label>
+                  <input class="form-input" type="date" id="f-new-payment-date">
+                </div>
+                <button type="button" class="btn-secondary" style="padding:10px;" onclick="addClientPayment()">Добавить</button>
+              </div>
+
               <div class="form-grid">
                 <div class="form-group">
                   <label class="form-label">Расчёт долга клиента</label>
@@ -702,8 +769,8 @@
                   </select>
                 </div>
                 <div class="form-group">
-                  <label class="form-label">клиент уже оплатил:</label>
-                  <input class="form-input" type="number" id="f-debt" placeholder="0" oninput="recalcTotal()">
+                  <label class="form-label">Клиент уже оплатил (сумма):</label>
+                  <input class="form-input" type="number" id="f-debt" placeholder="0" readonly style="background-color: var(--surface2); cursor: not-allowed;">
                 </div>
                 <div class="form-group">
                   <label class="form-label">Дата расчёта долга</label>
