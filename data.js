@@ -301,11 +301,10 @@ async function sbDeleteCarDirectory(id) {
 
 async function loadRefData() {
   try {
-    const [cars, wh, eq, svc, ps, part, ss, carDir, drops] = await Promise.all([
+    const [cars, wh, eq, ps, part, ss, carDir, drops] = await Promise.all([
       sbFetchRefOptional('ref_cars'),
       sbFetchRefOptional('ref_warehouses'),
       sbFetchRefOptional('ref_equipment'),
-      sbFetchRefOptional('ref_services'),
       sbFetchRefOptional('ref_payment_statuses'),
       sbFetchRefOptional('ref_partners'),
       sbFetchRefOptional('ref_supplier_statuses'),
@@ -315,7 +314,6 @@ async function loadRefData() {
     refCars             = cars;
     refWarehouses       = wh;
     refEquipment        = eq;
-    refServices         = svc;
     refPaymentStatuses  = ps.map(s => s.name === 'Борг' ? { ...s, name: 'Долг' } : s);
     refPartners         = part;
     refSupplierStatuses = ss;
@@ -727,7 +725,6 @@ let refWarehouses       = [];
 let refDropshippers     = [];
 let carDirectory        = []; // справочник авто
 let refEquipment        = [];
-let refServices         = [];
 let refPaymentStatuses  = [];
 let refPartners         = [];
 let refSupplierStatuses = [];

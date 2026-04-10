@@ -853,7 +853,6 @@ function buildBackupPayload(freshProblems) {
                             created_at: p.created_at || null,
                           })),
     ref_cars:             refCars             || [],
-    ref_services:         refServices         || [],
     ref_partners:         refPartners         || [],
     ref_payment_statuses: refPaymentStatuses  || [],
     ref_supplier_statuses:refSupplierStatuses || [],
@@ -1069,14 +1068,13 @@ async function exportAllJSON() {
         // 2. Для каждой таблицы: Insert → Import data → JSON
         //    или используйте SQL: INSERT INTO tablename SELECT * FROM json_populate_recordset(...)
         // 3. Таблицы: orders, workers, worker_salaries, ref_cars,
-        //    ref_services, ref_partners, car_directory и др.
+        //    ref_partners, car_directory и др.
       },
       tables: {
         orders:          { count: orderRows.length,   rows: orderRows  },
         workers:         { count: workerRows.length,  rows: workerRows },
         worker_salaries: { count: salaryRows.length,  rows: salaryRows },
         ref_cars:             { count: (refCars||[]).length,             rows: refCars||[]             },
-        ref_services:         { count: (refServices||[]).length,         rows: refServices||[]         },
         ref_partners:         { count: (refPartners||[]).length,         rows: refPartners||[]         },
         ref_payment_statuses: { count: (refPaymentStatuses||[]).length,  rows: refPaymentStatuses||[]  },
         ref_supplier_statuses:{ count: (refSupplierStatuses||[]).length, rows: refSupplierStatuses||[] },
@@ -1194,7 +1192,6 @@ async function exportAllCSV() {
     // 4. ref таблицы — через Worker API
     const refFetches = [
       { name: 'ref_cars',             data: refCars },
-      { name: 'ref_services',         data: refServices },
       { name: 'ref_partners',         data: refPartners },
       { name: 'ref_payment_statuses', data: refPaymentStatuses },
       { name: 'ref_supplier_statuses',data: refSupplierStatuses },

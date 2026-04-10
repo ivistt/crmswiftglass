@@ -7,6 +7,17 @@ let currentOrderTab = 'selection';  // 'selection' | 'planner' | 'done' — дл
 let currentWorkerTab = 'today'; // 'today' | 'done' | 'future' | 'past' | 'all' — для специалистов
 let ordersVisibleCount = 10;
 let lastOrdersListSignature = '';
+const SERVICE_TYPE_OPTIONS = [
+  'Монтаж лобового',
+  'Монтаж бокового',
+  'Монтаж заднего',
+  'Срезка лобового',
+  'Срезка бокового',
+  'Срезка заднего',
+  'Вклейка лобового',
+  'Вклейка бокового',
+  'Вклейка заднего',
+];
 
 function canMarkWorkerDone() {
   // Галочка доступна только специалисту (senior) для своих заказов
@@ -561,11 +572,10 @@ function populateRefSelects() {
   const svcBox = document.getElementById('service-type-checkboxes');
   if (svcBox) {
     const cur = (document.getElementById('f-service-type')?.value || '').split(',').map(s => s.trim()).filter(Boolean);
-    const validServices = refServices.filter(s => s.name.toLowerCase() !== 'калибровка');
-    svcBox.innerHTML = validServices.map(s => `
+    svcBox.innerHTML = SERVICE_TYPE_OPTIONS.map(name => `
       <label class="checkbox">
-        <input type="checkbox" value="${s.name}" ${cur.includes(s.name) ? 'checked' : ''} onchange="syncServiceTypes()">
-        ${s.name}
+        <input type="checkbox" value="${name}" ${cur.includes(name) ? 'checked' : ''} onchange="syncServiceTypes()">
+        ${name}
       </label>
     `).join('');
   }
