@@ -1,5 +1,5 @@
 // ============================================================
-// PROFILE.JS — экран профиля специалиста (учёт зарплат + касса)
+// PROFILE.JS — экраны ЗП и кассы специалиста
 // ============================================================
 
 let workerSalaries = [];
@@ -43,13 +43,19 @@ function calcCashBalance(log) {
 
 async function openProfileScreen() {
   await loadWorkerSalaries();
-  await loadWorkerCashLog();
   renderProfile();
   showScreen('profile');
   setActiveNav('profile');
 }
 
-// ── РЕНДЕР ПРОФИЛЯ ───────────────────────────────────────────
+async function openCashScreen() {
+  await loadWorkerCashLog();
+  renderCashScreen();
+  showScreen('cash');
+  setActiveNav('cash');
+}
+
+// ── РЕНДЕР ЗП ────────────────────────────────────────────────
 
 function renderProfile() {
   const el = document.getElementById('profile-content');
@@ -88,8 +94,6 @@ function renderProfile() {
     ? getWorkerCompletedOrdersSummary(attachedAssistant.name, today)
     : null;
 
-  const cashBalance = calcCashBalance(workerCashLog);
-  const cashHtml = currentRole === 'senior' ? renderCashSection(cashBalance, today) : '';
   const salaryRuleHtml = renderSalaryRuleCard(currentWorkerName);
   const todayOrdersHtml = renderSalaryOrdersList(todaySummary.orders);
   const salaryGroupHtml = ''
@@ -139,8 +143,39 @@ function renderProfile() {
     + '<div><div style="font-size:20px;font-weight:800;">' + currentWorkerName + '</div>'
     + '<div style="font-size:13px;color:var(--text3);margin-top:2px;">' + (ROLE_LABELS[currentRole] || currentRole) + '</div></div>'
     + '</div>'
-    + cashHtml
     + salaryGroupHtml;
+
+  initIcons();
+}
+
+function renderCashScreen() {
+  const el = document.getElementById('cash-content');
+  if (!el) return;
+
+  if (currentRole !== 'senior') {
+    el.innerHTML = ''
+      + '<div class="profile-header">'
+      + '<div class="worker-avatar" style="width:56px;height:56px;font-size:20px;border-radius:16px;flex-shrink:0;">' + getInitials(currentWorkerName) + '</div>'
+      + '<div><div style="font-size:20px;font-weight:800;">' + currentWorkerName + '</div>'
+      + '<div style="font-size:13px;color:var(--text3);margin-top:2px;">Касса</div></div>'
+      + '</div>'
+      + '<div class="profile-today-card" style="margin-top:12px;">'
+      + '<div style="font-size:14px;color:var(--text3);text-align:center;">Касса доступна только старшему специалисту</div>'
+      + '</div>';
+    initIcons();
+    return;
+  }
+
+  const today = getLocalDateString();
+  const balance = calcCashBalance(workerCashLog);
+
+  el.innerHTML = ''
+    + '<div class="profile-header">'
+    + '<div class="worker-avatar" style="width:56px;height:56px;font-size:20px;border-radius:16px;flex-shrink:0;">' + getInitials(currentWorkerName) + '</div>'
+    + '<div><div style="font-size:20px;font-weight:800;">' + currentWorkerName + '</div>'
+    + '<div style="font-size:13px;color:var(--text3);margin-top:2px;">Касса</div></div>'
+    + '</div>'
+    + renderCashSection(balance, today);
 
   initIcons();
 }

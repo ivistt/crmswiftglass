@@ -47,6 +47,7 @@ function updateNavbarVisibility() {
   const navAdd     = document.getElementById('nav-add');
   const bottomNav  = document.getElementById('bottom-navbar');
 
+  const navCash    = document.getElementById('nav-cash');
   const navProfile = document.getElementById('nav-profile');
 
   if (currentRole === 'owner') {
@@ -54,6 +55,7 @@ function updateNavbarVisibility() {
     if (bottomNav)  bottomNav.style.display  = '';
     if (navHome)    navHome.style.display    = '';
     if (navAdd)     navAdd.style.display     = '';
+    if (navCash)    navCash.style.display    = 'none';
     if (navProfile) navProfile.style.display = 'none';
     if (navClients) navClients.style.display = 'none';
     if (navWorkers) navWorkers.style.display = 'none';
@@ -63,17 +65,19 @@ function updateNavbarVisibility() {
     if (bottomNav)  bottomNav.style.display  = '';
     if (navHome)    navHome.style.display    = 'none';
     if (navAdd)     navAdd.style.display     = '';
+    if (navCash)    navCash.style.display    = 'none';
     if (navProfile) navProfile.style.display = 'none';
     if (navClients) navClients.style.display = canViewClients() ? '' : 'none';
     if (navWorkers) navWorkers.style.display = 'none';
     document.getElementById('app')?.classList.remove('no-navbar');
   } else {
-    // Специалисты: Записи + Профиль (без кнопки добавить)
+    // Специалисты: Записи + Касса + ЗП (без кнопки добавить)
     if (navAdd)     navAdd.style.display     = 'none';
     if (navClients) navClients.style.display = 'none';
     if (navWorkers) navWorkers.style.display = 'none';
     if (bottomNav) bottomNav.style.display = '';
     if (navHome)   navHome.style.display   = 'none';
+    if (navCash)   navCash.style.display   = '';
     if (navProfile) navProfile.style.display = '';
     document.getElementById('app')?.classList.remove('no-navbar');
   }
@@ -81,7 +85,7 @@ function updateNavbarVisibility() {
 
 function setActiveNav(name) {
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-  const map = { home: 'nav-home', months: 'nav-orders', orders: 'nav-orders', clients: 'nav-clients', workers: 'nav-workers', profile: 'nav-profile' };
+  const map = { home: 'nav-home', months: 'nav-orders', orders: 'nav-orders', clients: 'nav-clients', workers: 'nav-workers', cash: 'nav-cash', profile: 'nav-profile' };
   const id = map[name];
   if (id) { const el = document.getElementById(id); if (el) el.classList.add('active'); }
 }
@@ -91,6 +95,7 @@ function navTo(section) {
   else if (section === 'orders') { openOrdersScreen(); }
   else if (section === 'clients') { openClientsScreen(); }
   else if (section === 'workers') { openWorkersScreen(); }
+  else if (section === 'cash') { openCashScreen(); }
   else if (section === 'profile') { openProfileScreen(); }
 }
 
@@ -138,6 +143,7 @@ function showScreen(name) {
     workers: 'Сотрудники',
     finance: 'Финансы',
     'owner-cash': 'Касса сотрудников',
+    cash: null,
     profile: null,
     'order-detail': 'Детали заказа',
     'client-detail': 'Детали клиента',

@@ -158,9 +158,13 @@
       <span class="nav-icon ico"><i data-lucide="plus" style="width:22px;height:22px;"></i></span>
       <span class="nav-label">Добавить</span>
     </button>
+    <button class="nav-item" id="nav-cash" onclick="navTo('cash')" style="display:none;">
+      <span class="nav-icon ico"><i data-lucide="wallet" style="width:20px;height:20px;"></i></span>
+      <span class="nav-label">Касса</span>
+    </button>
     <button class="nav-item" id="nav-profile" onclick="navTo('profile')" style="display:none;">
-      <span class="nav-icon ico"><i data-lucide="user-round" style="width:20px;height:20px;"></i></span>
-      <span class="nav-label">Профиль</span>
+      <span class="nav-icon ico"><i data-lucide="wallet-cards" style="width:20px;height:20px;"></i></span>
+      <span class="nav-label">ЗП</span>
     </button>
     <button class="nav-item" id="nav-clients" onclick="navTo('clients')">
       <span class="nav-icon ico"><i data-lucide="users" style="width:20px;height:20px;"></i></span>
@@ -380,6 +384,11 @@
     <!-- PROFILE -->
     <div class="screen" id="screen-profile">
       <div id="profile-content"></div>
+    </div>
+
+    <!-- CASH -->
+    <div class="screen" id="screen-cash">
+      <div id="cash-content"></div>
     </div>
 
 <!-- CLIENT DETAIL -->
