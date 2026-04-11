@@ -127,10 +127,6 @@
       <div class="topbar-logo" onclick="goHome()">
         <img src="images/logo.svg" alt="SwiftGlass" style="height:28px;width:auto;">
       </div>
-      <div class="topbar-breadcrumb" id="breadcrumb" style="display:none;">
-        <span class="breadcrumb-sep ico"><i data-lucide="chevron-right" style="width:14px;height:14px;"></i></span>
-        <span class="breadcrumb-current" id="breadcrumb-text"></span>
-      </div>
     </div>
     <div class="topbar-right">
       <button class="refresh-btn" id="refresh-btn" onclick="refreshOrders()" title="Перезагрузить страницу">
@@ -188,7 +184,7 @@
       <div class="detail-topbar" id="years-back-topbar" style="display:none;">
         <button class="back-btn" onclick="goHome()" style="display:flex;align-items:center;gap:6px;">
           <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
-          Назад к главной
+          Назад
         </button>
       </div>
       <div class="page-header">
@@ -202,7 +198,7 @@
 
     <!-- MONTHS LIST -->
     <div class="screen" id="screen-months">
-      <button class="back-btn" onclick="openOrdersScreen()"><i data-lucide="arrow-left" style="width:14px;height:14px;"></i> Назад к годам</button>
+      <button class="back-btn" onclick="openOrdersScreen()"><i data-lucide="arrow-left" style="width:14px;height:14px;"></i> Назад</button>
       <div class="page-header" style="margin-top:-10px;">
         <div class="page-title" id="months-page-title">
           Записи по месяцам
@@ -230,7 +226,7 @@
       <div class="detail-topbar" id="orders-back-topbar" style="display:none;">
         <button class="back-btn" onclick="goBackFromOrdersList()" style="display:flex;align-items:center;gap:6px;">
           <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
-          <span id="orders-back-label">Назад к месяцам</span>
+          <span id="orders-back-label">Назад</span>
         </button>
       </div>
       <div class="page-header">
@@ -293,7 +289,7 @@
       <div class="detail-topbar">
         <button class="back-btn" onclick="goHome()" style="display:flex;align-items:center;gap:6px;">
           <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
-          <span data-back-home-label>Назад к главной</span>
+          <span data-back-home-label>Назад</span>
         </button>
       </div>
       <div class="page-header">
@@ -323,7 +319,7 @@
       <div class="detail-topbar">
         <button class="back-btn" onclick="goHome()" style="display:flex;align-items:center;gap:6px;">
           <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
-          <span data-back-home-label>Назад к главной</span>
+          <span data-back-home-label>Назад</span>
         </button>
       </div>
       <div class="page-header">
@@ -344,7 +340,7 @@
       <div class="detail-topbar">
         <button class="back-btn" id="order-back-btn" onclick="goBackFromOrder()" style="display:flex;align-items:center;gap:6px;">
           <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
-          Назад к заказам
+          Назад
         </button>
         <div class="detail-topbar-actions" id="order-detail-actions"></div>
       </div>
@@ -356,7 +352,7 @@
       <div class="detail-topbar">
         <button class="back-btn" onclick="goHome()" style="display:flex;align-items:center;gap:6px;">
           <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
-          <span data-back-home-label>Назад к главной</span>
+          <span data-back-home-label>Назад</span>
         </button>
       </div>
       <div class="page-header">
@@ -370,7 +366,7 @@
       <div class="detail-topbar">
         <button class="back-btn" onclick="goHome()" style="display:flex;align-items:center;gap:6px;">
           <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
-          <span data-back-home-label>Назад к главной</span>
+          <span data-back-home-label>Назад</span>
         </button>
       </div>
       <div class="page-header" style="margin-top:-10px;">
@@ -387,7 +383,7 @@
       <div class="detail-topbar">
         <button class="back-btn" onclick="goHome()" style="display:flex;align-items:center;gap:6px;">
           <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
-          <span data-back-home-label>Назад к главной</span>
+          <span data-back-home-label>Назад</span>
         </button>
       </div>
       <div class="page-header" style="margin-top:-10px;">
@@ -404,7 +400,7 @@
       <div class="detail-topbar">
         <button class="back-btn" onclick="goHome()" style="display:flex;align-items:center;gap:6px;">
           <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
-          <span data-back-home-label>Назад к главной</span>
+          <span data-back-home-label>Назад</span>
         </button>
       </div>
       <div class="page-header" style="margin-top:-10px;">
@@ -421,7 +417,7 @@
       <div class="detail-topbar">
         <button class="back-btn" onclick="goHome()" style="display:flex;align-items:center;gap:6px;">
           <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
-          <span data-back-home-label>Назад к главной</span>
+          <span data-back-home-label>Назад</span>
         </button>
       </div>
       <div class="page-header">
@@ -452,7 +448,7 @@
       <div class="detail-topbar">
         <button class="back-btn" onclick="goHome()" style="display:flex;align-items:center;gap:6px;">
           <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
-          Назад к записям
+          Назад
         </button>
       </div>
       <div id="profile-content"></div>
@@ -463,7 +459,7 @@
       <div class="detail-topbar">
         <button class="back-btn" onclick="goHome()" style="display:flex;align-items:center;gap:6px;">
           <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
-          Назад к записям
+          Назад
         </button>
       </div>
       <div id="cash-content"></div>
@@ -473,7 +469,7 @@
 <div class="screen" id="screen-client-detail">
   <button class="back-btn" style="display:flex;align-items:center;gap:6px;" onclick="showScreen('clients')">
     <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
-    Назад к клиентам
+    Назад
       </button>
       <div id="client-detail-content"></div>
     </div>
@@ -483,7 +479,7 @@
       <div class="detail-topbar">
         <button class="back-btn" onclick="goHome()" style="display:flex;align-items:center;gap:6px;">
           <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
-          <span data-back-home-label>Назад к главной</span>
+          <span data-back-home-label>Назад</span>
         </button>
       </div>
       <div class="page-header">
@@ -500,7 +496,7 @@
       <div class="detail-topbar">
         <button class="back-btn" onclick="openWarehousesScreen()" style="display:flex;align-items:center;gap:6px;">
           <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
-          Назад к складам
+          Назад
         </button>
       </div>
       <div class="page-header" style="margin-top:-10px;">

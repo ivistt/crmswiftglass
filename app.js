@@ -147,40 +147,12 @@ function showScreen(name) {
   if (el) el.classList.add('active');
   updateHomeBackLabels();
 
-  const crumbMap = {
-    home: null,
-    years: 'Записи по годам',
-    months: 'Записи',
-    orders: 'Записи',
-    clients: 'Клиенты',
-    workers: 'Сотрудники',
-    finance: 'Финансы',
-    'owner-today': 'Сегодня',
-    'owner-cash': 'Касса сотрудников',
-    'owner-payments': 'Оплаты',
-    cash: null,
-    profile: null,
-    'order-detail': 'Детали заказа',
-    'client-detail': 'Детали клиента',
-    'car-directory': 'Справочник авто',
-    warehouses: 'Склады (Долги)',
-    'warehouse-detail': 'Детали склада',
-  };
-  const crumb = document.getElementById('breadcrumb');
-  const crumbText = document.getElementById('breadcrumb-text');
-  if (crumbMap[name]) {
-    crumb.style.display = 'flex';
-    crumbText.textContent = crumbMap[name];
-  } else {
-    crumb.style.display = 'none';
-  }
-
   setActiveNav(name);
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 function updateHomeBackLabels() {
-  const label = currentRole === 'owner' ? 'Назад к главной' : 'Назад к записям';
+  const label = 'Назад';
   document.querySelectorAll('[data-back-home-label]').forEach(el => {
     el.textContent = label;
   });
@@ -223,6 +195,53 @@ function renderHome() {
     </div>
   `;
 
+  if (currentRole === 'owner') {
+    const today = getLocalDateString();
+    const todayOrders = orders.filter(o => !o.isCancelled && o.date === today);
+    const todayTotal = todayOrders.reduce((sum, o) => sum + getOrderClientTotalAmount(o), 0);
+    container.innerHTML += `
+      <div class="home-card" onclick="openOwnerTodayScreen()">
+        <div class="home-card-icon-wrap home-card-icon-dim">
+          <i data-lucide="calendar-days" style="width:22px;height:22px;"></i>
+        </div>
+        <h3>Сегодня</h3>
+        <p>${todayOrders.length} заказов</p>
+        <div class="home-card-count" style="font-size:22px; color: var(--accent);">${todayTotal.toLocaleString('ru')} ₴</div>
+      </div>
+    `;
+
+    const totalCash = (window.allCashLog || []).reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+    container.innerHTML += `
+      <div class="home-card" onclick="openOwnerCashScreen()">
+        <div class="home-card-icon-wrap home-card-icon-dim">
+          <i data-lucide="wallet" style="width:22px;height:22px;"></i>
+        </div>
+        <h3>Касса</h3>
+        <p>Сумма на руках</p>
+        <div class="home-card-count" style="font-size:22px; color: var(--accent);">${totalCash.toLocaleString('ru')} ₴</div>
+      </div>
+    `;
+  }
+
+  if (canViewFinance()) {
+    const debtOrders = orders.filter(o => !o.isCancelled && (o.supplierStatus === 'Не оплачено' || o.supplierStatus === 'Частично'));
+    const debtSum = debtOrders.reduce((sum, o) => {
+      const debt = (Number(o.purchase) || 0) - (Number(o.check) || 0);
+      return sum + (debt > 0 ? debt : 0);
+    }, 0);
+
+    container.innerHTML += `
+      <div class="home-card" onclick="openWarehousesScreen()">
+        <div class="home-card-icon-wrap home-card-icon-dim">
+          <i data-lucide="package" style="width:22px;height:22px;"></i>
+        </div>
+        <h3>Склады</h3>
+        <p>Долги поставщикам</p>
+        <div class="home-card-count" style="font-size:20px; color: var(--red);">${debtSum.toLocaleString('ru')} ₴</div>
+      </div>
+    `;
+  }
+
   if (canViewClients()) {
     const clients = getClients();
     container.innerHTML += `
@@ -262,40 +281,9 @@ function renderHome() {
         <div class="home-card-count" style="font-size:22px;">${totalSum.toLocaleString('ru')} ₴</div>
       </div>
     `;
-
-    const debtOrders = orders.filter(o => !o.isCancelled && (o.supplierStatus === 'Не оплачено' || o.supplierStatus === 'Частично'));
-    const debtSum = debtOrders.reduce((sum, o) => {
-      const debt = (Number(o.purchase) || 0) - (Number(o.check) || 0);
-      return sum + (debt > 0 ? debt : 0);
-    }, 0);
-
-    container.innerHTML += `
-      <div class="home-card" onclick="openWarehousesScreen()">
-        <div class="home-card-icon-wrap home-card-icon-dim">
-          <i data-lucide="package" style="width:22px;height:22px;"></i>
-        </div>
-        <h3>Склады</h3>
-        <p>Долги поставщикам</p>
-        <div class="home-card-count" style="font-size:20px; color: var(--red);">${debtSum.toLocaleString('ru')} ₴</div>
-      </div>
-    `;
   }
 
   if (currentRole === 'owner') {
-    const today = getLocalDateString();
-    const todayOrders = orders.filter(o => !o.isCancelled && o.date === today);
-    const todayTotal = todayOrders.reduce((sum, o) => sum + getOrderClientTotalAmount(o), 0);
-    container.innerHTML += `
-      <div class="home-card" onclick="openOwnerTodayScreen()">
-        <div class="home-card-icon-wrap home-card-icon-dim">
-          <i data-lucide="calendar-days" style="width:22px;height:22px;"></i>
-        </div>
-        <h3>Сегодня</h3>
-        <p>${todayOrders.length} заказов</p>
-        <div class="home-card-count" style="font-size:22px; color: var(--accent);">${todayTotal.toLocaleString('ru')} ₴</div>
-      </div>
-    `;
-
     const paymentEntries = getOwnerPaymentEntries();
     const paymentsTotal = paymentEntries.reduce((sum, entry) => sum + entry.amount, 0);
     const paymentMethodsCount = new Set(paymentEntries.map(entry => entry.method)).size;
@@ -307,18 +295,6 @@ function renderHome() {
         <h3>Оплаты</h3>
         <p>${paymentMethodsCount ? `Способов: ${paymentMethodsCount}` : 'По способам оплаты'}</p>
         <div class="home-card-count" style="font-size:22px; color: var(--accent);">${paymentsTotal.toLocaleString('ru')} ₴</div>
-      </div>
-    `;
-
-    const totalCash = (window.allCashLog || []).reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
-    container.innerHTML += `
-      <div class="home-card" onclick="openOwnerCashScreen()">
-        <div class="home-card-icon-wrap home-card-icon-dim">
-          <i data-lucide="wallet" style="width:22px;height:22px;"></i>
-        </div>
-        <h3>Касса</h3>
-        <p>Сумма на руках</p>
-        <div class="home-card-count" style="font-size:22px; color: var(--accent);">${totalCash.toLocaleString('ru')} ₴</div>
       </div>
     `;
 
@@ -724,18 +700,6 @@ function renderOwnerCashScreen() {
     .filter(entry => seniorNames.includes(entry.worker_name))
     .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
 
-  if (!logs.length) {
-    container.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-state-icon">${icon('banknote')}</div>
-        <h3>Записей кассы нет</h3>
-        <p>Когда у старших специалистов появятся движения по кассе, они будут показаны здесь</p>
-      </div>
-    `;
-    initIcons();
-    return;
-  }
-
   const balances = {};
   const snapshotsByDay = {};
   for (const entry of logs) {
@@ -745,6 +709,47 @@ function renderOwnerCashScreen() {
     if (!day) continue;
     if (!snapshotsByDay[day]) snapshotsByDay[day] = {};
     snapshotsByDay[day][workerName] = balances[workerName];
+  }
+
+  const currentCashRows = seniorNames.map(name => ({
+    workerName: name,
+    balance: Number(balances[name] || 0),
+  }));
+  const currentCashTotal = currentCashRows.reduce((sum, row) => sum + row.balance, 0);
+  const currentCashHtml = `
+    <div class="fin-month-card" style="margin-bottom:12px;">
+      <div style="padding:14px 16px;border-bottom:1px solid var(--border);">
+        <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">
+          <div>
+            <div class="fin-month-name">Текущая касса</div>
+            <div class="fin-month-sub">Общий остаток по всем старшим специалистам</div>
+          </div>
+          <div style="font-size:22px;font-weight:900;color:${currentCashTotal >= 0 ? 'var(--accent)' : '#ef4444'};white-space:nowrap;">${currentCashTotal.toLocaleString('ru')} ₴</div>
+        </div>
+      </div>
+      <div style="padding:12px 16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;">
+        ${currentCashRows.length ? currentCashRows.map(row => `
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:12px;">
+            <div style="font-size:13px;font-weight:700;color:var(--text2);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(row.workerName)}</div>
+            <div style="font-size:15px;font-weight:900;color:${row.balance >= 0 ? 'var(--accent)' : '#ef4444'};white-space:nowrap;">${row.balance.toLocaleString('ru')} ₴</div>
+          </div>
+        `).join('') : `
+          <div style="font-size:13px;color:var(--text3);">Старшие специалисты не найдены</div>
+        `}
+      </div>
+    </div>
+  `;
+
+  if (!logs.length) {
+    container.innerHTML = currentCashHtml + `
+      <div class="empty-state">
+        <div class="empty-state-icon">${icon('banknote')}</div>
+        <h3>Записей кассы нет</h3>
+        <p>Когда у старших специалистов появятся движения по кассе, они будут показаны здесь</p>
+      </div>
+    `;
+    initIcons();
+    return;
   }
 
   const tree = {};
@@ -759,7 +764,7 @@ function renderOwnerCashScreen() {
   const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
   const years = Object.keys(tree).sort((a, b) => b.localeCompare(a));
 
-  container.innerHTML = years.map(year => {
+  container.innerHTML = currentCashHtml + years.map(year => {
     const yearKey = `owner-cash-year-${year}`;
     const monthsHtml = Object.keys(tree[year]).sort((a, b) => b.localeCompare(a)).map(monthKey => {
       const monthToggleKey = `owner-cash-month-${monthKey}`;

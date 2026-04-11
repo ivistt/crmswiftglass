@@ -197,7 +197,7 @@ function updateOrdersBackTopbar() {
   const isSpecialist = currentRole !== 'owner' && currentRole !== 'manager';
   const shouldShow = Boolean(currentMonthFilter) || isSpecialist;
   topbar.style.display = shouldShow ? 'flex' : 'none';
-  label.textContent = currentMonthFilter ? 'Назад к месяцам' : 'Назад к годам';
+  label.textContent = 'Назад';
 }
 
 function goBackFromOrdersList() {
@@ -278,6 +278,7 @@ function renderOrderStatusBadges(o) {
   if (o.isCancelled) {
     badges.push('<span class="status-badge" style="background:var(--red,#DC2626);color:#fff;">Отменен</span>');
   } else {
+    if (!o.inWork && !o.workerDone) badges.push('<span class="status-badge status-selection">Подборка</span>');
     if (o.inWork && !o.workerDone) badges.push('<span class="status-badge" style="background:#F59E0B;color:#fff;">В работе</span>');
     if (o.workerDone && currentRole !== 'senior') badges.push('<span class="status-badge status-done">✓ Выполнен</span>');
   }
@@ -456,7 +457,7 @@ function openOrderDetail(id) {
       <div class="detail-section-title">${icon('clipboard-list')} Основная информация</div>
       <div class="detail-grid">
         ${field(`${icon('user')} Клиент`, o.client)}
-        ${field(`${icon('phone')} Телефон`, o.phone, 'mono')}
+        ${field(`${icon('phone')} Телефон`, phoneCallLink(o.phone), 'mono detail-phone-value')}
         ${field(`${icon('map-pin')} Место`, o.address)}
         ${field(`${icon('car')} Авто`, o.car)}
         ${field(`${icon('hash')} Єврокод`, o.code, 'mono')}
@@ -1460,6 +1461,14 @@ function field(label, value, cls = '') {
   `;
 }
 
+function phoneCallLink(phone) {
+  if (!phone) return '';
+  const raw = String(phone).trim();
+  const tel = raw.replace(/[^\d+]/g, '').replace(/(?!^)\+/g, '');
+  if (!tel) return raw;
+  return `<a class="detail-phone-link" href="tel:${tel}">${raw}</a>`;
+}
+
 function formatDate(d) {
   if (!d) return '—';
   const [y, m, day] = d.split('-');
@@ -1496,6 +1505,7 @@ function renderYears() {
 
   const keys = Object.keys(map).sort((a, b) => b.localeCompare(a));
   const container = document.getElementById('years-list');
+  container.className = 'list-cards';
 
   if (!keys.length) {
     const specialistTodayCard = renderSpecialistTodayYearCard();
@@ -1513,10 +1523,14 @@ function renderYears() {
     const displayList = (currentRole === 'owner' || currentRole === 'manager') ? list : list.filter(o => o.inWork);
     const totalSum = list.reduce((s, o) => s + ((Number(o.total) || 0) + (Number(o.income) || 0) + (Number(o.delivery) || 0)), 0);
     return `
-      <div class="home-card" style="display:flex;flex-direction:column;min-height:110px;" onclick="openYear('${year}')">
-        <div style="font-size:12px;color:var(--text3);font-weight:600;letter-spacing:0.04em;">${displayList.length} зап.${canViewFinance() ? ` &middot; ${totalSum.toLocaleString('ru')} &#x20B4;` : ''}</div>
-        <div style="margin-top:auto;padding-top:12px;">
-          <div style="font-size:26px;font-weight:800;line-height:1.1;">${year} год</div>
+      <div class="month-card" onclick="openYear('${year}')">
+        <div>
+          <div class="month-card-title">${year} год</div>
+          <div class="month-card-sub">${displayList.length} зап.</div>
+        </div>
+        <div class="month-card-right">
+          ${canViewFinance() ? `<div class="month-card-count">${totalSum.toLocaleString('ru')} ₴</div>` : `<div class="month-card-count">${displayList.length}</div>`}
+          <div class="month-card-label">${canViewFinance() ? 'сумма' : 'записей'}</div>
         </div>
       </div>
     `;
@@ -1535,11 +1549,14 @@ function renderSpecialistTodayYearCard() {
   );
 
   return `
-    <div class="home-card home-card-accent" style="display:flex;flex-direction:column;min-height:110px;" onclick="openSpecialistTodayOrders()">
-      <div style="font-size:12px;color:rgba(0,0,0,0.5);font-weight:700;letter-spacing:0.04em;">${todayOrders.length} зап.</div>
-      <div style="margin-top:auto;padding-top:12px;">
-        <div style="font-size:26px;font-weight:800;line-height:1.1;color:#0a0a0f;">Сегодня</div>
-        <div style="font-size:13px;color:rgba(0,0,0,0.45);margin-top:3px;">${formatDate(today)}</div>
+    <div class="month-card month-card-accent" onclick="openSpecialistTodayOrders()">
+      <div>
+        <div class="month-card-title">Сегодня</div>
+        <div class="month-card-sub">${formatDate(today)}</div>
+      </div>
+      <div class="month-card-right">
+        <div class="month-card-count">${todayOrders.length}</div>
+        <div class="month-card-label">зап.</div>
       </div>
     </div>
   `;
@@ -1590,6 +1607,7 @@ function renderMonths() {
 
   const keys = Object.keys(map).sort((a, b) => b.localeCompare(a));
   const container = document.getElementById('months-list');
+  container.className = 'list-cards';
 
   if (!keys.length) {
     container.innerHTML = `
@@ -1608,11 +1626,14 @@ function renderMonths() {
     const displayList = (currentRole === 'owner' || currentRole === 'manager') ? list : list.filter(o => o.inWork);
     const totalSum = list.reduce((s, o) => s + ((Number(o.total) || 0) + (Number(o.income) || 0) + (Number(o.delivery) || 0)), 0);
     return `
-      <div class="home-card" style="display:flex;flex-direction:column;min-height:110px;" onclick="openMonthOrders('${ym}')">
-        <div style="font-size:12px;color:var(--text3);font-weight:600;letter-spacing:0.04em;">${displayList.length} зап.${canViewFinance() ? ` &middot; ${totalSum.toLocaleString('ru')} &#x20B4;` : ''}</div>
-        <div style="margin-top:auto;padding-top:12px;">
-          <div style="font-size:26px;font-weight:800;line-height:1.1;">${monthName}</div>
-          <div style="font-size:13px;color:var(--text3);margin-top:3px;">${year}</div>
+      <div class="month-card" onclick="openMonthOrders('${ym}')">
+        <div>
+          <div class="month-card-title">${monthName}</div>
+          <div class="month-card-sub">${year} · ${displayList.length} зап.</div>
+        </div>
+        <div class="month-card-right">
+          ${canViewFinance() ? `<div class="month-card-count">${totalSum.toLocaleString('ru')} ₴</div>` : `<div class="month-card-count">${displayList.length}</div>`}
+          <div class="month-card-label">${canViewFinance() ? 'сумма' : 'записей'}</div>
         </div>
       </div>
     `;

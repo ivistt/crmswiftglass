@@ -197,13 +197,6 @@ body {
 }
 .topbar-logo span { color: var(--accent); }
 
-.topbar-breadcrumb {
-  display: flex; align-items: center; gap: 6px;
-  color: var(--text2); font-size: 13px;
-}
-.breadcrumb-sep { color: var(--text3); }
-.breadcrumb-current { color: var(--text); font-weight: 600; }
-
 .topbar-right { display: flex; align-items: center; gap: 10px; }
 
 .role-badge {
@@ -356,6 +349,12 @@ body {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 12px;
+}
+
+.list-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .home-card {
@@ -772,6 +771,7 @@ body {
 .status-unpaid   { background: var(--red-dim); color: var(--red); }
 .status-done     { background: rgba(0,229,160,0.12); color: var(--accent); border: 1px solid rgba(0,229,160,0.35); font-weight: 800; }
 .status-debt     { background: rgba(255,92,106,0.2); color: var(--red); }
+.status-selection { background: var(--surface3); color: var(--text2); }
 .status-default  { background: var(--surface3); color: var(--text2); }
 
 .mount-yes  { background: var(--blue-dim); color: var(--blue); }
@@ -789,9 +789,26 @@ body {
   align-items: center;
   justify-content: space-between;
 }
+.month-card-accent {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #0a0a0f;
+}
+.month-card-accent .month-card-title,
+.month-card-accent .month-card-count {
+  color: #0a0a0f;
+}
+.month-card-accent .month-card-sub,
+.month-card-accent .month-card-label {
+  color: rgba(0,0,0,0.55);
+}
 .month-card:hover {
   border-color: var(--border2);
   background: var(--surface2);
+}
+.month-card-accent:hover {
+  background: #0cf5ad;
+  border-color: #0cf5ad;
 }
 
 .month-card-title {
@@ -984,6 +1001,15 @@ body {
   color: var(--text);
 }
 
+.detail-phone-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.detail-phone-link:hover {
+  color: var(--accent);
+}
+
 .detail-topbar {
   display: flex;
   align-items: center;
@@ -991,10 +1017,30 @@ body {
   margin-bottom: 16px;
 }
 
+.detail-topbar .back-btn {
+  min-height: 38px;
+  margin-bottom: 0;
+  align-self: center;
+}
+
 .detail-topbar-actions {
   display: flex;
+  align-items: center;
   gap: 8px;
   margin-left: auto;
+}
+
+.detail-topbar-actions .icon-action-btn {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #050505;
+}
+
+.detail-topbar-actions .icon-action-btn:hover,
+.detail-topbar-actions .icon-action-btn.icon-action-danger:hover {
+  border-color: var(--accent2);
+  background: var(--accent2);
+  color: #050505;
 }
 
 .icon-action-btn {
@@ -1252,7 +1298,13 @@ input[type="datetime-local"] {
   .home-card { padding: 16px; }
   .home-card-icon { width: 38px; height: 38px; font-size: 18px; margin-bottom: 10px; }
   .home-card h3 { font-size: 11px; }
-  .home-card-count { font-size: 26px; }
+  .home-card-count,
+  .owner-dashboard-cards .home-card-count,
+  .month-card-count,
+  .home-card-main-text {
+    font-size: 18px !important;
+    letter-spacing: -0.5px;
+  }
 
   .page-title { font-size: 19px; }
 
