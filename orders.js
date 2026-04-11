@@ -265,7 +265,7 @@ function _filterSpecialistOrdersByTab(list) {
     return ownOrders.filter(o => !o.workerDone);
   }
   if (currentWorkerTab === 'today') {
-    return ownOrders.filter(o => !o.workerDone && o.date === today);
+    return ownOrders.filter(o => o.date === today);
   }
   if (currentWorkerTab === 'done') {
     return ownOrders.filter(o => o.workerDone);
@@ -785,6 +785,12 @@ function addSupplierPayment() {
   recalcTotal();
 }
 
+function sumCashSupplierPayments(payments) {
+  return (payments || []).reduce((sum, payment) => {
+    return sum + (isCashPaymentMethod(payment.method) ? (Number(payment.amount) || 0) : 0);
+  }, 0);
+}
+
 function removeClientPayment(idx) {
   if (!confirm('Удалить этот платеж из истории?')) return;
   currentClientPayments.splice(idx, 1);
@@ -1259,7 +1265,12 @@ async function saveOrder() {
 
   const oldCheck = Number(existingOrder ? existingOrder.check : 0) || 0;
   const newCheck = Number(data.check) || 0;
-  const checkDiff = newCheck - oldCheck;
+  const oldSupplierPayments = existingOrder?.supplierPayments || [];
+  const newSupplierPayments = data.supplierPayments || [];
+  const hasSupplierPaymentHistory = oldSupplierPayments.length > 0 || newSupplierPayments.length > 0;
+  const oldCashSupplierPaid = hasSupplierPaymentHistory ? sumCashSupplierPayments(oldSupplierPayments) : oldCheck;
+  const newCashSupplierPaid = hasSupplierPaymentHistory ? sumCashSupplierPayments(newSupplierPayments) : newCheck;
+  const cashSupplierDiff = newCashSupplierPaid - oldCashSupplierPaid;
 
   try {
     if (isNew) {
@@ -1274,9 +1285,9 @@ async function saveOrder() {
     }
 
     // Автоматическое списание/возврат средств за оплату стекла из кассы ответственного
-    if (currentRole === 'senior' && checkDiff !== 0) {
-      const amount = -checkDiff; // если увеличилась сумма поставщику, баланс кассы уменьшается
-      const typeStr = checkDiff > 0 ? 'Списание' : 'Возврат';
+    if ((currentRole === 'senior' || currentRole === 'owner') && cashSupplierDiff !== 0) {
+      const amount = -cashSupplierDiff; // наличная оплата поставщику уменьшает кассу
+      const typeStr = cashSupplierDiff > 0 ? 'Списание' : 'Возврат';
       const fDate = data.date ? formatDate(data.date) : '—';
       const fTime = data.time || '—';
       const fCar = data.car || '—';
@@ -1297,7 +1308,15 @@ async function saveOrder() {
           created_at: new Date().toISOString()
         });
       }
-      showToast(`${checkDiff > 0 ? 'Списано' : 'Возвращено'} ${Math.abs(checkDiff)} ₴ в кассу мастера ${targetWorker}`);
+      if (currentRole === 'owner' && Array.isArray(window.allCashLog)) {
+        window.allCashLog.unshift({
+          worker_name: targetWorker,
+          amount: amount,
+          comment: cashComment,
+          created_at: new Date().toISOString()
+        });
+      }
+      showToast(`${cashSupplierDiff > 0 ? 'Списано' : 'Возвращено'} ${Math.abs(cashSupplierDiff)} ₴ в кассу мастера ${targetWorker}`);
     }
 
     closeOrderModal();

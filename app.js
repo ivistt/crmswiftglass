@@ -285,14 +285,9 @@ function renderHome() {
       </div>
     `;
 
-    const paymentsTotal = orders
-      .filter(o => !o.isCancelled && o.paymentMethod)
-      .reduce((sum, o) => sum + (Number(o.debt) || 0), 0);
-    const paymentMethodsCount = new Set(
-      orders
-        .filter(o => !o.isCancelled && o.paymentMethod)
-        .map(o => normalizePaymentMethod(o.paymentMethod))
-    ).size;
+    const paymentEntries = getOwnerPaymentEntries();
+    const paymentsTotal = paymentEntries.reduce((sum, entry) => sum + entry.amount, 0);
+    const paymentMethodsCount = new Set(paymentEntries.map(entry => entry.method)).size;
     container.innerHTML += `
       <div class="home-card" onclick="openOwnerPaymentsScreen()">
         <div class="home-card-icon-wrap home-card-icon-dim">
@@ -353,12 +348,53 @@ function _ownerCashEntryDate(entry) {
   return new Date(entry.created_at).toISOString().slice(0, 10);
 }
 
-function _paymentOrderAmount(order) {
-  return Number(order?.debt) || 0;
-}
+function getOwnerPaymentEntries() {
+  const entries = [];
 
-function _paymentOrderDate(order) {
-  return order?.date || '';
+  for (const order of (orders || [])) {
+    if (!order || order.isCancelled) continue;
+
+    const clientPayments = (order.clientPayments || [])
+      .filter(payment => Number(payment.amount) > 0 && normalizePaymentMethod(payment.method));
+
+    if (clientPayments.length) {
+      clientPayments.forEach(payment => {
+        entries.push({
+          type: 'client',
+          title: 'Оплата клиента',
+          amount: Number(payment.amount) || 0,
+          method: normalizePaymentMethod(payment.method),
+          date: payment.date || order.date || '',
+          order,
+        });
+      });
+    } else if (order.paymentMethod && Number(order.debt) > 0) {
+      entries.push({
+        type: 'client',
+        title: 'Оплата клиента',
+        amount: Number(order.debt) || 0,
+        method: normalizePaymentMethod(order.paymentMethod),
+        date: order.date || '',
+        order,
+      });
+    }
+
+    (order.supplierPayments || []).forEach(payment => {
+      const method = normalizePaymentMethod(payment.method);
+      const amount = Number(payment.amount) || 0;
+      if (!amount || !method || isCashPaymentMethod(method)) return;
+      entries.push({
+        type: 'supplier',
+        title: 'Оплата поставщику',
+        amount: -amount,
+        method,
+        date: payment.date || order.date || '',
+        order,
+      });
+    });
+  }
+
+  return entries.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
 }
 
 function _ownerTodayGroupKey(order) {
@@ -469,16 +505,14 @@ function renderOwnerPaymentsScreen() {
   const container = document.getElementById('owner-payments-content');
   if (!container) return;
 
-  const paidOrders = (orders || [])
-    .filter(o => !o.isCancelled && o.paymentMethod)
-    .sort((a, b) => String(_paymentOrderDate(b)).localeCompare(String(_paymentOrderDate(a))));
+  const paymentEntries = getOwnerPaymentEntries();
 
-  if (!paidOrders.length) {
+  if (!paymentEntries.length) {
     container.innerHTML = `
       <div class="empty-state">
         <div class="empty-state-icon">💳</div>
         <h3>Оплат нет</h3>
-        <p>Когда в заказах появится способ оплаты, они будут собраны здесь</p>
+        <p>Когда в заказах появятся оплаты клиента или безналичные оплаты поставщику, они будут собраны здесь</p>
       </div>
     `;
     initIcons();
@@ -488,22 +522,22 @@ function renderOwnerPaymentsScreen() {
   const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
   const byMethod = {};
 
-  for (const order of paidOrders) {
-    const method = normalizePaymentMethod(order.paymentMethod) || '—';
-    const date = _paymentOrderDate(order);
+  for (const entry of paymentEntries) {
+    const method = entry.method || '—';
+    const date = entry.date || '';
     const year = date ? date.slice(0, 4) : 'Без даты';
     const month = date ? date.slice(0, 7) : 'Без даты';
     const day = date || 'Без даты';
 
     if (!byMethod[method]) byMethod[method] = { total: 0, years: {} };
-    byMethod[method].total += _paymentOrderAmount(order);
+    byMethod[method].total += entry.amount;
     if (!byMethod[method].years[year]) byMethod[method].years[year] = { total: 0, months: {} };
-    byMethod[method].years[year].total += _paymentOrderAmount(order);
+    byMethod[method].years[year].total += entry.amount;
     if (!byMethod[method].years[year].months[month]) byMethod[method].years[year].months[month] = { total: 0, days: {} };
-    byMethod[method].years[year].months[month].total += _paymentOrderAmount(order);
-    if (!byMethod[method].years[year].months[month].days[day]) byMethod[method].years[year].months[month].days[day] = { total: 0, orders: [] };
-    byMethod[method].years[year].months[month].days[day].total += _paymentOrderAmount(order);
-    byMethod[method].years[year].months[month].days[day].orders.push(order);
+    byMethod[method].years[year].months[month].total += entry.amount;
+    if (!byMethod[method].years[year].months[month].days[day]) byMethod[method].years[year].months[month].days[day] = { total: 0, entries: [] };
+    byMethod[method].years[year].months[month].days[day].total += entry.amount;
+    byMethod[method].years[year].months[month].days[day].entries.push(entry);
   }
 
   const methodNames = Object.keys(byMethod).sort((a, b) => byMethod[b].total - byMethod[a].total);
@@ -521,8 +555,10 @@ function renderOwnerPaymentsScreen() {
         const daysHtml = Object.keys(monthData.days).sort((a, b) => b.localeCompare(a)).map(day => {
           const dayData = monthData.days[day];
           const dayKey = `${monthToggleKey}-day-${day}`;
-          const ordersHtml = dayData.orders.map(order => {
-            const amount = _paymentOrderAmount(order);
+          const ordersHtml = dayData.entries.map(entry => {
+            const order = entry.order || {};
+            const amount = Number(entry.amount) || 0;
+            const isExpense = amount < 0;
             const total = (Number(order.total) || 0) + (Number(order.income) || 0) + (Number(order.delivery) || 0);
             return `
               <div class="order-card" style="margin:8px 0 0;cursor:pointer;" onclick="openOrderDetail('${order.id}')">
@@ -531,9 +567,10 @@ function renderOwnerPaymentsScreen() {
                     <span class="order-id">${order.id}</span>
                     <span class="order-name">${order.car || order.client || '—'}</span>
                   </div>
-                  <div style="font-size:16px;font-weight:800;color:var(--accent);">${amount.toLocaleString('ru')} ₴</div>
+                  <div style="font-size:16px;font-weight:800;color:${isExpense ? 'var(--red)' : 'var(--accent)'};">${amount.toLocaleString('ru')} ₴</div>
                 </div>
                 <div class="order-card-meta">
+                  <span class="order-meta-item">${entry.title}</span>
                   <span class="order-meta-item">${order.client || '—'}</span>
                   <span class="order-meta-item">${order.phone || '—'}</span>
                   ${total ? `<span class="order-meta-item">Всего: ${total.toLocaleString('ru')} ₴</span>` : ''}
@@ -548,9 +585,9 @@ function renderOwnerPaymentsScreen() {
                 <div style="display:flex;align-items:center;gap:8px;">
                   <i data-lucide="chevron-right" style="width:13px;height:13px;color:var(--text3);transition:transform 0.2s;" id="pchevron-${dayKey}"></i>
                   <div style="font-size:13px;color:var(--text2);font-weight:600;">${day === 'Без даты' ? day : formatDate(day)}</div>
-                  <div style="font-size:11px;color:var(--text3);">${dayData.orders.length} зак.</div>
+                  <div style="font-size:11px;color:var(--text3);">${dayData.entries.length} зап.</div>
                 </div>
-                <div style="font-size:13px;font-weight:800;color:var(--accent);">${dayData.total.toLocaleString('ru')} ₴</div>
+                <div style="font-size:13px;font-weight:800;color:${dayData.total < 0 ? 'var(--red)' : 'var(--accent)'};">${dayData.total.toLocaleString('ru')} ₴</div>
               </div>
               <div id="profile-month-body-${dayKey}" style="display:none;padding:0 0 10px;">
                 ${ordersHtml}
@@ -567,7 +604,7 @@ function renderOwnerPaymentsScreen() {
                 <div style="font-size:14px;font-weight:700;color:var(--text2);">${monthName}</div>
                 <div style="font-size:11px;color:var(--text3);">${Object.keys(monthData.days).length} дн.</div>
               </div>
-              <div style="font-size:14px;font-weight:800;color:var(--accent);">${monthData.total.toLocaleString('ru')} ₴</div>
+              <div style="font-size:14px;font-weight:800;color:${monthData.total < 0 ? 'var(--red)' : 'var(--accent)'};">${monthData.total.toLocaleString('ru')} ₴</div>
             </div>
             <div id="profile-month-body-${monthToggleKey}" style="display:none;background:var(--surface2);border-radius:0 0 8px 8px;">
               ${daysHtml}
@@ -584,7 +621,7 @@ function renderOwnerPaymentsScreen() {
               <div style="font-size:14px;font-weight:700;color:var(--text2);">${year}</div>
               <div style="font-size:11px;color:var(--text3);">${Object.keys(yearData.months).length} мес.</div>
             </div>
-            <div style="font-size:14px;font-weight:800;color:var(--accent);">${yearData.total.toLocaleString('ru')} ₴</div>
+            <div style="font-size:14px;font-weight:800;color:${yearData.total < 0 ? 'var(--red)' : 'var(--accent)'};">${yearData.total.toLocaleString('ru')} ₴</div>
           </div>
           <div id="profile-month-body-${yearKey}" style="display:none;background:var(--surface2);border-radius:0 0 8px 8px;">
             ${monthsHtml}
@@ -603,7 +640,7 @@ function renderOwnerPaymentsScreen() {
               <div class="fin-month-sub">${Object.keys(methodData.years).length} год.</div>
             </div>
           </div>
-          <div style="font-size:18px;font-weight:800;color:var(--accent);white-space:nowrap;">${methodData.total.toLocaleString('ru')} ₴</div>
+          <div style="font-size:18px;font-weight:800;color:${methodData.total < 0 ? 'var(--red)' : 'var(--accent)'};white-space:nowrap;">${methodData.total.toLocaleString('ru')} ₴</div>
         </div>
         <div id="profile-month-body-${methodKey}" style="display:none;padding:0 0 8px;">${yearsHtml}</div>
       </div>

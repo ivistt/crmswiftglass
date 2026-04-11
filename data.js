@@ -813,6 +813,10 @@ function normalizePaymentMethod(method) {
   return value;
 }
 
+function isCashPaymentMethod(method) {
+  return normalizePaymentMethod(method) === '🪙 Наличка';
+}
+
 let currentRole = null;
 let currentWorkerName = null;
 let workers     = [];
