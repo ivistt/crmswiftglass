@@ -180,12 +180,34 @@ async function confirmSeniorOrderAmounts(orderId) {
 
 // ---------- КНОПКА ДОБАВИТЬ ----------
 function setupOrderActions() {
+  updateOrdersBackTopbar();
   const el = document.getElementById('orders-actions');
   if (canCreateOrder()) {
     el.innerHTML = `<button class="btn-primary" onclick="openOrderModal(null)">+ Добавить запись</button>`;
   } else {
     el.innerHTML = '';
   }
+}
+
+function updateOrdersBackTopbar() {
+  const topbar = document.getElementById('orders-back-topbar');
+  const label = document.getElementById('orders-back-label');
+  if (!topbar || !label) return;
+
+  const isSpecialist = currentRole !== 'owner' && currentRole !== 'manager';
+  const shouldShow = Boolean(currentMonthFilter) || isSpecialist;
+  topbar.style.display = shouldShow ? 'flex' : 'none';
+  label.textContent = currentMonthFilter ? 'Назад к месяцам' : 'Назад к годам';
+}
+
+function goBackFromOrdersList() {
+  if (currentMonthFilter) {
+    renderMonths();
+    showScreen('months');
+    return;
+  }
+
+  openOrdersScreen();
 }
 
 // ---------- РЕНДЕР КАРТОЧКИ ЗАКАЗА ----------
@@ -203,9 +225,7 @@ function renderOrderCard(o) {
         <div class="order-card-left">
           <div class="order-card-status-row">
             <span class="order-id">${o.id}</span>
-            ${o.isCancelled ? '<span class="status-badge" style="background:var(--red,#DC2626);color:#fff;">Отменен</span>' : ''}
-            ${o.workerDone && !o.isCancelled ? '<span class="status-badge status-done">✓ Выполнен</span>' : ''}
-            ${statusBadge(getEffectivePaymentStatus(o))}
+            ${renderOrderStatusBadges(o)}
           </div>
           <div class="order-card-title-row">
             <span class="order-name">${o.car || '—'}</span>
@@ -227,10 +247,10 @@ function renderOrderCard(o) {
         </div>
       </div>
       <div class="order-card-meta">
-        <span class="order-meta-item">☎️ ${o.phone || '—'}</span>
-        <span class="order-meta-item">🗓️ ${formatDate(o.date)}</span>
-        <span class="order-meta-item">🚧 ${o.responsible || '—'}${o.assistant ? ' + ' + o.assistant : ''}</span>
-        ${o.warehouse ? `<span class="order-meta-item">🏭 ${o.warehouse}</span>` : ''}
+        <span class="order-meta-item">${icon('phone')} ${o.phone || '—'}</span>
+        <span class="order-meta-item">${icon('calendar')} ${formatDate(o.date)}</span>
+        <span class="order-meta-item">${icon('hard-hat')} ${o.responsible || '—'}${o.assistant ? ' + ' + o.assistant : ''}</span>
+        ${o.warehouse ? `<span class="order-meta-item">${icon('warehouse')} ${o.warehouse}</span>` : ''}
         ${(Number(o.check) > 0 || Number(o.purchase) > 0) ? `<span class="order-meta-item" style="font-weight:700;color:var(--text2);">${(Number(o.check) || 0).toLocaleString('ru')}/${(Number(o.purchase) || 0).toLocaleString('ru')}</span>` : ''}
         <span class="order-meta-item">${o.client || '—'}</span>
       </div>
@@ -251,6 +271,18 @@ function renderOrderCard(o) {
       ` : ''}
     </div>
   `;
+}
+
+function renderOrderStatusBadges(o) {
+  const badges = [];
+  if (o.isCancelled) {
+    badges.push('<span class="status-badge" style="background:var(--red,#DC2626);color:#fff;">Отменен</span>');
+  } else {
+    if (o.inWork && !o.workerDone) badges.push('<span class="status-badge" style="background:#F59E0B;color:#fff;">В работе</span>');
+    if (o.workerDone && currentRole !== 'senior') badges.push('<span class="status-badge status-done">✓ Выполнен</span>');
+  }
+  badges.push(statusBadge(getEffectivePaymentStatus(o)));
+  return badges.join('');
 }
 
 function _isCurrentWorkerOrder(order) {
@@ -378,7 +410,7 @@ function renderOrders() {
     const msg = (currentRole !== 'owner' && currentRole !== 'manager')
       ? (specialistEmptyMap[currentWorkerTab] || specialistEmptyMap.all)
       : '<h3>Записей не найдено</h3><p>Попробуйте изменить фильтры или добавьте новую запись</p>';
-    container.innerHTML = `<div class="empty-state"><div class="empty-state-icon">📋</div>${msg}</div>`;
+    container.innerHTML = `<div class="empty-state"><div class="empty-state-icon">${icon('clipboard-list')}</div>${msg}</div>`;
     return;
   }
 
@@ -399,9 +431,9 @@ function openOrderDetail(id) {
   const actionsEl = document.getElementById('order-detail-actions');
   if (actionsEl) {
     actionsEl.innerHTML = `
-      <button class="icon-action-btn" title="Скопировать данные" onclick="copyOrderSummary('${o.id}')">📋</button>
-      ${canEdit   ? `<button class="icon-action-btn" title="Редактировать" onclick="openOrderModal('${o.id}')">✏️</button>` : ''}
-      ${canDelete ? `<button class="icon-action-btn icon-action-danger" title="Удалить" onclick="deleteOrder('${o.id}')">🗑️</button>` : ''}
+      <button class="icon-action-btn" title="Скопировать данные" onclick="copyOrderSummary('${o.id}')">${icon('clipboard-list')}</button>
+      ${canEdit   ? `<button class="icon-action-btn" title="Редактировать" onclick="openOrderModal('${o.id}')">${icon('pencil')}</button>` : ''}
+      ${canDelete ? `<button class="icon-action-btn icon-action-danger" title="Удалить" onclick="deleteOrder('${o.id}')">${icon('trash-2')}</button>` : ''}
     `;
   }
 
@@ -411,57 +443,57 @@ function openOrderDetail(id) {
         <div>
           <div style="font-size:12px;color:var(--text3);font-family:'JetBrains Mono',monospace;margin-bottom:6px;">${o.id}</div>
           <div class="detail-title">${o.car || '—'}</div>
-          <div class="detail-subtitle">🗓️ ${formatDate(o.date)}${o.time ? ' · 🕐 ' + o.time : ''} &nbsp;·&nbsp; 🚧 ${o.responsible || '—'}</div>
+          <div class="detail-subtitle">${icon('calendar')} ${formatDate(o.date)}${o.time ? ' · ' + icon('clock') + ' ' + o.time : ''} &nbsp;·&nbsp; ${icon('hard-hat')} ${o.responsible || '—'}</div>
         </div>
         <div class="detail-badges">
-          ${o.inWork ? '<span class="status-badge" style="background:#F59E0B;color:#fff;">🔨 Планёрка</span>' : ''}
+          ${o.inWork ? `<span class="status-badge" style="background:#F59E0B;color:#fff;">${icon('hammer')} Планёрка</span>` : ''}
           ${statusBadge(getEffectivePaymentStatus(o))}
         </div>
       </div>
     </div>
 
     <div class="detail-section">
-      <div class="detail-section-title">📋 Основная информация</div>
+      <div class="detail-section-title">${icon('clipboard-list')} Основная информация</div>
       <div class="detail-grid">
-        ${field('👤 Клиент', o.client)}
-        ${field('☎️ Телефон', o.phone, 'mono')}
-        ${field('📍 Место', o.address)}
-        ${field('🚗 Авто', o.car)}
-        ${field('🔢 Єврокод', o.code, 'mono')}
-        ${field('📮 Новая почта', o.newPost ? 'Да' : '')}
-        ${field('🕐 Время', o.time)}
-        ${field('👥 Менеджер', o.author)}
-        ${field('📋 Отв. менеджер', o.manager)}
+        ${field(`${icon('user')} Клиент`, o.client)}
+        ${field(`${icon('phone')} Телефон`, o.phone, 'mono')}
+        ${field(`${icon('map-pin')} Место`, o.address)}
+        ${field(`${icon('car')} Авто`, o.car)}
+        ${field(`${icon('hash')} Єврокод`, o.code, 'mono')}
+        ${field(`${icon('mail')} Новая почта`, o.newPost ? 'Да' : '')}
+        ${field(`${icon('clock')} Время`, o.time)}
+        ${field(`${icon('users')} Менеджер`, o.author)}
+        ${field(`${icon('clipboard-list')} Отв. менеджер`, o.manager)}
       </div>
       ${o.notes ? `<div style="margin-top:14px;padding:12px;background:var(--surface2);border-radius:8px;font-size:13px;color:var(--text2);">📝 ${o.notes}</div>` : ''}
     </div>
 
     <div class="detail-section">
-      <div class="detail-section-title">⚙️ Послуги та роботи</div>
+      <div class="detail-section-title">${icon('wrench')} Послуги та роботи</div>
       <div class="detail-grid">
-        ${field('⚙️ Монтаж', o.mount ? o.mount + ' ₴' : '')}
-        ${field('🛠️ Вид послуги', o.serviceType)}
-        ${field('🧾 Только продажа', o.onlySale ? 'Да' : '')}
-        ${field('*️⃣ Молдинг', o.molding)}
-        ${field('⚙️ Доп. работы', o.extraWork)}
-        ${field('*️⃣ Доп услуги', o.tatu)}
+        ${field(`${icon('wrench')} Монтаж`, o.mount ? o.mount + ' ₴' : '')}
+        ${field(`${icon('tool')} Вид послуги`, o.serviceType)}
+        ${field(`${icon('receipt')} Только продажа`, o.onlySale ? 'Да' : '')}
+        ${field(`${icon('hash')} Молдинг`, o.molding)}
+        ${field(`${icon('wrench')} Доп. работы`, o.extraWork)}
+        ${field(`${icon('hash')} Доп услуги`, o.tatu)}
         ${field('Тонировка', o.toning)}
-        ${field('🚛 Доставка', o.delivery ? o.delivery + ' ₴' : '')}
+        ${field(`${icon('truck')} Доставка`, o.delivery ? o.delivery + ' ₴' : '')}
       </div>
     </div>
 
     ${(canViewFinance() || (currentRole === 'extra' && (o.responsible === currentWorkerName || o.assistant === currentWorkerName))) ? `
     <div class="detail-section">
-      <div class="detail-section-title">💸 Финансы</div>
+      <div class="detail-section-title">${icon('banknote')} Финансы</div>
       <div class="detail-grid">
     ${field('Расчёт долга клиента', getEffectivePaymentStatus(o))}
     ${field('Сумма поставщику', o.check ? o.check + ' ₴' : '')}
     ${field('Расчёт долга', o.debt ? o.debt + ' ₴' : '')}
     ${field('Дата расчёта долга', formatDate(o.debtDate))}
-    ${field('📌 Общая сумма работ', o.total ? o.total + ' ₴' : '', 'mono')}
+    ${field(`${icon('pin')} Общая сумма работ`, o.total ? o.total + ' ₴' : '', 'mono')}
         ${field('Молдинг Автор', o.moldingAuthor)}
-        ${field('🤝 Партнер', o.partner)}
-        ${field('📦 Статус оплати постачальнику', getEffectiveSupplierStatus(o))}
+        ${field(`${icon('handshake')} Партнер`, o.partner)}
+        ${field(`${icon('package')} Статус оплати постачальнику`, getEffectiveSupplierStatus(o))}
         ${field('Сумма покупки стекла', o.purchase ? o.purchase + ' ₴' : '')}
         ${field('Сумма продажи стекла', o.income ? o.income + ' ₴' : '')}
         ${field('Маржа стекло', o.remainder !== undefined ? o.remainder + ' ₴' : '')}
@@ -523,7 +555,7 @@ function copyOrderSummary(id) {
 
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(text).then(() => {
-      showToast('Дані скопійовано 📋');
+      showToast('Дані скопійовано');
     }).catch(() => {
       _fallbackCopy(text);
     });
@@ -542,7 +574,7 @@ function _fallbackCopy(text) {
   ta.select();
   try {
     document.execCommand('copy');
-    showToast('Дані скопійовано 📋');
+    showToast('Дані скопійовано');
   } catch (e) {
     showToast('Не вдалося скопіювати', 'error');
   }
@@ -748,9 +780,17 @@ function syncClientPaidFromPayments() {
 
 function syncSupplierPaidFromPayments() {
   const checkEl = document.getElementById('f-check');
-  if (!checkEl) return;
   const totalPaid = currentSupplierPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-  checkEl.value = String(totalPaid || 0);
+  if (checkEl) checkEl.value = String(totalPaid || 0);
+  syncSupplierLeftFromPayments();
+}
+
+function syncSupplierLeftFromPayments() {
+  const leftEl = document.getElementById('f-supplier-left');
+  if (!leftEl) return;
+  const purchase = Number(document.getElementById('f-purchase')?.value) || 0;
+  const paid = currentSupplierPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  leftEl.value = String(Math.max(0, purchase - paid));
 }
 
 function addClientPayment() {
@@ -815,6 +855,7 @@ function openOrderModal(id) {
 
   populateRefSelects();
   populateClientDatalist();
+  setOrderModalPanel('order');
 
   const cancelWrap = document.getElementById('cancel-toggle-wrap');
   if (cancelWrap) {
@@ -926,6 +967,7 @@ function openOrderModal(id) {
   if (liveTotalEl) liveTotalEl.style.display = 'none';
 
   applyOrderFormDateTimeDefaults();
+  updateOrderSaveButtonLabel();
   renderSupplierPayments();
   renderClientPayments(); // рендерим историю оплат (изначально)
   syncSupplierPaidFromPayments();
@@ -940,6 +982,47 @@ function openOrderModal(id) {
 function closeOrderModal() {
   document.getElementById('order-modal').classList.remove('active');
   editingOrderId = null;
+}
+
+function setOrderModalPanel(panel) {
+  const nextPanel = panel || 'order';
+  document.querySelectorAll('[data-order-modal-panel]').forEach(el => {
+    el.style.display = el.dataset.orderModalPanel === nextPanel ? '' : 'none';
+  });
+  document.querySelectorAll('[data-order-modal-tab]').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.orderModalTab === nextPanel);
+  });
+}
+
+function updateOrderSaveButtonLabel() {
+  const status = document.getElementById('f-order-status')?.value || '';
+  const label = document.getElementById('order-save-label');
+  const btn = document.getElementById('order-save-btn');
+  if (btn) {
+    btn.classList.remove('order-save-selection', 'order-save-planner', 'order-save-cancelled');
+  }
+  if (!label) return;
+  if (status === 'inWork') {
+    label.textContent = 'Сохранить в работу';
+    if (btn) btn.classList.add('order-save-planner');
+  } else if (status === 'cancelled') {
+    label.textContent = 'Сохранить отменённым';
+    if (btn) btn.classList.add('order-save-cancelled');
+  } else {
+    label.textContent = 'Сохранить в подборку';
+    if (btn) btn.classList.add('order-save-selection');
+  }
+}
+
+function toggleExclusiveOrderFlag(flag) {
+  const onlyCutEl = document.getElementById('f-only-cut');
+  const onlySaleEl = document.getElementById('f-only-sale');
+  if (flag === 'cut' && onlyCutEl?.checked && onlySaleEl) {
+    onlySaleEl.checked = false;
+  }
+  if (flag === 'sale' && onlySaleEl?.checked && onlyCutEl) {
+    onlyCutEl.checked = false;
+  }
 }
 
 function applyOrderFormDateTimeDefaults() {
@@ -1009,6 +1092,7 @@ function fillOrderForm(o) {
   if (onlyCutEl) onlyCutEl.checked = !!o.onlyCut;
   const onlySaleEl = document.getElementById('f-only-sale');
   if (onlySaleEl) onlySaleEl.checked = !!o.onlySale;
+  if (onlyCutEl?.checked && onlySaleEl?.checked) onlySaleEl.checked = false;
 
   if (o.reworkData) {
     set('f-rework-responsible', o.reworkData.responsible);
@@ -1035,7 +1119,7 @@ function clearOrderForm() {
     'f-date','f-time','f-responsible','f-client','f-phone','f-address','f-car','f-code',
     'f-notes','f-mount','f-service-type','f-molding',
     'f-extra-work','f-tatu','f-toning','f-delivery','f-warehouse','f-warehouse-code','f-configuration',
-    'f-payment-status','f-check','f-debt','f-debt-date','f-total',
+    'f-payment-status','f-check','f-supplier-left','f-debt','f-debt-date','f-total',
     'f-supplier-status','f-purchase','f-income',
     'f-remainder','f-payment-method','f-dropshipper','f-margin-total',
     'f-payout-dropshipper','f-payout-manager-glass','f-payout-resp-glass',
@@ -1063,13 +1147,17 @@ function clearOrderForm() {
 }
 
 function setPriceFieldsLocked(locked) {
-  const priceFields = ['f-total','f-check','f-debt','f-debt-date','f-payment-status','f-payment-method','f-new-supplier-payment-method','f-purchase','f-income','f-supplier-status'];
+  const priceFields = ['f-total','f-check','f-supplier-left','f-debt','f-debt-date','f-payment-status','f-payment-method','f-new-supplier-payment-method','f-purchase','f-income','f-supplier-status'];
   priceFields.forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
+    if (id === 'f-check' || id === 'f-supplier-left' || id === 'f-supplier-status') {
+      el.setAttribute('readonly', 'true');
+      el.setAttribute('disabled', 'true');
+      return;
+    }
     if (id === 'f-payment-status') return; // Now fully automated
     if (id === 'f-debt-date' && currentRole === 'senior') return;
-    if (id === 'f-supplier-status' && currentRole === 'senior') return;
     if (id === 'f-check' && currentRole === 'senior') return;
 
     const forceUnlock = (currentRole === 'owner' || currentRole === 'manager' || currentRole === 'extra');
@@ -1148,6 +1236,7 @@ function recalcTotal(mode = 'init') {
     const checkVal = Number(checkInput.value) || 0;
     supplierStatusSel.value = calcSupplierPaymentStatus(checkVal, glassPurchase);
   }
+  syncSupplierLeftFromPayments();
 
   recalcFullMargins();
 }
@@ -1261,7 +1350,7 @@ async function saveOrder() {
   if (!validateOrderRequiredFields(data)) return;
 
   const saveBtn = document.getElementById('order-save-btn');
-  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '⏳ Сохранение...'; }
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = '<i data-lucide="loader" style="width:14px;height:14px;"></i><span>Сохранение...</span>'; initIcons(); }
 
   const oldCheck = Number(existingOrder ? existingOrder.check : 0) || 0;
   const newCheck = Number(data.check) || 0;
@@ -1330,7 +1419,12 @@ async function saveOrder() {
   } catch (e) {
     showToast('Ошибка сохранения: ' + e.message, 'error');
   } finally {
-    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 Сохранить'; }
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.innerHTML = '<i data-lucide="save" style="width:14px;height:14px;"></i><span id="order-save-label"></span>';
+      updateOrderSaveButtonLabel();
+      initIcons();
+    }
   }
 }
 
@@ -1404,15 +1498,17 @@ function renderYears() {
   const container = document.getElementById('years-list');
 
   if (!keys.length) {
-    container.innerHTML = `
+    const specialistTodayCard = renderSpecialistTodayYearCard();
+    container.innerHTML = specialistTodayCard || `
       <div class="empty-state">
-        <div class="empty-state-icon">📅</div>
+        <div class="empty-state-icon">${icon('calendar')}</div>
         <h3>Записей не найдено</h3>
       </div>`;
     return;
   }
 
-  container.innerHTML = keys.map(year => {
+  const specialistTodayCard = renderSpecialistTodayYearCard();
+  container.innerHTML = specialistTodayCard + keys.map(year => {
     const list = map[year];
     const displayList = (currentRole === 'owner' || currentRole === 'manager') ? list : list.filter(o => o.inWork);
     const totalSum = list.reduce((s, o) => s + ((Number(o.total) || 0) + (Number(o.income) || 0) + (Number(o.delivery) || 0)), 0);
@@ -1425,6 +1521,39 @@ function renderYears() {
       </div>
     `;
   }).join('');
+}
+
+function renderSpecialistTodayYearCard() {
+  if (currentRole === 'owner' || currentRole === 'manager') return '';
+
+  const today = todayStr();
+  const todayOrders = orders.filter(o =>
+    _isCurrentWorkerOrder(o) &&
+    o.inWork &&
+    !o.isCancelled &&
+    o.date === today
+  );
+
+  return `
+    <div class="home-card home-card-accent" style="display:flex;flex-direction:column;min-height:110px;" onclick="openSpecialistTodayOrders()">
+      <div style="font-size:12px;color:rgba(0,0,0,0.5);font-weight:700;letter-spacing:0.04em;">${todayOrders.length} зап.</div>
+      <div style="margin-top:auto;padding-top:12px;">
+        <div style="font-size:26px;font-weight:800;line-height:1.1;color:#0a0a0f;">Сегодня</div>
+        <div style="font-size:13px;color:rgba(0,0,0,0.45);margin-top:3px;">${formatDate(today)}</div>
+      </div>
+    </div>
+  `;
+}
+
+function openSpecialistTodayOrders() {
+  currentMonthFilter = null;
+  document.querySelector('#screen-orders .page-title').innerHTML = `${icon('clipboard-list')} Сегодняшние заказы`;
+  initOrderTabs();
+  currentWorkerTab = 'today';
+  updateOrdersBackTopbar();
+  renderOrders();
+  showScreen('orders');
+  setWorkerTab('today');
 }
 
 function openYear(year) {
@@ -1465,7 +1594,7 @@ function renderMonths() {
   if (!keys.length) {
     container.innerHTML = `
       <div class="empty-state">
-        <div class="empty-state-icon">📅</div>
+        <div class="empty-state-icon">${icon('calendar')}</div>
         <h3>Записей не найдено</h3>
         <p>Попробуйте изменить фильтр</p>
       </div>`;
@@ -1494,7 +1623,7 @@ function openMonthOrders(ym) {
   currentMonthFilter = ym;
   const [year, month] = ym.split('-');
   const monthName = MONTH_NAMES_RU[parseInt(month) - 1];
-  document.querySelector('#screen-orders .page-title').textContent = `📋 ${monthName} ${year}`;
+  document.querySelector('#screen-orders .page-title').innerHTML = `${icon('clipboard-list')} ${monthName} ${year}`;
   initOrderTabs();
   setupOrderActions();
   renderOrdersForMonth(ym);
@@ -1545,7 +1674,7 @@ function renderOrdersForMonth(ym) {
     ordersVisibleCount = 10;
     container.innerHTML = `
       <div class="empty-state">
-        <div class="empty-state-icon">📋</div>
+        <div class="empty-state-icon">${icon('clipboard-list')}</div>
         <h3>Записей нет</h3>
         <p>В этом месяце нет заказов</p>
       </div>`;

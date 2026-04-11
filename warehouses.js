@@ -22,7 +22,7 @@ function renderWarehousesScreen() {
   if (!debtOrders.length) {
     container.innerHTML = `
       <div class="empty-state">
-        <div class="empty-state-icon">✅</div>
+        <div class="empty-state-icon">${icon('check')}</div>
         <h3>Все поставщики оплачены</h3>
       </div>
     `;
@@ -130,7 +130,7 @@ function renderWarehouseDetail() {
               </div>
               <div class="order-card-meta" style="flex-wrap:nowrap;justify-content:space-between;align-items:center;">
                 <span class="order-meta-item" style="color:var(--text3);">⏰ ${o.time || '—'}</span>
-                ${o.warehouseCode ? `<span class="order-meta-item" style="color:var(--text2);font-family:'JetBrains Mono',monospace;font-size:12px;">🔢 ${o.warehouseCode}</span>` : ''}
+                ${o.warehouseCode ? `<span class="order-meta-item" style="color:var(--text2);font-family:'JetBrains Mono',monospace;font-size:12px;">${icon('hash')} ${o.warehouseCode}</span>` : ''}
                 <span class="order-meta-item" style="font-weight:800;color:var(--red);font-size:14px;">Долг: ${debt.toLocaleString('ru')} ₴</span>
               </div>
             </div>

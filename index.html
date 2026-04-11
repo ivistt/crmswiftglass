@@ -185,6 +185,12 @@
 
     <!-- YEARS LIST -->
     <div class="screen" id="screen-years">
+      <div class="detail-topbar" id="years-back-topbar" style="display:none;">
+        <button class="back-btn" onclick="goHome()" style="display:flex;align-items:center;gap:6px;">
+          <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
+          Назад к главной
+        </button>
+      </div>
       <div class="page-header">
         <div class="page-title">
           Записи по годам
@@ -221,6 +227,12 @@
 
     <!-- ORDERS LIST -->
     <div class="screen" id="screen-orders">
+      <div class="detail-topbar" id="orders-back-topbar" style="display:none;">
+        <button class="back-btn" onclick="goBackFromOrdersList()" style="display:flex;align-items:center;gap:6px;">
+          <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
+          <span id="orders-back-label">Назад к месяцам</span>
+        </button>
+      </div>
       <div class="page-header">
         <div class="page-title" style="display:flex;align-items:center;gap:10px;">
           <span class="ico page-title-icon"><i data-lucide="clipboard-list" style="width:22px;height:22px;"></i></span>
@@ -278,6 +290,12 @@
 
     <!-- CLIENTS LIST -->
     <div class="screen" id="screen-clients">
+      <div class="detail-topbar">
+        <button class="back-btn" onclick="goHome()" style="display:flex;align-items:center;gap:6px;">
+          <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
+          <span data-back-home-label>Назад к главной</span>
+        </button>
+      </div>
       <div class="page-header">
         <div class="page-title" style="display:flex;align-items:center;gap:10px;">
           <span class="ico page-title-icon"><i data-lucide="users" style="width:22px;height:22px;"></i></span>
@@ -302,6 +320,12 @@
 
     <!-- WORKERS -->
     <div class="screen" id="screen-workers">
+      <div class="detail-topbar">
+        <button class="back-btn" onclick="goHome()" style="display:flex;align-items:center;gap:6px;">
+          <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
+          <span data-back-home-label>Назад к главной</span>
+        </button>
+      </div>
       <div class="page-header">
         <div class="page-title" style="display:flex;align-items:center;gap:10px;">
           <span class="ico page-title-icon"><i data-lucide="hard-hat" style="width:22px;height:22px;"></i></span>
@@ -320,7 +344,7 @@
       <div class="detail-topbar">
         <button class="back-btn" id="order-back-btn" onclick="goBackFromOrder()" style="display:flex;align-items:center;gap:6px;">
           <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
-          Назад
+          Назад к заказам
         </button>
         <div class="detail-topbar-actions" id="order-detail-actions"></div>
       </div>
@@ -329,6 +353,12 @@
 
     <!-- FINANCE -->
     <div class="screen" id="screen-finance">
+      <div class="detail-topbar">
+        <button class="back-btn" onclick="goHome()" style="display:flex;align-items:center;gap:6px;">
+          <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
+          <span data-back-home-label>Назад к главной</span>
+        </button>
+      </div>
       <div class="page-header">
         <div class="page-title">Финансы</div>
       </div>
@@ -340,7 +370,7 @@
       <div class="detail-topbar">
         <button class="back-btn" onclick="goHome()" style="display:flex;align-items:center;gap:6px;">
           <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
-          Назад
+          <span data-back-home-label>Назад к главной</span>
         </button>
       </div>
       <div class="page-header" style="margin-top:-10px;">
@@ -357,7 +387,7 @@
       <div class="detail-topbar">
         <button class="back-btn" onclick="goHome()" style="display:flex;align-items:center;gap:6px;">
           <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
-          Назад
+          <span data-back-home-label>Назад к главной</span>
         </button>
       </div>
       <div class="page-header" style="margin-top:-10px;">
@@ -374,7 +404,7 @@
       <div class="detail-topbar">
         <button class="back-btn" onclick="goHome()" style="display:flex;align-items:center;gap:6px;">
           <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
-          Назад
+          <span data-back-home-label>Назад к главной</span>
         </button>
       </div>
       <div class="page-header" style="margin-top:-10px;">
@@ -388,6 +418,12 @@
 
     <!-- CAR DIRECTORY -->
     <div class="screen" id="screen-car-directory">
+      <div class="detail-topbar">
+        <button class="back-btn" onclick="goHome()" style="display:flex;align-items:center;gap:6px;">
+          <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
+          <span data-back-home-label>Назад к главной</span>
+        </button>
+      </div>
       <div class="page-header">
         <div class="page-title" style="display:flex;align-items:center;gap:10px;">
           <span class="ico page-title-icon"><i data-lucide="car" style="width:22px;height:22px;"></i></span>
@@ -413,11 +449,23 @@
 
     <!-- PROFILE -->
     <div class="screen" id="screen-profile">
+      <div class="detail-topbar">
+        <button class="back-btn" onclick="goHome()" style="display:flex;align-items:center;gap:6px;">
+          <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
+          Назад к записям
+        </button>
+      </div>
       <div id="profile-content"></div>
     </div>
 
     <!-- CASH -->
     <div class="screen" id="screen-cash">
+      <div class="detail-topbar">
+        <button class="back-btn" onclick="goHome()" style="display:flex;align-items:center;gap:6px;">
+          <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
+          Назад к записям
+        </button>
+      </div>
       <div id="cash-content"></div>
     </div>
 
@@ -425,13 +473,19 @@
 <div class="screen" id="screen-client-detail">
   <button class="back-btn" style="display:flex;align-items:center;gap:6px;" onclick="showScreen('clients')">
     <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
-    Назад
+    Назад к клиентам
       </button>
       <div id="client-detail-content"></div>
     </div>
 
     <!-- WAREHOUSES -->
     <div class="screen" id="screen-warehouses">
+      <div class="detail-topbar">
+        <button class="back-btn" onclick="goHome()" style="display:flex;align-items:center;gap:6px;">
+          <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
+          <span data-back-home-label>Назад к главной</span>
+        </button>
+      </div>
       <div class="page-header">
         <div class="page-title" style="display:flex;align-items:center;gap:10px;">
           <span class="ico page-title-icon"><i data-lucide="package" style="width:22px;height:22px;"></i></span>
@@ -511,10 +565,16 @@
       </button>
     </div>
 
+    <div class="order-modal-tabs" id="order-modal-tabs">
+      <button type="button" class="order-modal-tab active" data-order-modal-tab="order" onclick="setOrderModalPanel('order')">Заказ</button>
+      <button type="button" class="order-modal-tab" data-order-modal-tab="work" onclick="setOrderModalPanel('work')">Работы</button>
+      <button type="button" class="order-modal-tab" data-order-modal-tab="finance" onclick="setOrderModalPanel('finance')">Финансы</button>
+    </div>
+
     <div class="modal-body">
 
       <!-- ── СЕКЦИЯ 1: ОСНОВНАЯ ИНФОРМАЦИЯ ── -->
-      <div class="form-section">
+      <div class="form-section" data-order-modal-panel="order">
         <div class="form-section-title form-section-title--blue">
           <i data-lucide="clipboard-list" style="width:13px;height:13px;"></i>
           Основная информация
@@ -522,39 +582,51 @@
         <div class="form-grid col-1">
           <div class="form-group" id="cancel-toggle-wrap">
             <label class="form-label">📌 Статус записи</label>
-            <select class="form-select" id="f-order-status" style="width:100%;">
+            <select class="form-select" id="f-order-status" style="width:100%;" onchange="updateOrderSaveButtonLabel()">
               <option value="">📋 Подборка</option>
               <option value="inWork">🔨 В работу (Планёрка)</option>
               <option value="cancelled">❌ Отменен</option>
             </select>
           </div>
-          <div class="form-group">
-            <label class="checkbox order-flag-checkbox">
-              <input type="checkbox" id="f-only-cut">
-              <span>✂️ Только срезка (ЗП ÷ 2)</span>
-            </label>
+          <div class="form-row form-row-flags">
+            <div class="form-group">
+              <label class="checkbox order-flag-checkbox">
+                <input type="checkbox" id="f-only-cut" onchange="toggleExclusiveOrderFlag('cut')">
+                <span>✂️ Только срезка (ЗП ÷ 2)</span>
+              </label>
+            </div>
+            <div class="form-group">
+              <label class="checkbox order-flag-checkbox">
+                <input type="checkbox" id="f-only-sale" onchange="toggleExclusiveOrderFlag('sale')">
+                <span>🧾 Только продажа</span>
+              </label>
+            </div>
+            <div class="form-group">
+              <label class="checkbox order-flag-checkbox">
+                <input type="checkbox" id="f-toning-external">
+                <span>Не начислять ЗП Лёше</span>
+              </label>
+            </div>
           </div>
-          <div class="form-group">
-            <label class="checkbox order-flag-checkbox">
-              <input type="checkbox" id="f-only-sale">
-              <span>🧾 Только продажа</span>
-            </label>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">🗓️ Дата</label>
+              <input class="form-input" type="date" id="f-date">
+            </div>
+            <div class="form-group">
+              <label class="form-label">🕐 Время</label>
+              <input class="form-input" type="time" id="f-time">
+            </div>
           </div>
-          <div class="form-group">
-            <label class="form-label">🗓️ Дата</label>
-            <input class="form-input" type="date" id="f-date">
-          </div>
-          <div class="form-group">
-            <label class="form-label">🕐 Время</label>
-            <input class="form-input" type="time" id="f-time">
-          </div>
-          <div class="form-group">
-            <label class="form-label">🚧 Ответственный</label>
-            <select class="form-select" id="f-responsible"></select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">🤝 Помощник</label>
-            <select class="form-select" id="f-assistant"></select>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">🚧 Ответственный</label>
+              <select class="form-select" id="f-responsible"></select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">🤝 Помощник</label>
+              <select class="form-select" id="f-assistant"></select>
+            </div>
           </div>
           <div class="form-group">
             <label class="form-label">📋 Ответственный менеджер</label>
@@ -606,23 +678,25 @@
               <span>📮 Новая почта</span>
             </label>
           </div>
-          <div class="form-group">
-            <label class="form-label">🏢 Склад</label>
-            <select class="form-select" id="f-warehouse">
-              <option value="">— выбрать —</option>
-              <option value="📦 ТРЕЙД">📦 ТРЕЙД</option>
-              <option value="📦 БОСС">📦 БОСС</option>
-              <option value="📦 ФОРМА">📦 ФОРМА</option>
-              <option value="📦 ДОНСКОГО">📦 ДОНСКОГО</option>
-              <option value="📦 ПРИМОРСКАЯ">📦 ПРИМОРСКАЯ</option>
-              <option value="📦 ДЕЛЬТАГЛАСС">📦 ДЕЛЬТАГЛАСС</option>
-              <option value="📦 ГЛАССПО">📦 ГЛАССПО</option>
-              <option value="📦 ЭЛСИ">📦 ЭЛСИ</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Код склада</label>
-            <input class="form-input" type="text" id="f-warehouse-code" placeholder="Свободный ввод">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">🏢 Склад</label>
+              <select class="form-select" id="f-warehouse">
+                <option value="">— выбрать —</option>
+                <option value="📦 ТРЕЙД">📦 ТРЕЙД</option>
+                <option value="📦 БОСС">📦 БОСС</option>
+                <option value="📦 ФОРМА">📦 ФОРМА</option>
+                <option value="📦 ДОНСКОГО">📦 ДОНСКОГО</option>
+                <option value="📦 ПРИМОРСКАЯ">📦 ПРИМОРСКАЯ</option>
+                <option value="📦 ДЕЛЬТАГЛАСС">📦 ДЕЛЬТАГЛАСС</option>
+                <option value="📦 ГЛАССПО">📦 ГЛАССПО</option>
+                <option value="📦 ЭЛСИ">📦 ЭЛСИ</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Код склада</label>
+              <input class="form-input" type="text" id="f-warehouse-code" placeholder="Свободный ввод">
+            </div>
           </div>
           <div class="form-group span-full" style="grid-column: 1 / -1;">
             <label class="form-label">🧰 Комплектация</label>
@@ -653,7 +727,7 @@
       </div>
 
       <!-- ── СЕКЦИЯ 2: УСЛУГИ (тип) ── -->
-      <div class="form-section">
+      <div class="form-section" data-order-modal-panel="work">
         <div class="form-section-title form-section-title--teal">
           <i data-lucide="wrench" style="width:13px;height:13px;"></i>
           Тип услуги
@@ -663,7 +737,7 @@
       </div>
 
       <!-- ── СЕКЦИЯ 3: РАБОТЫ (суммы) ── -->
-      <div class="form-section">
+      <div class="form-section" data-order-modal-panel="work">
         <div class="form-section-title form-section-title--teal">
           <i data-lucide="hammer" style="width:13px;height:13px;"></i>
           Стоимость работ
@@ -699,7 +773,7 @@
       </div>
 
       <!-- ── СЕКЦИЯ 4: ДОРАБОТКА (свёрнута по умолчанию) ── -->
-      <div class="form-section form-section--collapsible" id="rework-section">
+      <div class="form-section form-section--collapsible" id="rework-section" data-order-modal-panel="work">
         <div class="form-section-title form-section-title--toggle" onclick="toggleReworkSection()">
           <span style="display:flex;align-items:center;gap:6px;">
             <i data-lucide="tool" style="width:13px;height:13px;"></i>
@@ -746,7 +820,7 @@
 
 
       <!-- ── СЕКЦИЯ 5: ФИНАНСЫ (свёрнута по умолчанию) ── -->
-      <div class="form-section form-section--collapsible" id="finance-section">
+      <div class="form-section form-section--collapsible" id="finance-section" data-order-modal-panel="finance">
         <div class="form-section-title form-section-title--finance form-section-title--toggle"
              onclick="toggleFinanceSection()">
           <span style="display:flex;align-items:center;gap:6px;">
@@ -772,7 +846,17 @@
 
             <!-- ГРУППА 2: Стекло/Поставщик -->
             <div class="form-group span-full" style="background:var(--surface3); padding:16px; border-radius:12px; border:1px solid var(--border);">
-              <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:12px;text-transform:uppercase;">Стекло / Поставщик</div>
+              <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:12px;text-transform:uppercase;">Расход поставщику</div>
+              <div class="form-grid" style="margin-bottom:16px;">
+                <div class="form-group">
+                  <label class="form-label">Сумма покупки стекла</label>
+                  <input class="form-input" type="number" id="f-purchase" placeholder="0" oninput="recalcMargin()">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Сумма продажи стекла</label>
+                  <input class="form-input" type="number" id="f-income" placeholder="0" oninput="recalcMargin()">
+                </div>
+              </div>
               <div id="supplier-payments-list" style="margin-bottom:12px;display:flex;flex-direction:column;gap:8px;"></div>
               <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;margin-bottom:16px;padding:10px;background:var(--surface2);border-radius:8px;border:1px solid var(--border);">
                 <div style="min-width:0;">
@@ -801,16 +885,12 @@
               </div>
               <div class="form-grid">
                 <div class="form-group">
-                  <label class="form-label">Сумма покупки стекла</label>
-                  <input class="form-input" type="number" id="f-purchase" placeholder="0" oninput="recalcMargin()">
-                </div>
-                <div class="form-group">
-                  <label class="form-label">Сумма продажи стекла</label>
-                  <input class="form-input" type="number" id="f-income" placeholder="0" oninput="recalcMargin()">
-                </div>
-                <div class="form-group">
                   <label class="form-label">Сумма поставщику</label>
-                  <input class="form-input" type="number" id="f-check" placeholder="0" oninput="recalcTotal()">
+                  <input class="form-input" type="number" id="f-check" placeholder="0" disabled style="background-color:var(--surface2);cursor:not-allowed;">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Сумма поставщику осталось</label>
+                  <input class="form-input" type="number" id="f-supplier-left" placeholder="0" disabled style="background-color:var(--surface2);cursor:not-allowed;">
                 </div>
                 <div class="form-group">
                   <label class="form-label">Маржа стекло</label>
@@ -831,7 +911,7 @@
             <!-- ГРУППА 1: Клиент -->
             <div class="form-group span-full" style="background:var(--surface3); padding:16px; border-radius:12px; border:1px solid var(--border);">
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-                <div style="font-size:12px;font-weight:700;color:var(--text2);text-transform:uppercase;">Расчёт с клиентом</div>
+                <div style="font-size:12px;font-weight:700;color:var(--text2);text-transform:uppercase;">Приход от клиента</div>
               </div>
               <div id="client-payments-list" style="margin-bottom:12px;display:flex;flex-direction:column;gap:8px;"></div>
               <!-- Добавление платежа -->
@@ -880,18 +960,6 @@
                 </div>
               </div>
             </div>
-
-
-
-            <!-- Строка 7: чекбокс на всю ширину -->
-            <div class="form-group span-2 span-full">
-              <label class="form-label">Внешний специалист (тонировка)</label>
-              <label class="checkbox" style="gap:8px;margin-top:4px;">
-                <input type="checkbox" id="f-toning-external" style="width:18px;height:18px;accent-color:#00e5a0;">
-                <span style="font-size:13px;">Не начислять Лёше 20%</span>
-              </label>
-            </div>
-
           </div>
         </div>
       </div>
@@ -903,7 +971,7 @@
       <button class="btn-secondary" onclick="closeOrderModal()">Отмена</button>
       <button class="btn-primary" id="order-save-btn" style="display:flex;align-items:center;gap:6px;" onclick="saveOrder()">
         <i data-lucide="save" style="width:14px;height:14px;"></i>
-        Сохранить
+        <span id="order-save-label">Сохранить</span>
       </button>
     </div>
 

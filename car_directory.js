@@ -23,7 +23,7 @@ function renderCarDirectory() {
   if (!list.length) {
     container.innerHTML = `
       <div class="empty-state">
-        <div class="empty-state-icon">🚗</div>
+        <div class="empty-state-icon">${icon('car')}</div>
         <h3>${search ? 'Ничего не найдено' : 'Справочник пуст'}</h3>
         <p>${search ? 'Попробуйте изменить запрос' : 'Авто добавляются автоматически при создании заказов или вручную'}</p>
       </div>`;
@@ -46,8 +46,8 @@ function renderCarDirectory() {
             <span class="car-dir-code">${c.eurocode || '—'}</span>
           </div>
           <div class="car-dir-col-actions">
-            <button class="icon-action-btn" title="Редактировать" onclick="openCarDirModal('${c.id}')">✏️</button>
-            <button class="icon-action-btn icon-action-danger" title="Удалить" onclick="deleteCarDirEntry('${c.id}')">🗑️</button>
+            <button class="icon-action-btn" title="Редактировать" onclick="openCarDirModal('${c.id}')">${icon('pencil')}</button>
+            <button class="icon-action-btn icon-action-danger" title="Удалить" onclick="deleteCarDirEntry('${c.id}')">${icon('trash-2')}</button>
           </div>
         </div>
       `).join('')}

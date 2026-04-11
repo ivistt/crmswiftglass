@@ -389,7 +389,7 @@ function renderFinanceMonth(ym, monthOrders) {
 
         <!-- Зарплаты сотрудников (из профилей) -->
         <div class="fin-section-title" style="margin-top:16px;display:flex;align-items:center;justify-content:space-between;">
-          <span>💰 Зарплаты сотрудников</span>
+          <span>${icon('coins')} Зарплаты сотрудников</span>
           <button class="fin-add-salary-btn" onclick="openSalaryDetail()">
             <i data-lucide="external-link" style="width:12px;height:12px;"></i> Подробнее
           </button>
@@ -485,7 +485,7 @@ function renderSalaryScreen() {
     const workerNames = [...new Set(manualReports.map(s => s.worker_name))].sort();
     const anomalies = getSalaryAnomalies(manualReports);
     if (!workerNames.length && !anomalies.length) {
-      container.innerHTML = `<div class="empty-state"><div class="empty-state-icon">💰</div><h3>Данных нет</h3></div>`;
+      container.innerHTML = `<div class="empty-state"><div class="empty-state-icon">${icon('coins')}</div><h3>Данных нет</h3></div>`;
       return;
     }
     const anomaliesHtml = `
@@ -557,7 +557,7 @@ function renderSalaryScreen() {
     title.textContent = 'Аномалии ЗП';
     const anomalies = getSalaryAnomalies(manualReports);
     if (!anomalies.length) {
-      container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">✅</div><h3>Аномалий нет</h3><p>Все внесённые ЗП укладываются в порог 10%</p></div>';
+      container.innerHTML = `<div class="empty-state"><div class="empty-state-icon">${icon('check')}</div><h3>Аномалий нет</h3><p>Все внесённые ЗП укладываются в порог 10%</p></div>`;
       initIcons();
       return;
     }
@@ -950,7 +950,7 @@ async function loadBackupHistory() {
               <button class="btn-secondary" style="padding:5px 10px;font-size:12px;display:flex;align-items:center;gap:5px;flex-shrink:0;" onclick="downloadBackup(${b.id})">
                 <i data-lucide="download" style="width:12px;height:12px;"></i> JSON
               </button>
-              <button class="icon-action-btn icon-action-danger" title="Удалить" onclick="deleteBackup(${b.id})" style="flex-shrink:0;">🗑️</button>
+              <button class="icon-action-btn icon-action-danger" title="Удалить" onclick="deleteBackup(${b.id})" style="flex-shrink:0;">${icon('trash-2')}</button>
             </div>
           `;
         }).join('')}

@@ -90,6 +90,7 @@ function renderProfile() {
     ? (assistantManualReports.find(s => s.date === today) || null)
     : null;
   const assistantTodayAmount = Number(assistantTodayReport?.amount) || 0;
+  const assistantAccTotal = assistantRelevantEntries.reduce((sum, s) => sum + Number(s.amount), 0);
   const assistantTodaySummary = attachedAssistant
     ? getWorkerCompletedOrdersSummary(attachedAssistant.name, today)
     : null;
@@ -132,7 +133,7 @@ function renderProfile() {
     + '<div style="display:flex;flex-direction:column;gap:12px;">' + salaryHistoryHtml + '</div>'
     + '</div>'
     + (currentRole === 'senior' && attachedAssistant
-      ? renderAssistantSalarySection(attachedAssistant, assistantTodayReport, assistantTodaySummary, assistantTodayAmount)
+      ? renderAssistantSalarySection(attachedAssistant, assistantTodayReport, assistantTodaySummary, assistantTodayAmount, assistantAccTotal)
       : '')
     + '</div>'
     + '</div>';
@@ -231,7 +232,7 @@ function renderTodaySalarySubmission(todayReport, todaySummary, options = {}) {
   });
 }
 
-function renderAssistantSalarySection(assistantWorker, todayReport, todaySummary, todayAmount) {
+function renderAssistantSalarySection(assistantWorker, todayReport, todaySummary, todayAmount, assistantAccTotal = 0) {
   return ''
     + '<div style="padding:14px;background:rgba(29,233,182,.06);border-radius:12px;border:1px solid rgba(29,233,182,.2);">'
     + '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px;">'
@@ -240,6 +241,16 @@ function renderAssistantSalarySection(assistantWorker, todayReport, todaySummary
     + '<div style="font-size:20px;font-weight:800;color:var(--text1);margin-top:4px;">' + escapeHtml(assistantWorker.name) + '</div>'
     + '</div>'
     + '<div style="font-size:11px;color:var(--text3);padding:4px 10px;background:rgba(255,255,255,.04);border-radius:999px;">прикреплён к вам</div>'
+    + '</div>'
+    + '<div style="padding:14px;margin-bottom:12px;background:var(--surface2);border-radius:12px;border:1px solid var(--border);">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">'
+    + '<div>'
+    + '<div style="font-size:12px;font-weight:700;color:var(--text3);letter-spacing:0.04em;">НАКОПИЛОСЬ У ПОМОЩНИКА</div>'
+    + '<div style="font-size:24px;font-weight:800;color:var(--accent);margin-top:4px;">' + assistantAccTotal.toLocaleString('ru') + ' \u20B4</div>'
+    + '</div>'
+    + '<button class="btn-primary" style="padding:0 22px;min-height:42px;border-radius:14px;font-weight:800;" onclick="withdrawAssistantSalary()" ' + (assistantAccTotal <= 0 ? 'disabled' : '') + '>Снять</button>'
+    + '</div>'
+    + '<div style="font-size:11px;color:var(--text3);margin-top:8px;">Списание пойдёт из вашей кассы и запишется как выплата ЗП помощнику</div>'
     + '</div>'
     + renderSalarySubmissionCard({
       title: 'ВНЕСТИ СЕГОДНЯШНЮЮ ЗП ПОМОЩНИКУ',
@@ -301,7 +312,7 @@ function buildWorkerSalaryHistory(workerName, entries) {
   const sortedMonths = Object.keys(byMonth).sort((a, b) => b.localeCompare(a));
 
   if (!sortedMonths.length) {
-    return '<div class="empty-state"><div class="empty-state-icon">💰</div><h3>Записей нет</h3>'
+    return `<div class="empty-state"><div class="empty-state-icon">${icon('coins')}</div><h3>Записей нет</h3>`
       + '<p>Дневная зарплата появится здесь после сохранения</p></div>';
   }
 
@@ -398,7 +409,7 @@ function renderCashSection(balance, today) {
     // ── ТЕКУЩАЯ КАССА (сегодня) ──
     + '<div style="margin-bottom:16px;">'
     + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">'
-    + '<div style="font-size:12px;font-weight:700;color:var(--text3);letter-spacing:0.04em;">📅 СЕГОДНЯ</div>'
+    + '<div style="font-size:12px;font-weight:700;color:var(--text3);letter-spacing:0.04em;">' + icon('calendar') + ' СЕГОДНЯ</div>'
     + '<div style="font-size:15px;font-weight:800;color:' + todayColor + ';">'
     + (todayBalance >= 0 ? '+' : '') + todayBalance.toLocaleString('ru') + ' \u20B4'
     + '</div>'
@@ -573,7 +584,7 @@ function openCashEntryModal() {
     modal.innerHTML = `
       <div class="modal" style="max-width:400px;">
         <div class="modal-header">
-          <div class="modal-title">💵 Запись в кассу</div>
+          <div class="modal-title">${icon('banknote')} Запись в кассу</div>
           <button class="modal-close" onclick="closeCashEntryModal()">
             <i data-lucide="x" style="width:16px;height:16px;"></i>
           </button>
@@ -786,6 +797,25 @@ async function withdrawSalary() {
   }
 }
 
+async function withdrawAssistantSalary() {
+  const assistant = getAttachedAssistantWorker();
+  if (currentRole !== 'senior' || !assistant?.name) {
+    showToast('Помощник не найден', 'error');
+    return;
+  }
+
+  const accTotal = assistantWorkerSalaries
+    .filter(isRelevantSalaryEntry)
+    .reduce((sum, s) => sum + Number(s.amount), 0);
+  if (accTotal <= 0) {
+    showToast('У помощника нет накоплений для снятия', 'error');
+    return;
+  }
+
+  if (!confirm(`Снять ЗП помощника ${assistant.name} на сумму ${accTotal.toLocaleString('ru')} ₴ из вашей кассы?`)) return;
+  await performSalaryWithdrawal(assistant.name, currentWorkerName, accTotal);
+}
+
 function showSeniorSelectionModal(amount) {
   let modal = document.getElementById('salary-senior-modal');
   if (!modal) {
@@ -854,6 +884,10 @@ async function performSalaryWithdrawal(recipient, sourceSenior, amount) {
     
     if (recipient === currentWorkerName) {
       workerSalaries.unshift(salaryEntry);
+    }
+    const assistant = getAttachedAssistantWorker();
+    if (assistant?.name && recipient === assistant.name) {
+      assistantWorkerSalaries.unshift(salaryEntry);
     }
     if (sourceSenior === currentWorkerName && typeof workerCashLog !== 'undefined') {
       workerCashLog.unshift(cashEntry);

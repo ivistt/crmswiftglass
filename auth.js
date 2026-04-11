@@ -111,7 +111,7 @@ function _showApp(role, workerName) {
 
   const badge = document.getElementById('role-badge');
   if (role === 'owner') {
-    badge.textContent = '👑 ' + (workerName || 'Владелец');
+    badge.textContent = workerName || 'Владелец';
   } else {
     const roleLabel = ROLE_LABELS[role] || role;
     badge.textContent = workerName ? `${workerName} · ${roleLabel.replace(/^.\s/, '')}` : roleLabel;

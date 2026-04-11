@@ -5,6 +5,9 @@
 async function loadWorkers() {
   try {
     workers = await sbFetchWorkers();
+    if (currentRole !== 'owner') {
+      workers = workers.map(worker => ({ ...worker, salaryFormula: '' }));
+    }
   } catch (e) {
     showToast('Ошибка загрузки сотрудников: ' + e.message, 'error');
   }
@@ -16,7 +19,7 @@ function renderWorkers() {
   if (!workers.length) {
     container.innerHTML = `
       <div class="empty-state">
-        <div class="empty-state-icon">👷</div>
+        <div class="empty-state-icon">${icon('hard-hat')}</div>
         <h3>Сотрудников нет</h3>
         <p>Добавьте первого сотрудника, нажав кнопку выше</p>
       </div>`;
@@ -35,7 +38,7 @@ function renderWorkers() {
         <div class="worker-card-info">
           <div class="worker-name">${w.name}</div>
           <div class="worker-role">${w.role}</div>
-          <div class="worker-order-count">📋 ${orderCount} заказов</div>
+          <div class="worker-order-count">${icon('clipboard-list')} ${orderCount} заказов</div>
         </div>
         ${currentRole === 'owner' ? `
           <div style="display:flex;gap:8px;align-items:center;">
@@ -134,7 +137,7 @@ function openWorkerEditModal(workerId) {
     modal.innerHTML = `
       <div class="modal" style="max-height:90vh;overflow-y:auto;">
         <div class="modal-header">
-          <div class="modal-title">✏️ Редактировать сотрудника</div>
+          <div class="modal-title">${icon('pencil')} Редактировать сотрудника</div>
           <button class="modal-close" onclick="closeWorkerEditModal()">✕</button>
         </div>
         <div class="modal-body" style="display:flex;flex-direction:column;gap:16px;">
@@ -149,7 +152,7 @@ function openWorkerEditModal(workerId) {
 
           <!-- Роль -->
           <div class="form-group">
-            <label class="form-label">👤 Роль (системная)</label>
+            <label class="form-label">${icon('user')} Роль (системная)</label>
             <select class="form-select" id="we-role">
               <option value="senior">senior — Старший специалист</option>
               <option value="junior">junior — Младший специалист</option>
@@ -160,7 +163,7 @@ function openWorkerEditModal(workerId) {
 
           <!-- Помощник (для senior) -->
           <div class="form-group" id="we-assistant-group">
-            <label class="form-label">🤝 Помощник по умолчанию</label>
+            <label class="form-label">${icon('handshake')} Помощник по умолчанию</label>
             <select class="form-select" id="we-assistant">
               <option value="">— нет —</option>
             </select>
@@ -171,7 +174,7 @@ function openWorkerEditModal(workerId) {
 
           <!-- Условия ЗП (readonly, из SALARY_CONFIG) -->
           <div class="form-group" id="we-formula-group">
-            <label class="form-label">💰 Условия зарплаты</label>
+            <label class="form-label">${icon('coins')} Условия зарплаты</label>
             <div id="we-salary-rule-display" style="background:var(--surface2);border-radius:10px;padding:10px 14px;"></div>
             <div style="font-size:11px;color:var(--text3);margin-top:5px;">Условия задаются в <code>SALARY_CONFIG</code> в файле <code>data.js</code></div>
           </div>
@@ -179,7 +182,7 @@ function openWorkerEditModal(workerId) {
           <!-- Проблемы -->
           <div>
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-              <div style="font-size:11px;font-weight:700;color:var(--text3);letter-spacing:0.04em;">⚠️ ПРОБЛЕМЫ</div>
+              <div style="font-size:11px;font-weight:700;color:var(--text3);letter-spacing:0.04em;">${icon('alert-triangle')} ПРОБЛЕМЫ</div>
               <button class="fin-add-salary-btn" onclick="openAddProblemModalFromEdit()">
                 <i data-lucide="plus" style="width:11px;height:11px;"></i> Добавить
               </button>
@@ -435,7 +438,7 @@ function openAddProblemModal(workerName, callback) {
     modal.innerHTML = `
       <div class="modal">
         <div class="modal-header">
-          <div class="modal-title">⚠️ Добавить проблему</div>
+          <div class="modal-title">${icon('alert-triangle')} Добавить проблему</div>
           <button class="modal-close" onclick="closeAddProblemModal()">✕</button>
         </div>
         <div class="modal-body" style="display:flex;flex-direction:column;gap:12px;">
@@ -633,7 +636,7 @@ function _renderWorkerCashModal() {
     // Сегодня
     + '<div style="margin-bottom:16px;">'
     + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">'
-    + '<div style="font-size:12px;font-weight:700;color:var(--text3);letter-spacing:0.04em;">📅 СЕГОДНЯ</div>'
+    + '<div style="font-size:12px;font-weight:700;color:var(--text3);letter-spacing:0.04em;">' + icon('calendar') + ' СЕГОДНЯ</div>'
     + '<div style="font-size:15px;font-weight:800;color:' + todayColor + ';">'
     + (todayBalance >= 0 ? '+' : '') + todayBalance.toLocaleString('ru') + ' ₴</div>'
     + '</div>'

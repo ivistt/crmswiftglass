@@ -14,6 +14,10 @@ function getHeaders() {
   };
 }
 
+function icon(name, className = 'svg-icon') {
+  return `<span class="${className}" style="--icon-url:url('images/ico/${name}.svg');" aria-hidden="true"></span>`;
+}
+
 // ── ORDERS ───────────────────────────────────────────────────
 
 async function sbFetchOrders() {
@@ -790,11 +794,11 @@ function getWorkerCompletedOrdersSummary(workerName, date) {
 // ── GLOBAL STATE ─────────────────────────────────────────────
 
 const ROLE_LABELS = {
-  owner:   '👑 Владелец',
-  manager: '📋 Менеджер',
-  senior:  '🔧 Старший специалист',
-  junior:  '👤 Младший специалист',
-  extra:   '⭐ Экстра специалист',
+  owner:   'Владелец',
+  manager: 'Менеджер',
+  senior:  'Старший специалист',
+  junior:  'Младший специалист',
+  extra:   'Экстра специалист',
 };
 
 const PAYMENT_METHOD_OPTIONS = [

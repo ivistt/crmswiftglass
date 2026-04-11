@@ -17,7 +17,7 @@ function renderClients() {
   if (!list.length) {
     container.innerHTML = `
       <div class="empty-state">
-        <div class="empty-state-icon">👥</div>
+        <div class="empty-state-icon">${icon('users')}</div>
         <h3>Клиенты не найдены</h3>
         <p>Клиенты появляются автоматически при создании заказов</p>
       </div>`;
@@ -28,7 +28,7 @@ function renderClients() {
     <div class="client-card" onclick="openClientDetail('${encodeURIComponent(c.phone || c.name)}')">
       <div class="client-name">${c.name}</div>
       <div class="client-phone">${c.phone || '—'}</div>
-      <div class="client-orders">📋 Заказов: ${c.orders.length}</div>
+      <div class="client-orders">${icon('clipboard-list')} Заказов: ${c.orders.length}</div>
     </div>
   `).join('');
 }
@@ -40,6 +40,14 @@ function openClientDetail(key) {
   if (!c) return;
 
   const totalSpent = c.orders.reduce((s, o) => s + (Number(o.total) || 0), 0);
+  const totalSpentHtml = canViewFinance()
+    ? `
+        <div>
+          <div style="font-size:12px;color:var(--text3);margin-bottom:2px;">Всего потрачено</div>
+          <div style="font-size:24px;font-weight:800;color:var(--accent);">${totalSpent.toLocaleString('ru')} ₴</div>
+        </div>
+      `
+    : '';
 
   const el = document.getElementById('client-detail-content');
   el.innerHTML = `
@@ -49,15 +57,12 @@ function openClientDetail(key) {
             <div class="detail-title">${c.name}</div>
             <div class="detail-subtitle">${c.phone || '—'}</div>
           </div>
-        <div>
-          <div style="font-size:12px;color:var(--text3);margin-bottom:2px;">Всего потрачено</div>
-          <div style="font-size:24px;font-weight:800;color:var(--accent);">${totalSpent.toLocaleString('ru')} ₴</div>
-        </div>
+        ${totalSpentHtml}
       </div>
     </div>
 
     <div class="detail-section">
-      <div class="detail-section-title">📋 История заказов (${c.orders.length})</div>
+      <div class="detail-section-title">${icon('clipboard-list')} История заказов (${c.orders.length})</div>
       <div style="display:flex;flex-direction:column;gap:10px;">
         ${c.orders.map(o => `
           <div class="order-card" onclick="openOrderDetail('${o.id}')">
@@ -71,9 +76,9 @@ function openClientDetail(key) {
               </div>
             </div>
             <div class="order-card-meta">
-              <span class="order-meta-item">🗓️ ${formatDate(o.date)}</span>
-              <span class="order-meta-item">🚧 ${o.responsible || '—'}</span>
-              ${((Number(o.total) || 0) + (Number(o.income) || 0) + (Number(o.delivery) || 0)) > 0 ? `<span class="order-meta-item" style="font-weight:700;color:var(--accent);">💰 ${((Number(o.total) || 0) + (Number(o.income) || 0) + (Number(o.delivery) || 0)).toLocaleString('ru')} ₴</span>` : ''}
+              <span class="order-meta-item">${icon('calendar')} ${formatDate(o.date)}</span>
+              <span class="order-meta-item">${icon('hard-hat')} ${o.responsible || '—'}</span>
+              ${((Number(o.total) || 0) + (Number(o.income) || 0) + (Number(o.delivery) || 0)) > 0 ? `<span class="order-meta-item" style="font-weight:700;color:var(--accent);">${icon('coins')} ${((Number(o.total) || 0) + (Number(o.income) || 0) + (Number(o.delivery) || 0)).toLocaleString('ru')} ₴</span>` : ''}
             </div>
           </div>
         `).join('')}
