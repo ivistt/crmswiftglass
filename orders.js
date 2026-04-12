@@ -1407,6 +1407,15 @@ async function saveOrder() {
   const newCashSupplierPaid = hasSupplierPaymentHistory ? sumCashSupplierPayments(newSupplierPayments) : newCheck;
   const cashSupplierDiff = newCashSupplierPaid - oldCashSupplierPaid;
 
+  // Дельта наличных платежей от клиента (для зачисления в кассу мастера)
+  const oldClientPayments = existingOrder?.clientPayments || [];
+  const newClientPayments = data.clientPayments || [];
+  const sumCashClientPayments = (payments) =>
+    (payments || []).reduce((sum, p) => sum + (isCashPaymentMethod(p.method) ? (Number(p.amount) || 0) : 0), 0);
+  const oldCashClientPaid = sumCashClientPayments(oldClientPayments);
+  const newCashClientPaid = sumCashClientPayments(newClientPayments);
+  const cashClientDiff = newCashClientPaid - oldCashClientPaid;
+
   try {
     if (isNew) {
       const saved = await sbInsertOrder(data);
@@ -1462,6 +1471,26 @@ async function saveOrder() {
         });
       }
       showToast(`${cashSupplierDiff > 0 ? 'Списано' : 'Возвращено'} ${Math.abs(cashSupplierDiff)} ₴ в кассу мастера ${targetWorker}`);
+    }
+
+    // Зачисление/возврат наличных от клиента в кассу мастера
+    if ((currentRole === 'senior' || currentRole === 'owner') && cashClientDiff !== 0) {
+      const typeStr = cashClientDiff > 0 ? 'Оплата клиента' : 'Возврат клиенту';
+      const fDate = data.date ? formatDate(data.date) : '—';
+      const fCar = data.car || '—';
+      const targetWorker2 = data.responsible || currentWorkerName;
+      const cashComment2 = `${typeStr} наличкой ${data.id}, ${fDate}, авто: ${fCar}`;
+      const cashEntry = await sbInsertCashEntry({
+        worker_name: targetWorker2,
+        amount: cashClientDiff,
+        comment: cashComment2,
+      });
+      if (typeof workerCashLog !== 'undefined' && targetWorker2 === currentWorkerName) {
+        workerCashLog.unshift(cashEntry);
+      }
+      if (currentRole === 'owner' && Array.isArray(window.allCashLog)) {
+        window.allCashLog.unshift(cashEntry);
+      }
     }
 
     closeOrderModal();

@@ -786,11 +786,18 @@ function isManualSalaryReportEntry(entry) {
 }
 
 function isSalaryWithdrawalEntry(entry) {
-  return !!entry && entry.order_id === SALARY_WITHDRAWAL_ORDER_ID;
+  return !!entry && String(entry.order_id || '').startsWith(SALARY_WITHDRAWAL_ORDER_ID);
 }
 
 function isRelevantSalaryEntry(entry) {
   return isManualSalaryReportEntry(entry) || isSalaryWithdrawalEntry(entry);
+}
+
+function getSalaryWithdrawalActor(entry) {
+  const raw = String(entry?.order_id || '');
+  const prefix = `${SALARY_WITHDRAWAL_ORDER_ID} · снял `;
+  if (!raw.startsWith(prefix)) return '';
+  return raw.slice(prefix.length).trim();
 }
 
 function getWorkerCompletedOrdersSummary(workerName, date) {

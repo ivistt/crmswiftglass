@@ -154,6 +154,7 @@ function renderProfile() {
     + (canManageAssistantSalary() && workedAssistants.length
       ? renderAssistantSalarySection(workedAssistants, selectedAssistant, assistantTodayReport, assistantTodaySummary, assistantTodayAmount, assistantAccTotal)
       : '')
+    + buildWithdrawalsBlock(relevantSalaryEntries)
     + '<div class="profile-today-card" style="margin-top:12px;">'
     + '<div style="font-size:12px;font-weight:800;color:var(--text3);margin-bottom:12px;letter-spacing:0.04em;">ИСТОРИЯ ЗАРПЛАТ</div>'
     + '<div style="display:flex;flex-direction:column;gap:12px;">' + salaryHistoryHtml + '</div>'
@@ -399,7 +400,11 @@ function buildWorkerSalaryHistory(workerName, entries) {
       const withdrawalsHtml = withdrawals.length
         ? '<div style="margin-top:10px;display:flex;flex-direction:column;gap:6px;">'
           + withdrawals.map(entry => '<div style="font-size:12px;color:#ef4444;">'
-            + escapeHtml(entry.order_id || 'Выплата') + ': ' + Number(entry.amount).toLocaleString('ru') + ' ₴'
+            + escapeHtml(formatDate(date))
+            + ' · '
+            + escapeHtml(getSalaryWithdrawalActor(entry) ? `снял ${getWorkerDisplayName(getSalaryWithdrawalActor(entry))}` : 'снятие ЗП')
+            + ' · '
+            + Number(entry.amount).toLocaleString('ru') + ' ₴'
             + '</div>').join('')
           + '</div>'
         : '';
@@ -429,6 +434,46 @@ function buildWorkerSalaryHistory(workerName, entries) {
       + '<div id="profile-month-body-sal-' + ym + '" style="display:none;padding:0 16px 16px;">' + daysHtml + '</div>'
       + '</div>';
   }).join('');
+}
+
+// ── БЛОК СНЯТИЙ ЗП ──────────────────────────────────────────
+// Показывает помощнику: кто, когда и на сколько снял его зарплату
+
+function buildWithdrawalsBlock(entries) {
+  const withdrawals = (entries || [])
+    .filter(isSalaryWithdrawalEntry)
+    .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+
+  if (!withdrawals.length) return '';
+
+  const rowsHtml = withdrawals.map(entry => {
+    const actor = getSalaryWithdrawalActor(entry);
+    const actorLabel = actor ? getWorkerDisplayName(actor) : 'старший';
+    const amount = Math.abs(Number(entry.amount));
+    return '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);flex-wrap:wrap;">'
+      + '<div style="display:flex;align-items:center;gap:10px;">'
+      + '<div style="width:32px;height:32px;border-radius:10px;background:rgba(239,68,68,.12);display:flex;align-items:center;justify-content:center;flex-shrink:0;">'
+      + '<i data-lucide="arrow-down-left" style="width:15px;height:15px;color:#ef4444;"></i>'
+      + '</div>'
+      + '<div>'
+      + '<div style="font-size:13px;font-weight:600;color:var(--text);">' + escapeHtml(actorLabel) + '</div>'
+      + '<div style="font-size:11px;color:var(--text3);margin-top:2px;">' + escapeHtml(formatDate(entry.date)) + '</div>'
+      + '</div>'
+      + '</div>'
+      + '<div style="font-size:15px;font-weight:800;color:#ef4444;">−' + amount.toLocaleString('ru') + ' \u20B4</div>'
+      + '</div>';
+  }).join('');
+
+  return '<div class="profile-today-card" style="margin-top:12px;">'
+    + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">'
+    + '<i data-lucide="hand-coins" style="width:15px;height:15px;color:#ef4444;"></i>'
+    + '<div style="font-size:12px;font-weight:800;color:#ef4444;letter-spacing:0.04em;">СНЯТИЯ ЗАРПЛАТЫ</div>'
+    + '</div>'
+    + '<div style="font-size:11px;color:var(--text3);margin-bottom:10px;">Кто и когда снял вашу накопленную зарплату</div>'
+    + '<div style="background:var(--surface2);border-radius:12px;padding:0 14px;">'
+    + rowsHtml
+    + '</div>'
+    + '</div>';
 }
 
 // ── КАССА — РЕНДЕР СЕКЦИИ ────────────────────────────────────
@@ -931,12 +976,17 @@ window.confirmJuniorWithdrawal = async function(amount) {
 async function performSalaryWithdrawal(recipient, sourceSenior, amount) {
   try {
     const today = getLocalDateString();
+    const isSelfWithdrawal = recipient === sourceSenior;
+    const cashComment = isSelfWithdrawal
+      ? 'Снятие ЗП'
+      : `Снятие ЗП помощника ${recipient}`;
+    const salaryWithdrawalLabel = `${SALARY_WITHDRAWAL_ORDER_ID} · снял ${sourceSenior}`;
     
     // 1. Снимаем сумму из кассы старшего (sourceSenior)
     const cashEntry = await sbInsertCashEntry({
       worker_name: sourceSenior,
       amount: -amount,
-      comment: recipient === sourceSenior ? 'Снятие ЗП' : `Снятие ЗП - ${recipient}`
+      comment: cashComment
     });
     
     // 2. Добавляем отрицательную запись в зарплату получателя (recipient)
@@ -944,7 +994,7 @@ async function performSalaryWithdrawal(recipient, sourceSenior, amount) {
       worker_name: recipient,
       amount: -amount,
       date: today,
-      order_id: SALARY_WITHDRAWAL_ORDER_ID
+      order_id: salaryWithdrawalLabel
     });
     
     if (recipient === currentWorkerName) {
@@ -970,7 +1020,12 @@ async function performSalaryWithdrawal(recipient, sourceSenior, amount) {
 // Вызывается из orders.js после toggleWorkerDone
 
 async function addCashFromOrder(order) {
+  // Если у заказа есть история клиентских платежей — касса уже обновляется
+  // автоматически в saveOrder() при добавлении каждого платежа.
+  // Эта функция обрабатывает только legacy-заказы без clientPayments.
   if (currentRole !== 'senior') return;
+  const hasPaymentHistory = Array.isArray(order.clientPayments) && order.clientPayments.length > 0;
+  if (hasPaymentHistory) return;
   if ((order.paymentMethod || '').toLowerCase() !== 'наличка') return;
   const amount = Number(order.debt) || 0;
   if (amount <= 0) return;
