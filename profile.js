@@ -7,6 +7,11 @@ let workerProblems = [];
 let workerCashLog  = [];  // записи кассы текущего специалиста
 let assistantWorkerSalaries = [];
 let cashSearchQuery = '';
+let selectedAssistantSalaryName = '';
+
+function canManageAssistantSalary() {
+  return currentRole === 'senior' || currentRole === 'extra';
+}
 
 // ── ЗАГРУЗКА ─────────────────────────────────────────────────
 
@@ -15,9 +20,16 @@ async function loadWorkerSalaries() {
   try {
     workerSalaries = await sbFetchWorkerSalaries(currentWorkerName);
     assistantWorkerSalaries = [];
-    const assistant = getAttachedAssistantWorker();
-    if (currentRole === 'senior' && assistant?.name) {
-      assistantWorkerSalaries = await sbFetchWorkerSalaries(assistant.name);
+    const assistants = getSeniorWorkedAssistants();
+    if (canManageAssistantSalary() && assistants.length) {
+      if (!assistants.some(w => w.name === selectedAssistantSalaryName)) {
+        selectedAssistantSalaryName = assistants[0].name;
+      }
+      if (selectedAssistantSalaryName) {
+        assistantWorkerSalaries = await sbFetchWorkerSalaries(selectedAssistantSalaryName);
+      }
+    } else {
+      selectedAssistantSalaryName = '';
     }
   } catch (e) {
     assistantWorkerSalaries = [];
@@ -64,10 +76,9 @@ function renderProfile() {
     el.innerHTML = ''
       + '<div class="profile-header">'
       + '<div class="worker-avatar" style="width:56px;height:56px;font-size:20px;border-radius:16px;flex-shrink:0;">' + getInitials(currentWorkerName) + '</div>'
-      + '<div><div style="font-size:20px;font-weight:800;">' + currentWorkerName + '</div>'
+      + '<div><div style="font-size:20px;font-weight:800;">' + getWorkerDisplayName(currentWorkerName) + '</div>'
       + '<div style="font-size:13px;color:var(--text3);margin-top:2px;">' + (ROLE_LABELS[currentRole] || currentRole) + '</div></div>'
       + '</div>'
-      + renderSalaryRuleCard(currentWorkerName)
       + '<div style="margin-top:12px;padding:16px;background:var(--surface2);border-radius:14px;text-align:center;color:var(--text3);font-size:14px;">'
       + 'Зарплата начисляется владельцем'
       + '</div>';
@@ -76,7 +87,8 @@ function renderProfile() {
   }
 
   const today = getLocalDateString();
-  const attachedAssistant = getAttachedAssistantWorker();
+  const selectedAssistant = getSelectedAssistantWorker();
+  const workedAssistants = getSeniorWorkedAssistants();
   const relevantSalaryEntries = workerSalaries.filter(isRelevantSalaryEntry);
   const manualReports = relevantSalaryEntries.filter(isManualSalaryReportEntry);
   const accTotal = relevantSalaryEntries.reduce((sum, s) => sum + Number(s.amount), 0);
@@ -86,24 +98,35 @@ function renderProfile() {
   const salaryHistoryHtml = buildWorkerSalaryHistory(currentWorkerName, relevantSalaryEntries);
   const assistantRelevantEntries = assistantWorkerSalaries.filter(isRelevantSalaryEntry);
   const assistantManualReports = assistantRelevantEntries.filter(isManualSalaryReportEntry);
-  const assistantTodayReport = attachedAssistant
+  const assistantTodayReport = selectedAssistant
     ? (assistantManualReports.find(s => s.date === today) || null)
     : null;
   const assistantTodayAmount = Number(assistantTodayReport?.amount) || 0;
   const assistantAccTotal = assistantRelevantEntries.reduce((sum, s) => sum + Number(s.amount), 0);
-  const assistantTodaySummary = attachedAssistant
-    ? getWorkerCompletedOrdersSummary(attachedAssistant.name, today)
+  const assistantTodaySummary = selectedAssistant
+    ? getWorkerCompletedOrdersSummary(selectedAssistant.name, today)
     : null;
-
-  const salaryRuleHtml = renderSalaryRuleCard(currentWorkerName);
   const todayOrdersHtml = renderSalaryOrdersList(todaySummary.orders);
+  const summaryCardsHtml = ''
+    + '<div class="profile-summary" style="margin-top:12px;">'
+    + '<div class="profile-summary-card">'
+    + '<div class="profile-summary-label">Накоплено</div>'
+    + '<div class="profile-summary-value">' + accTotal.toLocaleString('ru') + ' \u20B4</div>'
+    + '<div style="font-size:11px;color:var(--text3);margin-top:6px;">Доступно к снятию</div>'
+    + '</div>'
+    + '<div class="profile-summary-card">'
+    + '<div class="profile-summary-label">За сегодня</div>'
+    + '<div class="profile-summary-value">' + todayAmount.toLocaleString('ru') + ' \u20B4</div>'
+    + '<div style="font-size:11px;color:var(--text3);margin-top:6px;">Выполнено заказов: ' + todaySummary.count + '</div>'
+    + '</div>'
+    + '</div>';
   const salaryGroupHtml = ''
+    + summaryCardsHtml
     + '<div class="profile-today-card" style="margin-top:12px;">'
     + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px;">'
     + '<div>'
-    + '<div class="profile-today-label"><i data-lucide="wallet-cards" style="width:15px;height:15px;"></i> Зарплата</div>'
-    + '<div style="font-size:28px;font-weight:800;color:var(--accent);margin-top:4px;">' + accTotal.toLocaleString('ru') + ' \u20B4</div>'
-    + '<div style="font-size:11px;color:var(--text3);">накопления</div>'
+    + '<div class="profile-today-label"><i data-lucide="wallet-cards" style="width:15px;height:15px;"></i> Ваша зарплата</div>'
+    + '<div style="font-size:12px;color:var(--text3);margin-top:6px;">Начисление за день, итог за сегодня и снятие накоплений</div>'
     + '</div>'
     + '<button class="btn-primary" style="padding:0 24px;min-height:44px;border-radius:14px;font-weight:800;" onclick="withdrawSalary()" ' + (accTotal <= 0 ? 'disabled' : '') + '>Снять ЗП</button>'
     + '</div>'
@@ -127,21 +150,19 @@ function renderProfile() {
     + '</div>'
     + todayOrdersHtml
     + '</div>'
-    + salaryRuleHtml
-    + '<div>'
-    + '<div style="font-size:12px;font-weight:700;color:var(--text3);margin-bottom:8px;letter-spacing:0.04em;">ИСТОРИЯ ЗАРПЛАТ</div>'
-    + '<div style="display:flex;flex-direction:column;gap:12px;">' + salaryHistoryHtml + '</div>'
     + '</div>'
-    + (currentRole === 'senior' && attachedAssistant
-      ? renderAssistantSalarySection(attachedAssistant, assistantTodayReport, assistantTodaySummary, assistantTodayAmount, assistantAccTotal)
+    + (canManageAssistantSalary() && workedAssistants.length
+      ? renderAssistantSalarySection(workedAssistants, selectedAssistant, assistantTodayReport, assistantTodaySummary, assistantTodayAmount, assistantAccTotal)
       : '')
-    + '</div>'
+    + '<div class="profile-today-card" style="margin-top:12px;">'
+    + '<div style="font-size:12px;font-weight:800;color:var(--text3);margin-bottom:12px;letter-spacing:0.04em;">ИСТОРИЯ ЗАРПЛАТ</div>'
+    + '<div style="display:flex;flex-direction:column;gap:12px;">' + salaryHistoryHtml + '</div>'
     + '</div>';
 
   el.innerHTML = ''
     + '<div class="profile-header">'
     + '<div class="worker-avatar" style="width:56px;height:56px;font-size:20px;border-radius:16px;flex-shrink:0;">' + getInitials(currentWorkerName) + '</div>'
-    + '<div><div style="font-size:20px;font-weight:800;">' + currentWorkerName + '</div>'
+    + '<div><div style="font-size:20px;font-weight:800;">' + getWorkerDisplayName(currentWorkerName) + '</div>'
     + '<div style="font-size:13px;color:var(--text3);margin-top:2px;">' + (ROLE_LABELS[currentRole] || currentRole) + '</div></div>'
     + '</div>'
     + salaryGroupHtml;
@@ -157,7 +178,7 @@ function renderCashScreen() {
     el.innerHTML = ''
       + '<div class="profile-header">'
       + '<div class="worker-avatar" style="width:56px;height:56px;font-size:20px;border-radius:16px;flex-shrink:0;">' + getInitials(currentWorkerName) + '</div>'
-      + '<div><div style="font-size:20px;font-weight:800;">' + currentWorkerName + '</div>'
+      + '<div><div style="font-size:20px;font-weight:800;">' + getWorkerDisplayName(currentWorkerName) + '</div>'
       + '<div style="font-size:13px;color:var(--text3);margin-top:2px;">Касса</div></div>'
       + '</div>'
       + '<div class="profile-today-card" style="margin-top:12px;">'
@@ -173,7 +194,7 @@ function renderCashScreen() {
   el.innerHTML = ''
     + '<div class="profile-header">'
     + '<div class="worker-avatar" style="width:56px;height:56px;font-size:20px;border-radius:16px;flex-shrink:0;">' + getInitials(currentWorkerName) + '</div>'
-    + '<div><div style="font-size:20px;font-weight:800;">' + currentWorkerName + '</div>'
+    + '<div><div style="font-size:20px;font-weight:800;">' + getWorkerDisplayName(currentWorkerName) + '</div>'
     + '<div style="font-size:13px;color:var(--text3);margin-top:2px;">Касса</div></div>'
     + '</div>'
     + renderCashSection(balance, today);
@@ -232,15 +253,24 @@ function renderTodaySalarySubmission(todayReport, todaySummary, options = {}) {
   });
 }
 
-function renderAssistantSalarySection(assistantWorker, todayReport, todaySummary, todayAmount, assistantAccTotal = 0) {
+function renderAssistantSalarySection(assistantWorkers, assistantWorker, todayReport, todaySummary, todayAmount, assistantAccTotal = 0) {
+  const optionsHtml = assistantWorkers.map(worker =>
+    `<option value="${escapeHtml(worker.name)}" ${assistantWorker?.name === worker.name ? 'selected' : ''}>${escapeHtml(getWorkerDisplayName(worker.name))}</option>`
+  ).join('');
+  const hasSelectedAssistant = !!assistantWorker?.name;
+  const safeSummary = todaySummary || { count: 0, orders: [] };
+
   return ''
     + '<div style="padding:14px;background:rgba(29,233,182,.06);border-radius:12px;border:1px solid rgba(29,233,182,.2);">'
     + '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px;">'
     + '<div>'
     + '<div style="font-size:12px;font-weight:700;color:var(--text2);letter-spacing:0.04em;">ПОМОЩНИК</div>'
-    + '<div style="font-size:20px;font-weight:800;color:var(--text1);margin-top:4px;">' + escapeHtml(assistantWorker.name) + '</div>'
+    + '<div style="font-size:11px;color:var(--text3);margin-top:4px;">Выберите помощника, с которым вы работали</div>'
     + '</div>'
-    + '<div style="font-size:11px;color:var(--text3);padding:4px 10px;background:rgba(255,255,255,.04);border-radius:999px;">прикреплён к вам</div>'
+    + '<div style="font-size:11px;color:var(--text3);padding:4px 10px;background:rgba(255,255,255,.04);border-radius:999px;">по совместным заказам</div>'
+    + '</div>'
+    + '<div style="margin-bottom:12px;">'
+    + '<select class="form-select" id="assistant-salary-select" onchange="changeAssistantSalaryWorker(this.value)">' + optionsHtml + '</select>'
     + '</div>'
     + '<div style="padding:14px;margin-bottom:12px;background:var(--surface2);border-radius:12px;border:1px solid var(--border);">'
     + '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">'
@@ -248,7 +278,7 @@ function renderAssistantSalarySection(assistantWorker, todayReport, todaySummary
     + '<div style="font-size:12px;font-weight:700;color:var(--text3);letter-spacing:0.04em;">НАКОПИЛОСЬ У ПОМОЩНИКА</div>'
     + '<div style="font-size:24px;font-weight:800;color:var(--accent);margin-top:4px;">' + assistantAccTotal.toLocaleString('ru') + ' \u20B4</div>'
     + '</div>'
-    + '<button class="btn-primary" style="padding:0 22px;min-height:42px;border-radius:14px;font-weight:800;" onclick="withdrawAssistantSalary()" ' + (assistantAccTotal <= 0 ? 'disabled' : '') + '>Снять</button>'
+    + '<button class="btn-primary" style="padding:0 22px;min-height:42px;border-radius:14px;font-weight:800;" onclick="withdrawAssistantSalary()" ' + (!hasSelectedAssistant || assistantAccTotal <= 0 ? 'disabled' : '') + '>Снять</button>'
     + '</div>'
     + '<div style="font-size:11px;color:var(--text3);margin-top:8px;">Списание пойдёт из вашей кассы и запишется как выплата ЗП помощнику</div>'
     + '</div>'
@@ -258,10 +288,12 @@ function renderAssistantSalarySection(assistantWorker, todayReport, todaySummary
       buttonLabel: 'Сохранить',
       buttonAction: 'saveAssistantTodaySalaryReport()',
       value: Number(todayReport?.amount) || '',
-      disabled: todaySummary.count < 1 ? 'disabled' : '',
-      hint: todaySummary.count < 1
+      disabled: !hasSelectedAssistant || safeSummary.count < 1 ? 'disabled' : '',
+      hint: !hasSelectedAssistant
+        ? 'Сначала выберите помощника'
+        : safeSummary.count < 1
         ? 'У помощника пока нет выполненных заказов за сегодня'
-        : `У помощника выполнено ${todaySummary.count} заказ(ов) за сегодня`,
+        : `У помощника выполнено ${safeSummary.count} заказ(ов) за сегодня`,
       label: 'Сумма ЗП помощнику за сегодня'
     })
     + '<div style="padding:14px;margin-top:12px;background:var(--surface2);border-radius:12px;border:1px solid var(--border);">'
@@ -271,18 +303,51 @@ function renderAssistantSalarySection(assistantWorker, todayReport, todaySummary
     + '<div style="font-size:11px;color:var(--text3);padding:4px 10px;background:var(--surface3);border-radius:8px;">записано вами</div>'
     + '</div>'
     + '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:12px;color:var(--text3);">'
-    + '<span>Выполнено: ' + todaySummary.count + '</span>'
+    + '<span>Выполнено: ' + safeSummary.count + '</span>'
     + '</div>'
-    + renderSalaryOrdersList(todaySummary.orders)
+    + renderSalaryOrdersList(safeSummary.orders)
     + '</div>'
     + '</div>';
 }
 
-function getAttachedAssistantWorker() {
-  if (currentRole !== 'senior') return null;
-  const seniorWorker = (workers || []).find(w => w.systemRole === 'senior' && w.name === currentWorkerName);
-  if (!seniorWorker?.assistant) return null;
-  return (workers || []).find(w => w.name === seniorWorker.assistant) || null;
+function getSeniorWorkedAssistants() {
+  if (!canManageAssistantSalary()) return [];
+  const names = new Set();
+  (orders || []).forEach(order => {
+    if (!order || order.isCancelled) return;
+    if (order.responsible === currentWorkerName && order.assistant) {
+      names.add(order.assistant);
+    }
+    if (order.reworkData?.responsible === currentWorkerName && order.reworkData?.assistant) {
+      names.add(order.reworkData.assistant);
+    }
+  });
+
+  return [...names]
+    .map(name => (workers || []).find(w => w.name === name) || { name })
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ru'));
+}
+
+function getSelectedAssistantWorker() {
+  const assistants = getSeniorWorkedAssistants();
+  if (!assistants.length) return null;
+  if (!assistants.some(worker => worker.name === selectedAssistantSalaryName)) {
+    selectedAssistantSalaryName = assistants[0].name;
+  }
+  return assistants.find(worker => worker.name === selectedAssistantSalaryName) || assistants[0] || null;
+}
+
+async function changeAssistantSalaryWorker(name) {
+  selectedAssistantSalaryName = name || '';
+  assistantWorkerSalaries = [];
+  if (selectedAssistantSalaryName) {
+    try {
+      assistantWorkerSalaries = await sbFetchWorkerSalaries(selectedAssistantSalaryName);
+    } catch (e) {
+      showToast('Ошибка загрузки зарплат помощника: ' + e.message, 'error');
+    }
+  }
+  renderProfile();
 }
 
 function renderSalaryOrdersList(orderItems) {
@@ -733,8 +798,8 @@ async function saveTodaySalaryReport() {
 }
 
 async function saveAssistantTodaySalaryReport() {
-  const assistant = getAttachedAssistantWorker();
-  if (currentRole !== 'senior' || !assistant?.name) {
+  const assistant = getSelectedAssistantWorker();
+  if (!canManageAssistantSalary() || !assistant?.name) {
     showToast('Помощник не найден', 'error');
     return;
   }
@@ -798,8 +863,8 @@ async function withdrawSalary() {
 }
 
 async function withdrawAssistantSalary() {
-  const assistant = getAttachedAssistantWorker();
-  if (currentRole !== 'senior' || !assistant?.name) {
+  const assistant = getSelectedAssistantWorker();
+  if (!canManageAssistantSalary() || !assistant?.name) {
     showToast('Помощник не найден', 'error');
     return;
   }
@@ -885,7 +950,7 @@ async function performSalaryWithdrawal(recipient, sourceSenior, amount) {
     if (recipient === currentWorkerName) {
       workerSalaries.unshift(salaryEntry);
     }
-    const assistant = getAttachedAssistantWorker();
+    const assistant = getSelectedAssistantWorker();
     if (assistant?.name && recipient === assistant.name) {
       assistantWorkerSalaries.unshift(salaryEntry);
     }

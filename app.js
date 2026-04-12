@@ -437,8 +437,8 @@ function _ownerTodayGroupKey(order) {
 }
 
 function _ownerTodayGroupLabel(group) {
-  if (!group.assistant) return group.responsible;
-  return `${group.responsible} + ${group.assistant}`;
+  if (!group.assistant) return getWorkerDisplayName(group.responsible);
+  return getWorkerDisplayPair(group.responsible, group.assistant);
 }
 
 function renderOwnerTodayScreen() {

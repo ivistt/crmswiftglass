@@ -36,7 +36,7 @@ function renderWorkers() {
       <div class="worker-card worker-card-simple">
         <div class="worker-avatar">${getInitials(w.name)}</div>
         <div class="worker-card-info">
-          <div class="worker-name">${w.name}</div>
+          <div class="worker-name">${getWorkerDisplayName(w.name)}</div>
           <div class="worker-role">${w.role}</div>
           <div class="worker-order-count">${icon('clipboard-list')} ${orderCount} заказов</div>
         </div>
@@ -77,6 +77,7 @@ function openWorkerModal() {
   const m = document.getElementById('worker-modal');
   if (!m) return;
   document.getElementById('w-name').value = '';
+  document.getElementById('w-alias').value = '';
   document.getElementById('w-role').value = 'Старший специалист';
   document.getElementById('w-system-role').value = 'senior';
   document.getElementById('w-note').value = '';
@@ -90,6 +91,7 @@ function closeWorkerModal() {
 
 async function saveWorker() {
   const name = document.getElementById('w-name').value.trim();
+  const alias = document.getElementById('w-alias').value.trim();
   const role = document.getElementById('w-role').value;
   const sysRole = document.getElementById('w-system-role').value;
   const note = document.getElementById('w-note').value.trim();
@@ -102,6 +104,7 @@ async function saveWorker() {
   try {
     const w = await sbInsertWorker({
       name: name,
+      alias: alias,
       role: role,
       system_role: sysRole,
       note: note
@@ -148,6 +151,11 @@ function openWorkerEditModal(workerId) {
           <div class="form-group">
             <label class="form-label">🔑 Новый пароль</label>
             <input class="form-input" type="text" id="we-password" placeholder="Оставьте пустым — без изменений" autocomplete="new-password">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">${icon('star')} Псевдоним</label>
+            <input class="form-input" type="text" id="we-alias" placeholder="Например: 🐻 Василий">
           </div>
 
           <!-- Роль -->
@@ -211,8 +219,9 @@ function openWorkerEditModal(workerId) {
   }
 
   // Заполняем поля
-  document.getElementById('worker-edit-name-display').textContent = w.name;
+  document.getElementById('worker-edit-name-display').textContent = getWorkerDisplayName(w.name);
   document.getElementById('we-password').value = '';
+  document.getElementById('we-alias').value = w.alias || '';
   document.getElementById('we-role').value = w.systemRole || 'senior';
   // Показываем условия ЗП из SALARY_CONFIG
   _renderWeSalaryRule(w.name);
@@ -224,7 +233,7 @@ function openWorkerEditModal(workerId) {
     asSel.innerHTML = '<option value="">— нет —</option>' +
       workers
         .filter(x => x.systemRole === 'junior' && x.name !== w.name)
-        .map(x => `<option value="${x.name}">${x.name}</option>`)
+        .map(x => `<option value="${x.name}">${getWorkerDisplayName(x.name)}</option>`)
         .join('');
     asSel.value = w.assistant || '';
   }
@@ -340,6 +349,7 @@ async function saveWorkerEdit() {
   if (!w) return;
 
   const password  = document.getElementById('we-password').value.trim();
+  const alias     = document.getElementById('we-alias')?.value.trim() || '';
   const role      = document.getElementById('we-role').value;
   const assistant = document.getElementById('we-assistant')?.value || '';
 
@@ -349,6 +359,7 @@ async function saveWorkerEdit() {
   try {
     const updates = {
       systemRole: role,
+      alias: alias,
       assistant: assistant,
     };
     if (password) updates.password = password;
@@ -358,6 +369,7 @@ async function saveWorkerEdit() {
     // Обновляем локально
     Object.assign(w, updates);
     w.systemRole = role;
+    w.alias = alias;
     w.assistant = assistant;
 
     closeWorkerEditModal();

@@ -18,6 +18,18 @@ function icon(name, className = 'svg-icon') {
   return `<span class="${className}" style="--icon-url:url('images/ico/${name}.svg');" aria-hidden="true"></span>`;
 }
 
+function getWorkerDisplayName(name) {
+  const raw = String(name || '').trim();
+  if (!raw) return '';
+  const workerAlias = (workers || []).find(w => w.name === raw)?.alias;
+  return workerAlias || raw;
+}
+
+function getWorkerDisplayPair(responsible, assistant) {
+  const lead = getWorkerDisplayName(responsible) || '—';
+  return assistant ? `${lead} + ${getWorkerDisplayName(assistant)}` : lead;
+}
+
 // ── ORDERS ───────────────────────────────────────────────────
 
 async function sbFetchOrders() {
@@ -113,6 +125,7 @@ async function sbUpdateWorker(workerId, updates) {
   if (updates.systemRole !== undefined) body.system_role    = updates.systemRole;
   if (updates.salaryFormula !== undefined) body.salary_formula = updates.salaryFormula || '';
   if (updates.assistant !== undefined) body.assistant = updates.assistant || '';
+  if (updates.alias !== undefined) body.alias = updates.alias || '';
   // Пароль обновляется через set-pin если передан
   if (updates.password) {
     await sbSetWorkerPin(workerId, updates.password);
@@ -529,6 +542,7 @@ function rowToWorker(r) {
   return {
     id:            r.id,
     name:          r.name,
+    alias:         r.alias         || '',
     role:          r.role          || '',
     systemRole:    r.system_role   || 'junior',
     note:          r.note          || '',
@@ -540,6 +554,7 @@ function rowToWorker(r) {
 function workerToRow(w) {
   return {
     name:           w.name,
+    alias:          w.alias         || '',
     role:           w.role          || '',
     system_role:    w.systemRole    || 'junior',
     note:           w.note          || '',

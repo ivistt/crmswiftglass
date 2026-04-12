@@ -236,8 +236,9 @@ function renderOrderCard(o) {
           ${canMark ? `
             <button
               class="btn-check-done ${o.workerDone ? 'done' : ''}"
-              onclick="event.stopPropagation(); toggleWorkerDone('${o.id}')"
-              title="${o.workerDone ? 'Отменить выполнение' : 'Отметить выполненным'}"
+              onclick="${o.workerDone ? 'event.stopPropagation(); return false;' : `event.stopPropagation(); toggleWorkerDone('${o.id}')`}"
+              title="${o.workerDone ? 'Заказ уже отмечен выполненным' : 'Отметить выполненным'}"
+              ${o.workerDone ? 'disabled' : ''}
             >
               <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <polyline points="2,7 5.5,10.5 12,3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -249,9 +250,9 @@ function renderOrderCard(o) {
       <div class="order-card-meta">
         <span class="order-meta-item">${icon('phone')} ${o.phone || '—'}</span>
         <span class="order-meta-item">${icon('calendar')} ${formatDate(o.date)}</span>
-        <span class="order-meta-item">${icon('hard-hat')} ${o.responsible || '—'}${o.assistant ? ' + ' + o.assistant : ''}</span>
+        <span class="order-meta-item">${icon('hard-hat')} ${getWorkerDisplayPair(o.responsible, o.assistant)}</span>
         ${o.warehouse ? `<span class="order-meta-item">${icon('warehouse')} ${o.warehouse}</span>` : ''}
-        ${(Number(o.check) > 0 || Number(o.purchase) > 0) ? `<span class="order-meta-item" style="font-weight:700;color:var(--text2);">${(Number(o.check) || 0).toLocaleString('ru')}/${(Number(o.purchase) || 0).toLocaleString('ru')}</span>` : ''}
+        ${(Number(o.check) > 0 || Number(o.purchase) > 0) ? `<span class="order-meta-item" style="font-weight:700;"><span style="color:var(--yellow);">${(Number(o.check) || 0).toLocaleString('ru')}</span><span style="color:var(--text3);font-weight:600;">/</span><span style="color:var(--accent);">${(Number(o.purchase) || 0).toLocaleString('ru')}</span></span>` : ''}
         <span class="order-meta-item">${o.client || '—'}</span>
       </div>
       ${canQuickConfirm ? `
@@ -343,6 +344,14 @@ function loadMoreOrders() {
   }
 }
 
+function refreshOrdersView() {
+  if (currentMonthFilter) {
+    renderOrdersForMonth(currentMonthFilter);
+  } else {
+    renderOrders();
+  }
+}
+
 function _renderOrdersListWithLoadMore(container, list, signature) {
   const visibleList = _prepareVisibleOrders(list, signature);
   const hasMore = visibleList.length < list.length;
@@ -424,6 +433,7 @@ function openOrderDetail(id) {
   if (!o) return;
 
   const el = document.getElementById('order-detail-content');
+  const fullOrderTotal = getOrderClientTotal(o);
 
   const canEdit   = currentRole === 'owner' || currentRole === 'manager';
   const canDelete = canDeleteOrder();
@@ -444,7 +454,7 @@ function openOrderDetail(id) {
         <div>
           <div style="font-size:12px;color:var(--text3);font-family:'JetBrains Mono',monospace;margin-bottom:6px;">${o.id}</div>
           <div class="detail-title">${o.car || '—'}</div>
-          <div class="detail-subtitle">${icon('calendar')} ${formatDate(o.date)}${o.time ? ' · ' + icon('clock') + ' ' + o.time : ''} &nbsp;·&nbsp; ${icon('hard-hat')} ${o.responsible || '—'}</div>
+          <div class="detail-subtitle">${icon('calendar')} ${formatDate(o.date)}${o.time ? ' · ' + icon('clock') + ' ' + o.time : ''} &nbsp;·&nbsp; ${icon('hard-hat')} ${getWorkerDisplayPair(o.responsible, o.assistant)}</div>
         </div>
         <div class="detail-badges">
           ${o.inWork ? `<span class="status-badge" style="background:#F59E0B;color:#fff;">${icon('hammer')} Планёрка</span>` : ''}
@@ -454,23 +464,48 @@ function openOrderDetail(id) {
     </div>
 
     <div class="detail-section">
-      <div class="detail-section-title">${icon('clipboard-list')} Основная информация</div>
+      <div class="detail-section-title">${icon('banknote')} Ключевые суммы</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;">
+        <div style="padding:14px;background:linear-gradient(135deg,rgba(29,233,182,.16),rgba(29,233,182,.05));border:1px solid rgba(29,233,182,.22);border-radius:14px;">
+          <div style="font-size:11px;font-weight:800;color:var(--text3);letter-spacing:0.05em;">ОБЩАЯ СУММА ЗАКАЗА</div>
+          <div style="font-size:28px;font-weight:900;color:var(--accent);margin-top:8px;">${fullOrderTotal.toLocaleString('ru')} ₴</div>
+        </div>
+        <div style="padding:14px;background:var(--surface2);border:1px solid var(--border);border-radius:14px;">
+          <div style="font-size:11px;font-weight:800;color:var(--text3);letter-spacing:0.05em;">ПРОДАЖА СТЕКЛА</div>
+          <div style="font-size:24px;font-weight:900;color:var(--text);margin-top:8px;">${(Number(o.income) || 0).toLocaleString('ru')} ₴</div>
+        </div>
+        <div style="padding:14px;background:var(--surface2);border:1px solid var(--border);border-radius:14px;">
+          <div style="font-size:11px;font-weight:800;color:var(--text3);letter-spacing:0.05em;">СУММА РАБОТ</div>
+          <div style="font-size:24px;font-weight:900;color:var(--text);margin-top:8px;">${(Number(o.total) || 0).toLocaleString('ru')} ₴</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="detail-section">
+      <div class="detail-section-title">${icon('clipboard-list')} Клиент и запись</div>
       <div class="detail-grid">
         ${field(`${icon('user')} Клиент`, o.client)}
         ${field(`${icon('phone')} Телефон`, phoneCallLink(o.phone), 'mono detail-phone-value')}
         ${field(`${icon('map-pin')} Место`, o.address)}
-        ${field(`${icon('car')} Авто`, o.car)}
-        ${field(`${icon('hash')} Єврокод`, o.code, 'mono')}
         ${field(`${icon('mail')} Новая почта`, o.newPost ? 'Да' : '')}
         ${field(`${icon('clock')} Время`, o.time)}
-        ${field(`${icon('users')} Менеджер`, o.author)}
-        ${field(`${icon('clipboard-list')} Отв. менеджер`, o.manager)}
+        ${field(`${icon('users')} Менеджер`, getWorkerDisplayName(o.author))}
+        ${field(`${icon('clipboard-list')} Отв. менеджер`, getWorkerDisplayName(o.manager))}
       </div>
       ${o.notes ? `<div style="margin-top:14px;padding:12px;background:var(--surface2);border-radius:8px;font-size:13px;color:var(--text2);">📝 ${o.notes}</div>` : ''}
     </div>
 
     <div class="detail-section">
-      <div class="detail-section-title">${icon('wrench')} Послуги та роботи</div>
+      <div class="detail-section-title">${icon('car')} Авто и склад</div>
+      <div class="detail-grid">
+        ${field(`${icon('car')} Авто`, o.car)}
+        ${field(`${icon('warehouse')} Склад`, [o.warehouse, o.warehouseCode ? `<span style="color:var(--text3);">·</span> <span class="mono">${o.warehouseCode}</span>` : ''].filter(Boolean).join(' '))}
+        ${field(`${icon('hash')} Єврокод`, o.code, 'mono')}
+      </div>
+    </div>
+
+    <div class="detail-section">
+      <div class="detail-section-title">${icon('wrench')} Работы и услуги</div>
       <div class="detail-grid">
         ${field(`${icon('wrench')} Монтаж`, o.mount ? o.mount + ' ₴' : '')}
         ${field(`${icon('tool')} Вид послуги`, o.serviceType)}
@@ -483,21 +518,23 @@ function openOrderDetail(id) {
       </div>
     </div>
 
-    ${(canViewFinance() || (currentRole === 'extra' && (o.responsible === currentWorkerName || o.assistant === currentWorkerName))) ? `
     <div class="detail-section">
-      <div class="detail-section-title">${icon('banknote')} Финансы</div>
+      <div class="detail-section-title">${icon('banknote')} Финансы и расчёты</div>
       <div class="detail-grid">
-    ${field('Расчёт долга клиента', getEffectivePaymentStatus(o))}
-    ${field('Сумма поставщику', o.check ? o.check + ' ₴' : '')}
-    ${field('Расчёт долга', o.debt ? o.debt + ' ₴' : '')}
-    ${field('Дата расчёта долга', formatDate(o.debtDate))}
-    ${field(`${icon('pin')} Общая сумма работ`, o.total ? o.total + ' ₴' : '', 'mono')}
+        ${field('Статус оплаты клиента', getEffectivePaymentStatus(o))}
+        ${field('Оплачено клиентом', o.debt ? o.debt + ' ₴' : '')}
+        ${field('Дата расчёта долга', formatDate(o.debtDate))}
+        ${field(`${icon('pin')} Общая сумма работ`, o.total ? o.total + ' ₴' : '', 'mono')}
+        ${field('Общая сумма заказа', fullOrderTotal ? fullOrderTotal + ' ₴' : '', 'mono')}
+        ${field('Сумма продажи стекла', o.income ? o.income + ' ₴' : '')}
+        ${field('Сумма покупки стекла', o.purchase ? o.purchase + ' ₴' : '')}
+        ${field('Оплачено поставщику', o.check ? o.check + ' ₴' : '')}
+        ${field(`${icon('package')} Статус оплати постачальнику`, getEffectiveSupplierStatus(o))}
+        ${field('Маржа стекло', o.remainder !== undefined ? o.remainder + ' ₴' : '')}
+        ${field('Маржа общая', o.marginTotal !== undefined ? o.marginTotal + ' ₴' : '')}
+        ${field('Способ оплаты', normalizePaymentMethod(o.paymentMethod))}
         ${field('Молдинг Автор', o.moldingAuthor)}
         ${field(`${icon('handshake')} Партнер`, o.partner)}
-        ${field(`${icon('package')} Статус оплати постачальнику`, getEffectiveSupplierStatus(o))}
-        ${field('Сумма покупки стекла', o.purchase ? o.purchase + ' ₴' : '')}
-        ${field('Сумма продажи стекла', o.income ? o.income + ' ₴' : '')}
-        ${field('Маржа стекло', o.remainder !== undefined ? o.remainder + ' ₴' : '')}
         ${field('Дропшиппер', o.dropshipper)}
         ${field('Выплата дропшипперу', o.dropshipperPayout ? o.dropshipperPayout + ' ₴' : '')}
         ${field('Выплата менеджеру (стекло)', o.payoutManagerGlass ? o.payoutManagerGlass + ' ₴' : '')}
@@ -508,11 +545,8 @@ function openOrderDetail(id) {
         ${field('Выплата за доп. работы (помощ.)', o.payoutExtraAssist ? o.payoutExtraAssist + ' ₴' : '')}
         ${field('Выплата за молдинг (ответств.)', o.payoutMoldingResp ? o.payoutMoldingResp + ' ₴' : '')}
         ${field('Выплата за молдинг (помощ.)', o.payoutMoldingAssist ? o.payoutMoldingAssist + ' ₴' : '')}
-        ${field('Маржа общая', o.marginTotal !== undefined ? o.marginTotal + ' ₴' : '')}
-        ${field('Способ оплаты', normalizePaymentMethod(o.paymentMethod))}
       </div>
     </div>
-    ` : ''}
   `;
 
   showScreen('order-detail');
@@ -599,18 +633,29 @@ function applyAssistantForResponsible(respName) {
   const asSel  = document.getElementById('f-assistant');
 
   if (asSel && senior) {
-    if (senior.assistant) {
+    const preferredAssistant = senior.assistant || '';
+    if (preferredAssistant) {
       // Ищем опцию без учёта регистра и лишних пробелов
-      const matchedOption = Array.from(asSel.options).find(o => norm(o.value) === norm(senior.assistant));
+      const matchedOption = Array.from(asSel.options).find(o => norm(o.value) === norm(preferredAssistant));
       if (matchedOption) {
         asSel.value = matchedOption.value;
       } else {
-        console.warn(`Assistant "${senior.assistant}" for ${respName} not found in dropdown options.`);
+        console.warn(`Assistant "${preferredAssistant}" for ${respName} not found in dropdown options.`);
       }
     } else {
       asSel.value = '';
     }
   }
+}
+
+async function rememberAssistantForResponsible(respName, assistantName) {
+  const norm = s => (s || '').trim().toLowerCase();
+  const responsible = (workers || []).find(w => norm(w.name) === norm(respName));
+  if (!responsible || !assistantName) return;
+  if (norm(responsible.assistant) === norm(assistantName)) return;
+
+  await sbUpdateWorker(responsible.id, { assistant: assistantName });
+  responsible.assistant = assistantName;
 }
 
 function populateRefSelects() {
@@ -661,7 +706,7 @@ function populateRefSelects() {
   if (maSel) {
     const cur = maSel.value;
     maSel.innerHTML = '<option value="">— выбрать —</option>' +
-      workers.map(w => `<option value="${w.name}">${w.name}</option>`).join('');
+      workers.map(w => `<option value="${w.name}">${getWorkerDisplayName(w.name)}</option>`).join('');
     if (cur) maSel.value = cur;
   }
 
@@ -679,7 +724,7 @@ function populateRefSelects() {
   if (assistantSel) {
     const cur = assistantSel.value;
     assistantSel.innerHTML = '<option value="">— выбрать / нет —</option>' + 
-      workers.filter(w => ['senior', 'junior', 'extra'].includes(w.systemRole)).map(w => `<option value="${w.name}">${w.name} (${w.role})</option>`).join('');
+      workers.filter(w => ['senior', 'junior', 'extra'].includes(w.systemRole)).map(w => `<option value="${w.name}">${getWorkerDisplayName(w.name)} (${w.role})</option>`).join('');
     if (cur) assistantSel.value = cur;
   }
 
@@ -688,7 +733,7 @@ function populateRefSelects() {
   if (respSel) {
     const cur = respSel.value;
     respSel.innerHTML = '<option value="">— выбрать —</option>' +
-      workers.filter(w => ['senior', 'extra'].includes(w.systemRole)).map(w => `<option value="${w.name}">${w.name} (${w.role})</option>`).join('');
+      workers.filter(w => ['senior', 'extra'].includes(w.systemRole)).map(w => `<option value="${w.name}">${getWorkerDisplayName(w.name)} (${w.role})</option>`).join('');
     if (cur) respSel.value = cur;
     
     // При смене ответственного — подставляем помощника
@@ -700,7 +745,7 @@ function populateRefSelects() {
   if (reworkRespSel) {
     const cur = reworkRespSel.value;
     reworkRespSel.innerHTML = '<option value="">— выбрать —</option>' +
-      workers.filter(w => ['senior', 'extra'].includes(w.systemRole)).map(w => `<option value="${w.name}">${w.name} (${w.role})</option>`).join('');
+      workers.filter(w => ['senior', 'extra'].includes(w.systemRole)).map(w => `<option value="${w.name}">${getWorkerDisplayName(w.name)} (${w.role})</option>`).join('');
     if (cur) reworkRespSel.value = cur;
   }
 
@@ -709,7 +754,7 @@ function populateRefSelects() {
   if (reworkAsSel) {
     const cur = reworkAsSel.value;
     reworkAsSel.innerHTML = '<option value="">— нет —</option>' +
-      workers.filter(w => ['senior', 'junior', 'extra'].includes(w.systemRole)).map(w => `<option value="${w.name}">${w.name} (${w.role})</option>`).join('');
+      workers.filter(w => ['senior', 'junior', 'extra'].includes(w.systemRole)).map(w => `<option value="${w.name}">${getWorkerDisplayName(w.name)} (${w.role})</option>`).join('');
     if (cur) reworkAsSel.value = cur;
   }
 }
@@ -1366,11 +1411,21 @@ async function saveOrder() {
     if (isNew) {
       const saved = await sbInsertOrder(data);
       orders.unshift(saved);
+      try {
+        await rememberAssistantForResponsible(data.responsible, data.assistant);
+      } catch (e) {
+        console.warn('Failed to remember assistant preference:', e);
+      }
       showToast('Запись создана ✓');
     } else {
       const saved = await sbUpdateOrder(data);
       const idx = orders.findIndex(o => o.id === editingOrderId);
       if (idx !== -1) orders[idx] = saved;
+      try {
+        await rememberAssistantForResponsible(data.responsible, data.assistant);
+      } catch (e) {
+        console.warn('Failed to remember assistant preference:', e);
+      }
       showToast('Запись обновлена ✓');
     }
 
@@ -1653,6 +1708,7 @@ function openMonthOrders(ym) {
 
 function renderOrdersForMonth(ym) {
   const search = (document.getElementById('filter-search')?.value || '').toLowerCase();
+  const dateF  = document.getElementById('filter-date')?.value || '';
   const statF  = document.getElementById('filter-status')?.value || '';
   const sort   = document.getElementById('filter-sort')?.value || 'desc';
 
@@ -1680,6 +1736,7 @@ function renderOrdersForMonth(ym) {
     (o.phone   || '').toLowerCase().includes(search) ||
     (o.id      || '').toLowerCase().includes(search)
   );
+  if (dateF) list = list.filter(o => o.date === dateF);
   if (statF) list = list.filter(o => getEffectivePaymentStatus(o) === statF);
   list.sort((a, b) => {
     const ad = a.date || '';
@@ -1688,7 +1745,7 @@ function renderOrdersForMonth(ym) {
   });
 
   const container = document.getElementById('orders-list');
-  const signature = _getOrdersListSignature('month', { search, statF, sort, ym });
+  const signature = _getOrdersListSignature('month', { search, dateF, statF, sort, ym });
 
   if (!list.length) {
     lastOrdersListSignature = signature;
@@ -1711,21 +1768,22 @@ async function toggleWorkerDone(orderId) {
   const o = orders.find(x => x.id === orderId);
   if (!o) return;
   if (o.responsible !== currentWorkerName) return;
-  o.workerDone = !o.workerDone;
+  if (o.workerDone) return;
+  o.workerDone = true;
   try {
     await sbUpdateOrder(o);
     // Автозачисление в кассу если наличка и заказ отмечен выполненным
-    if (o.workerDone && typeof addCashFromOrder === 'function') {
+    if (typeof addCashFromOrder === 'function') {
       await addCashFromOrder(o);
     }
     currentMonthFilter ? renderOrdersForMonth(currentMonthFilter) : renderOrders();
-    showToast(o.workerDone ? '✓ Выполнено' : 'Отметка снята');
+    showToast('✓ Выполнено');
     if (document.getElementById('screen-profile')?.classList.contains('active')) {
       await loadWorkerSalaries();
       renderProfile();
     }
   } catch (e) {
-    o.workerDone = !o.workerDone;
+    o.workerDone = false;
     showToast('Ошибка: ' + e.message, 'error');
   }
 }
