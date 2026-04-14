@@ -261,6 +261,178 @@ function getDropshipperPaid(order) {
   return (order?.dropshipperPayments || []).reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
 }
 
+const DROPSHIPPER_CASH_PAYMENT_WORKERS = {
+  'Оплата наличка Олег': 'Oleg Starshiy',
+  'Оплата наличка Лёша': 'Lyosha',
+};
+
+function getDropshipperPaymentMethods() {
+  const base = PAYMENT_METHOD_OPTIONS || [];
+  return ['Оплата наличка Олег', 'Оплата наличка Лёша', ...base];
+}
+
+function dropshipperTreeKey(prefix, value) {
+  return prefix + '-' + String(value || 'none').replace(/[^a-zA-Z0-9а-яА-Я_-]/g, '-');
+}
+
+function renderDropshipperOrderCard(o) {
+  const due = Number(o.dropshipperPayout) || 0;
+  const paid = getDropshipperPaid(o);
+  const left = Math.max(0, due - paid);
+  return `
+    <div class="order-card" onclick="openOrderDetail('${o.id}')">
+      <div class="order-card-top">
+        <div class="order-card-left"><span class="order-id">${o.id}</span><span class="order-name">${o.car || '—'}</span></div>
+        <div style="font-size:15px;font-weight:900;color:${left > 0 ? 'var(--yellow)' : 'var(--accent)'};">${due.toLocaleString('ru')} ₴</div>
+      </div>
+      <div class="order-card-meta">
+        <span class="order-meta-item">${icon('clock')} ${o.time || '—'}</span>
+        <span class="order-meta-item">${icon('user')} ${o.client || '—'}</span>
+        <span class="order-meta-item">${icon('phone')} ${o.phone || '—'}</span>
+        <span class="order-meta-item">Выплачено: ${paid.toLocaleString('ru')} ₴</span>
+        <span class="order-meta-item">Осталось: ${left.toLocaleString('ru')} ₴</span>
+      </div>
+    </div>
+  `;
+}
+
+function renderDropshipperOrdersTree(list) {
+  const tree = {};
+  list.forEach(o => {
+    const date = o.date || 'Без даты';
+    const year = date === 'Без даты' ? 'Без даты' : date.slice(0, 4);
+    const month = date === 'Без даты' ? 'Без даты' : date.slice(0, 7);
+    if (!tree[year]) tree[year] = {};
+    if (!tree[year][month]) tree[year][month] = {};
+    if (!tree[year][month][date]) tree[year][month][date] = [];
+    tree[year][month][date].push(o);
+  });
+  const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+  const sumDue = rows => rows.reduce((sum, o) => sum + (Number(o.dropshipperPayout) || 0), 0);
+  return Object.keys(tree).sort((a, b) => b.localeCompare(a)).map(year => {
+    const months = Object.keys(tree[year]).sort((a, b) => b.localeCompare(a));
+    const yearOrders = months.flatMap(month => Object.values(tree[year][month]).flat());
+    const yearKey = dropshipperTreeKey('drop-orders-year', year);
+    const monthsHtml = months.map(month => {
+      const days = Object.keys(tree[year][month]).sort((a, b) => b.localeCompare(a));
+      const monthOrders = Object.values(tree[year][month]).flat();
+      const monthKey = dropshipperTreeKey('drop-orders-month', month);
+      const monthTitle = month === 'Без даты' ? 'Без даты' : monthNames[Number(month.slice(5, 7)) - 1];
+      const daysHtml = days.map(day => {
+        const rows = tree[year][month][day].sort((a, b) => String(b.time || '').localeCompare(String(a.time || '')));
+        const dayKey = dropshipperTreeKey('drop-orders-day', day);
+        return `
+          <div style="border-bottom:1px solid var(--border);">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 12px;cursor:pointer;" onclick="toggleProfileMonth('${dayKey}')">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <i data-lucide="chevron-right" style="width:13px;height:13px;color:var(--text3);transition:transform 0.2s;" id="pchevron-${dayKey}"></i>
+                <div><div style="font-size:13px;color:var(--text2);font-weight:700;">${day === 'Без даты' ? 'Без даты' : formatDate(day)}</div><div style="font-size:11px;color:var(--text3);">Заказов: ${rows.length}</div></div>
+              </div>
+              <div style="font-size:13px;font-weight:800;color:var(--yellow);white-space:nowrap;">${sumDue(rows).toLocaleString('ru')} ₴</div>
+            </div>
+            <div id="profile-month-body-${dayKey}" style="display:none;padding:0 12px 12px 34px;"><div style="display:flex;flex-direction:column;gap:8px;">${rows.map(renderDropshipperOrderCard).join('')}</div></div>
+          </div>
+        `;
+      }).join('');
+      return `
+        <div style="border-bottom:1px solid var(--border);">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 12px;cursor:pointer;" onclick="toggleProfileMonth('${monthKey}')">
+            <div style="display:flex;align-items:center;gap:8px;"><i data-lucide="chevron-right" style="width:14px;height:14px;color:var(--text3);transition:transform 0.2s;" id="pchevron-${monthKey}"></i><div><div style="font-size:14px;font-weight:800;color:var(--text2);">${monthTitle}</div><div style="font-size:11px;color:var(--text3);">${days.length} дней · ${monthOrders.length} заказов</div></div></div>
+            <div style="font-size:14px;font-weight:800;color:var(--yellow);white-space:nowrap;">${sumDue(monthOrders).toLocaleString('ru')} ₴</div>
+          </div>
+          <div id="profile-month-body-${monthKey}" style="display:none;padding-left:12px;background:var(--surface2);border-radius:0 0 8px 8px;">${daysHtml}</div>
+        </div>
+      `;
+    }).join('');
+    return `
+      <div class="fin-month-card" style="margin-bottom:8px;">
+        <div class="fin-month-header" onclick="toggleProfileMonth('${yearKey}')">
+          <div style="display:flex;align-items:center;gap:10px;"><i data-lucide="chevron-right" style="width:16px;height:16px;color:var(--text3);transition:transform 0.2s;" id="pchevron-${yearKey}"></i><div><div class="fin-month-name">${year === 'Без даты' ? 'Без даты' : year + ' год'}</div><div class="fin-month-sub">${months.length} мес. · ${yearOrders.length} заказов</div></div></div>
+          <div style="font-size:18px;font-weight:800;color:var(--yellow);">${sumDue(yearOrders).toLocaleString('ru')} ₴</div>
+        </div>
+        <div id="profile-month-body-${yearKey}" style="display:none;padding:0 0 8px;">${monthsHtml}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderDropshipperPaymentsTree(list) {
+  const payments = [];
+  list.forEach(order => {
+    (order.dropshipperPayments || []).forEach(payment => {
+      payments.push({ ...payment, order });
+    });
+  });
+  if (!payments.length) return '<div class="empty-state">Выплат пока нет</div>';
+  const tree = {};
+  payments.forEach(payment => {
+    const date = payment.date || 'Без даты';
+    const year = date === 'Без даты' ? 'Без даты' : date.slice(0, 4);
+    const month = date === 'Без даты' ? 'Без даты' : date.slice(0, 7);
+    if (!tree[year]) tree[year] = {};
+    if (!tree[year][month]) tree[year][month] = {};
+    if (!tree[year][month][date]) tree[year][month][date] = [];
+    tree[year][month][date].push(payment);
+  });
+  const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+  const sumPayments = rows => rows.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  return Object.keys(tree).sort((a, b) => b.localeCompare(a)).map(year => {
+    const months = Object.keys(tree[year]).sort((a, b) => b.localeCompare(a));
+    const yearPayments = months.flatMap(month => Object.values(tree[year][month]).flat());
+    const yearKey = dropshipperTreeKey('drop-pay-year', year);
+    const monthsHtml = months.map(month => {
+      const days = Object.keys(tree[year][month]).sort((a, b) => b.localeCompare(a));
+      const monthPayments = Object.values(tree[year][month]).flat();
+      const monthKey = dropshipperTreeKey('drop-pay-month', month);
+      const monthTitle = month === 'Без даты' ? 'Без даты' : monthNames[Number(month.slice(5, 7)) - 1];
+      const daysHtml = days.map(day => {
+        const rows = tree[year][month][day];
+        const dayKey = dropshipperTreeKey('drop-pay-day', day);
+        const rowsHtml = rows.map(payment => `
+          <div class="order-card" onclick="openOrderDetail('${payment.order.id}')">
+            <div class="order-card-top">
+              <div class="order-card-left"><span class="order-id">${payment.order.id}</span><span class="order-name">${payment.order.car || payment.order.client || '—'}</span></div>
+              <div style="font-size:15px;font-weight:900;color:var(--accent);">${Number(payment.amount).toLocaleString('ru')} ₴</div>
+            </div>
+            <div class="order-card-meta">
+              <span class="order-meta-item">${normalizePaymentMethod(payment.method)}</span>
+              <span class="order-meta-item">${payment.order.client || '—'}</span>
+              <span class="order-meta-item">${payment.order.phone || '—'}</span>
+            </div>
+          </div>
+        `).join('');
+        return `
+          <div style="border-bottom:1px solid var(--border);">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 12px;cursor:pointer;" onclick="toggleProfileMonth('${dayKey}')">
+              <div style="display:flex;align-items:center;gap:8px;"><i data-lucide="chevron-right" style="width:13px;height:13px;color:var(--text3);transition:transform 0.2s;" id="pchevron-${dayKey}"></i><div><div style="font-size:13px;color:var(--text2);font-weight:700;">${day === 'Без даты' ? 'Без даты' : formatDate(day)}</div><div style="font-size:11px;color:var(--text3);">Выплат: ${rows.length}</div></div></div>
+              <div style="font-size:13px;font-weight:800;color:var(--accent);white-space:nowrap;">${sumPayments(rows).toLocaleString('ru')} ₴</div>
+            </div>
+            <div id="profile-month-body-${dayKey}" style="display:none;padding:0 12px 12px 34px;"><div style="display:flex;flex-direction:column;gap:8px;">${rowsHtml}</div></div>
+          </div>
+        `;
+      }).join('');
+      return `
+        <div style="border-bottom:1px solid var(--border);">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 12px;cursor:pointer;" onclick="toggleProfileMonth('${monthKey}')">
+            <div style="display:flex;align-items:center;gap:8px;"><i data-lucide="chevron-right" style="width:14px;height:14px;color:var(--text3);transition:transform 0.2s;" id="pchevron-${monthKey}"></i><div><div style="font-size:14px;font-weight:800;color:var(--text2);">${monthTitle}</div><div style="font-size:11px;color:var(--text3);">${days.length} дней · ${monthPayments.length} выплат</div></div></div>
+            <div style="font-size:14px;font-weight:800;color:var(--accent);white-space:nowrap;">${sumPayments(monthPayments).toLocaleString('ru')} ₴</div>
+          </div>
+          <div id="profile-month-body-${monthKey}" style="display:none;padding-left:12px;background:var(--surface2);border-radius:0 0 8px 8px;">${daysHtml}</div>
+        </div>
+      `;
+    }).join('');
+    return `
+      <div class="fin-month-card" style="margin-bottom:8px;">
+        <div class="fin-month-header" onclick="toggleProfileMonth('${yearKey}')">
+          <div style="display:flex;align-items:center;gap:10px;"><i data-lucide="chevron-right" style="width:16px;height:16px;color:var(--text3);transition:transform 0.2s;" id="pchevron-${yearKey}"></i><div><div class="fin-month-name">${year === 'Без даты' ? 'Без даты' : year + ' год'}</div><div class="fin-month-sub">${months.length} мес. · ${yearPayments.length} выплат</div></div></div>
+          <div style="font-size:18px;font-weight:800;color:var(--accent);">${sumPayments(yearPayments).toLocaleString('ru')} ₴</div>
+        </div>
+        <div id="profile-month-body-${yearKey}" style="display:none;padding:0 0 8px;">${monthsHtml}</div>
+      </div>
+    `;
+  }).join('');
+}
+
 function openDropshipperDetail(name) {
   currentDropshipperFilter = name;
   const titleEl = document.getElementById('dropshipper-detail-title');
@@ -276,17 +448,6 @@ function renderDropshipperDetail() {
   const totalDue = list.reduce((sum, o) => sum + (Number(o.dropshipperPayout) || 0), 0);
   const totalPaid = list.reduce((sum, o) => sum + getDropshipperPaid(o), 0);
   const totalLeft = Math.max(0, totalDue - totalPaid);
-  const tree = {};
-  list.forEach(o => {
-    if (!o.date) return;
-    const year = o.date.slice(0, 4);
-    const month = o.date.slice(5, 7);
-    if (!tree[year]) tree[year] = {};
-    if (!tree[year][month]) tree[year][month] = {};
-    if (!tree[year][month][o.date]) tree[year][month][o.date] = [];
-    tree[year][month][o.date].push(o);
-  });
-  const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
   let html = `
     <div class="profile-summary" style="margin-bottom:14px;">
       <div class="profile-summary-card">
@@ -303,34 +464,11 @@ function renderDropshipperDetail() {
       </div>
     </div>
     <button class="btn-primary" style="width:100%;min-height:44px;margin-bottom:14px;font-weight:800;" onclick="openDropshipperPaymentModal()" ${totalLeft <= 0 ? 'disabled' : ''}>Выплатить</button>
+    <div style="font-size:12px;font-weight:800;color:var(--text3);letter-spacing:0.04em;margin:16px 0 10px;">ЗАКАЗЫ</div>
+    ${renderDropshipperOrdersTree(list)}
+    <div style="font-size:12px;font-weight:800;color:var(--text3);letter-spacing:0.04em;margin:18px 0 10px;">ВЫПЛАТЫ</div>
+    ${renderDropshipperPaymentsTree(list)}
   `;
-  Object.keys(tree).sort((a, b) => b.localeCompare(a)).forEach(year => {
-    html += `<div style="font-size:18px;font-weight:800;margin:22px 0 10px;">${year}</div>`;
-    Object.keys(tree[year]).sort((a, b) => b.localeCompare(a)).forEach(month => {
-      html += `<div style="font-size:15px;font-weight:800;color:var(--text2);margin:14px 0 8px;">${monthNames[Number(month) - 1]}</div>`;
-      Object.keys(tree[year][month]).sort((a, b) => b.localeCompare(a)).forEach(day => {
-        const rows = tree[year][month][day];
-        const total = rows.reduce((sum, o) => sum + (Number(o.dropshipperPayout) || 0), 0);
-        const paid = rows.reduce((sum, o) => sum + getDropshipperPaid(o), 0);
-        html += `<div style="font-size:13px;font-weight:700;color:var(--text3);margin:12px 0 8px;">${formatDate(day)} · ${total.toLocaleString('ru')} ₴</div>`;
-        html += rows.map(o => `
-          <div class="order-card" onclick="openOrderDetail('${o.id}')">
-            <div class="order-card-top">
-              <div class="order-card-left"><span class="order-id">${o.id}</span><span class="order-name">${o.car || '—'}</span></div>
-              <div style="font-size:15px;font-weight:900;color:${Math.max(0, Number(o.dropshipperPayout) - getDropshipperPaid(o)) > 0 ? 'var(--yellow)' : 'var(--accent)'};">${Number(o.dropshipperPayout).toLocaleString('ru')} ₴</div>
-            </div>
-            <div class="order-card-meta">
-              <span class="order-meta-item">${icon('clock')} ${o.time || '—'}</span>
-              <span class="order-meta-item">${icon('user')} ${o.client || '—'}</span>
-              <span class="order-meta-item">${icon('phone')} ${o.phone || '—'}</span>
-              <span class="order-meta-item">Выплачено: ${getDropshipperPaid(o).toLocaleString('ru')} ₴</span>
-              <span class="order-meta-item">Осталось: ${Math.max(0, Number(o.dropshipperPayout) - getDropshipperPaid(o)).toLocaleString('ru')} ₴</span>
-            </div>
-          </div>
-        `).join('');
-      });
-    });
-  });
   container.innerHTML = html;
   initIcons();
 }
@@ -387,7 +525,7 @@ function openDropshipperPaymentModal() {
   const methodEl = document.getElementById('dropshipper-payment-method');
   if (methodEl) {
     methodEl.innerHTML = '<option value="">— выбрать —</option>' +
-      (PAYMENT_METHOD_OPTIONS || []).map(method => `<option value="${escapeAttr(method)}">${escapeHtml(method)}</option>`).join('');
+      getDropshipperPaymentMethods().map(method => `<option value="${escapeAttr(method)}">${escapeHtml(method)}</option>`).join('');
   }
   modal.classList.add('active');
   initIcons();
@@ -419,6 +557,19 @@ async function saveDropshipperPayment() {
   let remaining = amount;
   const timestamp = new Date().toISOString();
   try {
+    const cashWorkerName = DROPSHIPPER_CASH_PAYMENT_WORKERS[method] || '';
+    if (cashWorkerName) {
+      const cashEntry = await sbInsertCashEntry({
+        worker_name: cashWorkerName,
+        amount: -amount,
+        comment: `Выплата дропшипперу ${currentDropshipperFilter}, ${formatDate(date)}`,
+      });
+      if (Array.isArray(window.allCashLog) && cashEntry) window.allCashLog.unshift(cashEntry);
+      if (typeof workerCashLog !== 'undefined' && cashWorkerName === currentWorkerName && cashEntry) {
+        workerCashLog.unshift(cashEntry);
+      }
+    }
+
     for (const item of eligible) {
       if (remaining <= 0) break;
       const part = Math.min(item.left, remaining);

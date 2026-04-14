@@ -706,7 +706,7 @@ function calcDailyBaseSalary(workerName, date) {
 
 function calcOrderSalary(workerName, order) {
   const rule        = getSalaryRule(workerName);
-  const glassMargin = _orderGlassMargin(order);
+  const glassMargin = order.dropshipper ? 0 : _orderGlassMargin(order);
   const molding     = Number(order.molding) || 0;
   const fromGlass   = Math.round(glassMargin * (rule.glassMarginPct || 0));
   const fromMolding = Math.round(molding * (rule.moldingPct || 0));
@@ -766,6 +766,7 @@ function _calcRomaTatuBonus(order) {
 // ЗП менеджера: ставка + % от маржи стекла
 // Начисляется только если он указан в поле order.manager
 function _calcManagerSalary(order) {
+  if (order.dropshipper) return 0;
   const rule = getSalaryRule(order.manager || 'Sasha Manager');
   const glassMargin = _orderGlassMargin(order);
   return Math.round(glassMargin * (rule.glassMarginPct || 0));

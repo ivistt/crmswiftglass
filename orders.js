@@ -2105,20 +2105,21 @@ function recalcFullMargins() {
   const tatuSum       = val('f-tatu');
   const total         = val('f-total');
   const toningExternal = document.getElementById('f-toning-external')?.checked || false;
+  const hasDropshipper = !!document.getElementById('f-dropshipper')?.value;
 
   const marginGlass = incomeGlass - purchaseGlass;
   const costMolding = moldingSum * 0.4;
   const costToning  = toningSum * 0.4;
 
-  const payoutDropshipper = document.getElementById('f-dropshipper')?.value ? marginGlass : 0;
+  const payoutDropshipper = hasDropshipper ? marginGlass : 0;
 
   const managerValue = document.getElementById('f-manager')?.value || '';
   const managerRule = managerValue && typeof getSalaryRule === 'function' ? getSalaryRule(managerValue) : {};
-  const payoutManagerGlass = marginGlass > 0 ? Math.round(marginGlass * (managerRule.glassMarginPct || 0)) : 0;
+  const payoutManagerGlass = !hasDropshipper && marginGlass > 0 ? Math.round(marginGlass * (managerRule.glassMarginPct || 0)) : 0;
 
   const responsibleName = document.getElementById('f-responsible')?.value || '';
   const responsibleRule = responsibleName && typeof getSalaryRule === 'function' ? getSalaryRule(responsibleName) : {};
-  const payoutRespGlass = marginGlass > 0 ? Math.round(marginGlass * (responsibleRule.glassMarginPct || 0)) : 0;
+  const payoutRespGlass = !hasDropshipper && marginGlass > 0 ? Math.round(marginGlass * (responsibleRule.glassMarginPct || 0)) : 0;
 
   // Рома: 20% от tatu (всегда, если tatu > 0)
   const payoutRoma = tatuSum > 0 ? Math.round(tatuSum * 0.20) : 0;
