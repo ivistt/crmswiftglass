@@ -416,6 +416,7 @@ function rowToOrder(r) {
     client:          r.client,
     phone:           r.phone,
     address:         r.address || '',
+    vin:             r.vin || '',
     car:             r.car,
     code:            r.code,
     notes:           r.notes,
@@ -483,6 +484,7 @@ function orderToRow(o) {
     client:           o.client,
     phone:            o.phone,
     address:          o.address || null,
+    vin:              o.vin || null,
     car:              o.car,
     code:             o.code,
     notes:            o.notes,
@@ -595,43 +597,35 @@ async function sbUpdateWorkerFormula(workerId, formula) {
 
 // ── РАСЧЁТ ЗАРПЛАТ ───────────────────────────────────────────
 //
-// SALARY_CONFIG — единственное место где задаются условия ЗП.
-//
-// Структура записи:
-//   base            — фикс. ставка за каждый заказ (₴)
-//   baseIfResp      — ставка только если сотрудник ответственный (не помощник)
-//   glassMarginPct  — % от маржи стекла (income − purchase), число 0–1
-//   servicesPct     — % от суммы услуг (mount+molding+extraWork+tatu+toning), число 0–1
-//   tatuBonusPct    — % от tatu как отдельный бонус (начисляется поверх)
-//
-// Специальные ключи:
-//   _senior  — дефолт для всех senior/extra которых нет в списке
-//   _junior  — дефолт для всех junior которых нет в списке
-//   _manager — дефолт для manager (используется в _calcManagerSalary)
-//
-// ЗП = base + baseIfResp(если responsible) + glassMargin*glassMarginPct + services*servicesPct
-// Тату-бонус (tatuBonusPct) начисляется отдельно через _calcTatuBonus и не входит в calcOrderSalary.
-
 const SALARY_CONFIG = {
-  // ── Старшие специалисты ──────────────────────────────────
-  'Костя':      { base: 800, glassMarginPct: 0.10, servicesPct: 0.20 },
-  'Саша Смоков':{ base: 800, glassMarginPct: 0.10, servicesPct: 0.20 },
-
-  // ── Младшие специалисты ───────────────────────────────────
-  'Рома':       { base: 500, servicesPct: 0.20, tatuBonusPct: 0.20 },
-  'Артём':      { baseIfResp: 500, servicesPct: 0.20 },
-  'Лёша':       { servicesPct: 0.20 },
-  'Серёжа':     { servicesPct: 0.15 },
-  'Витя':       { servicesPct: 0.15 },
-  'Саша Дога':  { servicesPct: 0.15 },
-
-  // ── Менеджеры ─────────────────────────────────────────────
-  'Саша Менеджер': { base: 800, glassMarginPct: 0.10 },
+  'Артем':      { selectedServices: true, dailyBaseIfCompleted: 500 },
+  'Артём':      { selectedServices: true, dailyBaseIfCompleted: 500 },
+  'Рома':       { selectedServices: true, dailyBaseIfCompleted: 500, tatuBonusPct: 0.20, globalTatuBonus: true },
+  'Витя':       { selectedServices: true },
+  'Женя':       { selectedServices: true },
+  'Саша Дога':  { selectedServices: true },
+  'Саша Смоков':{ selectedServices: true, serviceAdjustments: { mount: 100, cut: 50, glue: 50 }, glassMarginPct: 0.10, moldingPct: 0.10, dailyBaseIfCompleted: 800 },
+  'Серёжа':     { selectedServices: true, serviceAdjustments: { mount: -100, cut: -50, glue: -50 } },
+  'Сережа':     { selectedServices: true, serviceAdjustments: { mount: -100, cut: -50, glue: -50 } },
+  'Костя':      { glassMarginPct: 0.10, moldingPct: 0.10, dailyBaseIfCompleted: 800 },
+  'Саша Менеджер': { glassMarginPct: 0.10, attendanceBase: 800, managerOnly: true },
+  'Sasha Manager': { glassMarginPct: 0.10, attendanceBase: 800, managerOnly: true },
+  'Настя':      { attendanceBase: 2000 },
+  'Nastya':      { attendanceBase: 2000 },
+  'Лёша':       { selectedServices: true, toningBonusPct: 0.20, globalToningBonus: true },
+  'Леша':       { selectedServices: true, toningBonusPct: 0.20, globalToningBonus: true },
 
   // ── Дефолты по роли ──────────────────────────────────────
-  _senior:  { glassMarginPct: 0.10, servicesPct: 0.20 },
-  _junior:  { base: 500 },
-  _manager: { base: 800, glassMarginPct: 0.10 },
+  _senior:  { selectedServices: true },
+  _junior:  { selectedServices: true },
+  _manager: { managerOnly: true },
+};
+
+const DEFAULT_SALARY_FORMULA = {
+  senior: 'выбранные услуги по прайсу',
+  junior: 'выбранные услуги по прайсу',
+  extra: 'выбранные услуги по прайсу',
+  manager: 'по персональной формуле',
 };
 
 // Возвращает конфиг ЗП для сотрудника с учётом дефолта по роли
@@ -642,15 +636,6 @@ function getSalaryRule(workerName) {
   if (w.systemRole === 'senior' || w.systemRole === 'extra') return SALARY_CONFIG._senior;
   if (w.systemRole === 'manager') return SALARY_CONFIG._manager;
   return SALARY_CONFIG._junior;
-}
-
-// Вычисляет «услуги» заказа — без стекла и доставки
-function _orderServices(order) {
-  return (Number(order.mount)     || 0)
-       + (Number(order.molding)   || 0)
-       + (Number(order.extraWork) || 0)
-       + (Number(order.tatu)      || 0)
-       + (Number(order.toning)    || 0);
 }
 
 // Вычисляет маржу стекла: продажная минус закупочная
@@ -683,28 +668,43 @@ function _getCompletedOrdersForWorkerDate(workerName, date) {
   );
 }
 
+function _salarySelectedServiceItems(order) {
+  const raw = String(order?.serviceType || '');
+  if (!raw) return [];
+  const byName = (typeof SERVICE_TYPE_BY_NAME !== 'undefined') ? SERVICE_TYPE_BY_NAME : {};
+  return raw.split(',')
+    .map(s => s.trim())
+    .filter(Boolean)
+    .map(name => byName[name] || { name, rate: 0, salaryCategory: 'custom' });
+}
+
+function _selectedServicesSalary(workerName, order) {
+  const rule = getSalaryRule(workerName);
+  if (!rule.selectedServices) return 0;
+  const adjustments = rule.serviceAdjustments || {};
+  return _salarySelectedServiceItems(order).reduce((sum, item) => {
+    if (item.salaryCategory === 'custom') return sum;
+    const adjustment = Number(adjustments[item.salaryCategory]) || 0;
+    return sum + Math.max(0, (Number(item.rate) || 0) + adjustment);
+  }, 0);
+}
+
 function calcDailyBaseSalary(workerName, date) {
   const rule = getSalaryRule(workerName);
   const dayOrders = _getCompletedOrdersForWorkerDate(workerName, date);
   if (!dayOrders.length) return 0;
-
-  let amount = rule.base || 0;
-  if ((rule.baseIfResp || 0) > 0 && dayOrders.some(o => _workerIsResponsibleInOrder(o, workerName))) {
-    amount += rule.baseIfResp || 0;
-  }
-  return amount;
+  return Number(rule.dailyBaseIfCompleted) || 0;
 }
 
-// ЗП за заказ для конкретного участника (responsible или assistant).
-// Тату-бонус (tatuBonusPct) считается отдельно через _calcTatuBonus.
 function calcOrderSalary(workerName, order) {
   const rule        = getSalaryRule(workerName);
-  const services    = _orderServices(order);
   const glassMargin = _orderGlassMargin(order);
+  const molding     = Number(order.molding) || 0;
   const fromGlass   = Math.round(glassMargin * (rule.glassMarginPct || 0));
-  const fromServ    = Math.round(services    * (rule.servicesPct    || 0));
+  const fromMolding = Math.round(molding * (rule.moldingPct || 0));
+  const fromServ    = _selectedServicesSalary(workerName, order);
 
-  let finalSalary = fromGlass + fromServ;
+  let finalSalary = fromGlass + fromMolding + fromServ;
   if (order.onlyCut) finalSalary = Math.round(finalSalary / 2);
 
   return finalSalary;
@@ -713,15 +713,7 @@ function calcOrderSalary(workerName, order) {
 // ЗП за доработку
 function calcReworkSalary(workerName, reworkData) {
   if (!reworkData) return 0;
-  const rule = getSalaryRule(workerName);
-  const services = (Number(reworkData.mount) || 0)
-                 + (Number(reworkData.molding) || 0)
-                 + (Number(reworkData.extraWork) || 0)
-                 + (Number(reworkData.tatu) || 0)
-                 + (Number(reworkData.toning) || 0);
-
-  let finalSalary = Math.round(services * (rule.servicesPct || 0));
-  return finalSalary;
+  return 0;
 }
 
 // Тату-бонус: начисляется если в конфиге есть tatuBonusPct и в заказе есть tatu
@@ -738,6 +730,12 @@ function _calcTatuBonus(workerName, order) {
   return tatuBonusMain + tatuBonusRework;
 }
 
+function _calcToningBonus(workerName, order) {
+  const rule = getSalaryRule(workerName);
+  if (!rule.toningBonusPct) return 0;
+  return Math.round((Number(order.toning) || 0) * rule.toningBonusPct);
+}
+
 // Обратная совместимость — старое имя функции
 function _calcRomaTatuBonus(order) {
   return _calcTatuBonus('Рома', order);
@@ -746,17 +744,27 @@ function _calcRomaTatuBonus(order) {
 // ЗП менеджера: ставка + % от маржи стекла
 // Начисляется только если он указан в поле order.manager
 function _calcManagerSalary(order) {
-  const rule = SALARY_CONFIG._manager;
+  const rule = getSalaryRule(order.manager || 'Саша Менеджер');
   const glassMargin = _orderGlassMargin(order);
   return Math.round(glassMargin * (rule.glassMarginPct || 0));
 }
 
 // Итоговая зп за день (используется в profile для совместимости)
 function calcDaySalary(workerName, date) {
-  return calcDailyBaseSalary(workerName, date)
+  const salaryEntries = (typeof allSalaries !== 'undefined' && Array.isArray(allSalaries) && allSalaries.length)
+    ? allSalaries
+    : (typeof workerSalaries !== 'undefined' && Array.isArray(workerSalaries) ? workerSalaries : []);
+  const attendanceAmount = salaryEntries.some(entry =>
+    entry.worker_name === workerName &&
+    entry.date === date &&
+    entry.order_id === WORK_ATTENDANCE_ORDER_ID
+  ) ? (Number(getSalaryRule(workerName).attendanceBase) || 0) : 0;
+  return attendanceAmount
+    + calcDailyBaseSalary(workerName, date)
     + orders
       .filter(o => o.workerDone && !o.isCancelled && o.date === date &&
-              (o.responsible === workerName || o.assistant === workerName || o.manager === workerName || o.reworkData?.responsible === workerName || o.reworkData?.assistant === workerName))
+              (o.responsible === workerName || o.assistant === workerName || o.manager === workerName || o.reworkData?.responsible === workerName || o.reworkData?.assistant === workerName ||
+               _calcTatuBonus(workerName, o) > 0 || _calcToningBonus(workerName, o) > 0))
       .reduce((sum, o) => {
         let total = sum;
         if (o.responsible === workerName || o.assistant === workerName) {
@@ -768,12 +776,15 @@ function calcDaySalary(workerName, date) {
         if (o.manager === workerName) {
           total += _calcManagerSalary(o);
         }
+        total += _calcTatuBonus(workerName, o);
+        total += _calcToningBonus(workerName, o);
         return total;
       }, 0);
 }
 
 const MANUAL_SALARY_REPORT_ORDER_ID = 'DAY_REPORT';
 const SALARY_WITHDRAWAL_ORDER_ID = 'Выплата';
+const WORK_ATTENDANCE_ORDER_ID = 'Выход в работу';
 
 function getOrderClientTotalAmount(order) {
   return (Number(order?.total) || 0)
@@ -789,8 +800,12 @@ function isSalaryWithdrawalEntry(entry) {
   return !!entry && String(entry.order_id || '').startsWith(SALARY_WITHDRAWAL_ORDER_ID);
 }
 
+function isWorkAttendanceEntry(entry) {
+  return !!entry && entry.order_id === WORK_ATTENDANCE_ORDER_ID && Number(entry.amount) > 0;
+}
+
 function isRelevantSalaryEntry(entry) {
-  return isManualSalaryReportEntry(entry) || isSalaryWithdrawalEntry(entry);
+  return !!entry && Number(entry.amount) !== 0;
 }
 
 function getSalaryWithdrawalActor(entry) {

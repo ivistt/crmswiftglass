@@ -269,14 +269,31 @@ function _renderWeSalaryRule(workerName) {
 
   if (rule.base)
     rows.push(['Ставка за день', rule.base.toLocaleString('ru') + ' ₴']);
+  if (rule.dailyBaseIfCompleted)
+    rows.push(['Ставка за день с заказами', rule.dailyBaseIfCompleted.toLocaleString('ru') + ' ₴']);
+  if (rule.attendanceBase)
+    rows.push(['Ставка по кнопке "Я в работе"', rule.attendanceBase.toLocaleString('ru') + ' ₴']);
   if (rule.baseIfResp)
     rows.push(['Доплата за день (если ответственный)', rule.baseIfResp.toLocaleString('ru') + ' ₴']);
   if (rule.glassMarginPct)
     rows.push(['Маржа стекла', Math.round(rule.glassMarginPct * 100) + '%']);
+  if (rule.moldingPct)
+    rows.push(['Молдинг', Math.round(rule.moldingPct * 100) + '%']);
   if (rule.servicesPct)
     rows.push(['Услуги (монтаж и др.)', Math.round(rule.servicesPct * 100) + '%']);
+  if (rule.selectedServices) {
+    const adj = rule.serviceAdjustments || {};
+    const details = [
+      adj.mount ? `монтаж ${adj.mount > 0 ? '+' : ''}${adj.mount}` : '',
+      adj.cut ? `срезка ${adj.cut > 0 ? '+' : ''}${adj.cut}` : '',
+      adj.glue ? `вклейка ${adj.glue > 0 ? '+' : ''}${adj.glue}` : '',
+    ].filter(Boolean).join(', ');
+    rows.push(['Выбранные услуги', details || 'по прайсу']);
+  }
   if (rule.tatuBonusPct)
     rows.push(['Бонус тату', Math.round(rule.tatuBonusPct * 100) + '%']);
+  if (rule.toningBonusPct)
+    rows.push(['Бонус тонировки', Math.round(rule.toningBonusPct * 100) + '%']);
 
   if (!rows.length) {
     container.innerHTML = '<div style="font-size:13px;color:var(--text3);">Условия не заданы</div>';
@@ -285,9 +302,13 @@ function _renderWeSalaryRule(workerName) {
 
   const formulaParts = [];
   if (rule.base) formulaParts.push(rule.base + ' ₴');
+  if (rule.dailyBaseIfCompleted) formulaParts.push(rule.dailyBaseIfCompleted + ' ₴/день с заказом');
+  if (rule.attendanceBase) formulaParts.push(rule.attendanceBase + ' ₴/выход');
   if (rule.baseIfResp) formulaParts.push(rule.baseIfResp + ' ₴ (если отв.)');
   if (rule.glassMarginPct) formulaParts.push('маржа × ' + Math.round(rule.glassMarginPct * 100) + '%');
+  if (rule.moldingPct) formulaParts.push('молдинг × ' + Math.round(rule.moldingPct * 100) + '%');
   if (rule.servicesPct) formulaParts.push('услуги × ' + Math.round(rule.servicesPct * 100) + '%');
+  if (rule.selectedServices) formulaParts.push('выбранные услуги');
 
   container.innerHTML =
     rows.map((r, i) =>

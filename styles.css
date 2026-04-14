@@ -236,6 +236,15 @@ body {
 }
 .refresh-btn:hover { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); }
 .refresh-btn:disabled { opacity: 0.4; cursor: default; }
+.refresh-btn[data-state="loading"] .ico,
+.refresh-btn[data-state="loading"] svg {
+  animation: loader-spin 1s linear infinite;
+}
+.refresh-btn[data-state="unchanged"] {
+  border-color: rgba(0,229,160,0.35);
+  background: var(--accent-dim);
+  color: var(--accent);
+}
 
 /* ===== BOTTOM NAVBAR (island) ===== */
 .bottom-navbar {
@@ -740,9 +749,21 @@ body {
 }
 
 .order-card-client-total {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 12px;
   font-weight: 800;
   white-space: nowrap;
+  color: var(--accent);
+  background: var(--green-dim);
+  border: 1px solid rgba(0,229,160,0.28);
+  border-radius: 5px;
+  padding: 2px 7px;
+}
+.order-card-client-total-separator {
+  color: var(--text3);
+  font-weight: 700;
 }
 
 .order-card-meta {
@@ -882,6 +903,40 @@ body {
 .client-name { font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 2px; }
 .client-phone { font-size: 12px; color: var(--text2); }
 .client-orders { font-size: 11px; color: var(--text3); margin-top: 3px; }
+.client-debt-pill {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 104px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text2);
+  flex-shrink: 0;
+}
+.client-debt-pill span {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text3);
+}
+.client-debt-pill strong {
+  font-size: 13px;
+  font-weight: 900;
+}
+.client-debt-pill.has-debt {
+  background: var(--red-dim);
+  border-color: rgba(255,92,106,0.3);
+  color: var(--red);
+}
+.client-debt-pill.no-debt {
+  background: var(--green-dim);
+  border-color: rgba(0,229,160,0.24);
+  color: var(--accent);
+}
 
 /* ===== WORKERS ===== */
 .workers-grid {
@@ -1817,6 +1872,24 @@ input[type="datetime-local"] {
 
 /* Чекбоксы услуг */
 .service-checkboxes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+.service-group {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  background: var(--surface2);
+}
+.service-group-title {
+  font-size: 12px;
+  font-weight: 900;
+  color: var(--text3);
+  letter-spacing: 0.04em;
+  margin-bottom: 10px;
+}
+.service-group-options {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -1832,8 +1905,14 @@ input[type="datetime-local"] {
   transition: all 0.2s;
   display: inline-flex;
   align-items: center;
+  gap: 6px;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
+}
+.service-checkboxes label.checkbox small {
+  color: var(--text3);
+  font-size: 11px;
+  font-weight: 800;
 }
 .service-checkboxes label.checkbox:hover {
   border-color: var(--accent);
@@ -1844,6 +1923,9 @@ input[type="datetime-local"] {
   border-color: var(--accent);
   background: var(--accent);
   color: #000;
+}
+.service-checkboxes label.checkbox:has(input:checked) small {
+  color: rgba(0,0,0,0.62);
 }
 .service-checkboxes label.checkbox input {
   display: none;
@@ -2125,6 +2207,20 @@ input[type="datetime-local"] {
   font-size: 13px;
   color: var(--text3);
   text-align: center;
+}
+
+.vin-status {
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text3);
+}
+.vin-ok { color: var(--accent); }
+.vin-error, .vin-err { color: var(--red); }
+.vin-loading { color: var(--yellow); }
+.autofilled {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px var(--accent-dim);
 }
 
 /* Кнопка lock/unlock еврокода */

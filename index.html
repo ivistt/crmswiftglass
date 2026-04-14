@@ -129,7 +129,7 @@
       </div>
     </div>
     <div class="topbar-right">
-      <button class="refresh-btn" id="refresh-btn" onclick="refreshOrders()" title="Перезагрузить страницу">
+      <button class="refresh-btn" id="refresh-btn" onclick="refreshOrders()" title="Обновить данные из базы">
         <i data-lucide="refresh-cw" style="width:15px;height:15px;"></i>
       </button>
       <span class="role-badge" id="role-badge"></span>
@@ -305,12 +305,24 @@
         </button>
       </div>
       <div class="filters-bar">
-        <div style="position:relative;">
-          <span class="ico" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);opacity:0.35;pointer-events:none;">
-            <i data-lucide="search" style="width:15px;height:15px;"></i>
-          </span>
-          <input class="filter-input" type="text" id="filter-client-search"
-            placeholder="Поиск по имени, телефону..." oninput="renderClients()" style="padding-left:38px;">
+        <div style="display:flex;gap:8px;width:100%;flex-wrap:wrap;">
+          <div style="position:relative;flex:1 1 220px;min-width:0;">
+            <span class="ico" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);opacity:0.35;pointer-events:none;">
+              <i data-lucide="search" style="width:15px;height:15px;"></i>
+            </span>
+            <input class="filter-input" type="text" id="filter-client-search"
+              placeholder="Поиск по имени, телефону..." oninput="renderClients()" style="width:100%;padding-left:38px;">
+          </div>
+          <select class="filter-select" id="filter-client-sort" onchange="renderClients()" style="flex:0 1 190px;">
+            <option value="debt-desc">Долг: больше сначала</option>
+            <option value="debt-asc">Долг: меньше сначала</option>
+            <option value="name">По имени</option>
+          </select>
+          <select class="filter-select" id="filter-client-debt" onchange="renderClients()" style="flex:0 1 150px;">
+            <option value="all">Все клиенты</option>
+            <option value="debt">С долгом</option>
+            <option value="no-debt">Без долга</option>
+          </select>
         </div>
       </div>
       <div class="clients-grid" id="clients-list"></div>
@@ -653,6 +665,10 @@
           <div class="form-group">
             <label class="form-label">📍 Место</label>
             <input class="form-input" type="text" id="f-address" placeholder="Адрес / Расположение">
+          </div>
+          <div class="form-group">
+            <label class="form-label">VIN код</label>
+            <input class="form-input" type="text" id="f-vin" placeholder="17 символов" maxlength="17" autocomplete="off">
           </div>
           <div class="form-group">
             <label class="form-label">🚗 Автомобиль</label>
@@ -1137,6 +1153,7 @@
 <script src="profile.js"></script>
 <script src="auth.js"></script>
 <script src="workers.js"></script>
+<script src="vin-decoder.js"></script>
 <script src="orders.js"></script>
 <script src="clients.js"></script>
 <script src="finance.js"></script>

@@ -7,17 +7,26 @@ let currentOrderTab = 'selection';  // 'selection' | 'planner' | 'done' — дл
 let currentWorkerTab = 'actual'; // 'actual' | 'today' | 'done' | 'future' | 'past' | 'all' — для специалистов
 let ordersVisibleCount = 10;
 let lastOrdersListSignature = '';
+let currentOrderDetailId = null;
 const SERVICE_TYPE_OPTIONS = [
-  'Монтаж лобового',
-  'Монтаж бокового',
-  'Монтаж заднего',
-  'Срезка лобового',
-  'Срезка бокового',
-  'Срезка заднего',
-  'Вклейка лобового',
-  'Вклейка бокового',
-  'Вклейка заднего',
+  { group: 'Монтаж', name: 'Монтаж лобового', rate: 400, salaryCategory: 'mount' },
+  { group: 'Монтаж', name: 'Монтаж бокового', rate: 300, salaryCategory: 'mount' },
+  { group: 'Монтаж', name: 'Монтаж заднего', rate: 400, salaryCategory: 'mount' },
+  { group: 'Монтаж', name: 'Монтаж лобового бус', rate: 500, salaryCategory: 'mount' },
+  { group: 'Монтаж', name: 'Монтаж лобового грузовик', rate: 700, salaryCategory: 'mount' },
+  { group: 'Срезка', name: 'Срезка лобового', rate: 200, salaryCategory: 'cut' },
+  { group: 'Срезка', name: 'Срезка бокового', rate: 150, salaryCategory: 'cut' },
+  { group: 'Срезка', name: 'Срезка заднего', rate: 200, salaryCategory: 'cut' },
+  { group: 'Срезка', name: 'Срезка лобового бус', rate: 250, salaryCategory: 'cut' },
+  { group: 'Срезка', name: 'Срезка лобового грузовик', rate: 350, salaryCategory: 'cut' },
+  { group: 'Вклейка', name: 'Вклейка лобового', rate: 200, salaryCategory: 'glue' },
+  { group: 'Вклейка', name: 'Вклейка бокового', rate: 150, salaryCategory: 'glue' },
+  { group: 'Вклейка', name: 'Вклейка заднего', rate: 200, salaryCategory: 'glue' },
+  { group: 'Вклейка', name: 'Вклейка лобового бус', rate: 250, salaryCategory: 'glue' },
+  { group: 'Вклейка', name: 'Вклейка лобового грузовик', rate: 350, salaryCategory: 'glue' },
+  { group: 'Нестандартные работы', name: 'Нестандартные работы', rate: 0, salaryCategory: 'custom' },
 ];
+const SERVICE_TYPE_BY_NAME = Object.fromEntries(SERVICE_TYPE_OPTIONS.map(item => [item.name, item]));
 
 function canMarkWorkerDone() {
   // Галочка доступна только специалисту (senior) для своих заказов
@@ -217,7 +226,7 @@ function renderOrderCard(o) {
   const canQuickConfirm = canQuickConfirmOrderAmounts(o);
   const clientTotal = getOrderClientTotal(o);
   const clientPaidHtml = clientTotal > 0
-    ? `<span class="order-card-client-total"><span style="color:var(--yellow);">${(Number(o.debt) || 0).toLocaleString('ru')}</span><span style="color:var(--text3);font-weight:600;">/</span><span style="color:var(--accent);">${clientTotal.toLocaleString('ru')}</span></span>`
+    ? `<span class="order-card-client-total" title="Клиент оплатил / общая сумма заказа"><span>${(Number(o.debt) || 0).toLocaleString('ru')}</span><span class="order-card-client-total-separator">/</span><span>${clientTotal.toLocaleString('ru')} ₴</span></span>`
     : '';
   return `
     <div class="order-card" onclick="openOrderDetail('${o.id}')">
@@ -251,6 +260,7 @@ function renderOrderCard(o) {
         <span class="order-meta-item">${icon('phone')} ${o.phone || '—'}</span>
         <span class="order-meta-item">${icon('calendar')} ${formatDate(o.date)}</span>
         <span class="order-meta-item">${icon('hard-hat')} ${getWorkerDisplayPair(o.responsible, o.assistant)}</span>
+        ${o.manager ? `<span class="order-meta-item">${icon('user')} ${getWorkerDisplayName(o.manager)}</span>` : ''}
         ${o.warehouse ? `<span class="order-meta-item">${icon('warehouse')} ${o.warehouse}</span>` : ''}
         ${(Number(o.check) > 0 || Number(o.purchase) > 0) ? `<span class="order-meta-item" style="font-weight:700;"><span style="color:var(--yellow);">${(Number(o.check) || 0).toLocaleString('ru')}</span><span style="color:var(--text3);font-weight:600;">/</span><span style="color:var(--accent);">${(Number(o.purchase) || 0).toLocaleString('ru')}</span></span>` : ''}
         <span class="order-meta-item">${o.client || '—'}</span>
@@ -431,6 +441,7 @@ function renderOrders() {
 function openOrderDetail(id) {
   const o = orders.find(x => x.id === id);
   if (!o) return;
+  currentOrderDetailId = id;
 
   const el = document.getElementById('order-detail-content');
   const fullOrderTotal = getOrderClientTotal(o);
@@ -487,6 +498,7 @@ function openOrderDetail(id) {
         ${field(`${icon('user')} Клиент`, o.client)}
         ${field(`${icon('phone')} Телефон`, phoneCallLink(o.phone), 'mono detail-phone-value')}
         ${field(`${icon('map-pin')} Место`, o.address)}
+        ${field('VIN', o.vin, 'mono')}
         ${field(`${icon('mail')} Новая почта`, o.newPost ? 'Да' : '')}
         ${field(`${icon('clock')} Время`, o.time)}
         ${field(`${icon('users')} Менеджер`, getWorkerDisplayName(o.author))}
@@ -571,20 +583,27 @@ function copyOrderSummary(id) {
   if (!o) return;
 
   const lines = [];
-  const worksTotal = Number(o.total) || 0;
-  const glassTotal = Number(o.income) || 0;
-  const fullTotal = worksTotal + glassTotal + (Number(o.delivery) || 0);
+  const fullTotal = getOrderClientTotal(o);
+  const fmt = value => `${Number(value).toLocaleString('ru')} ₴`;
+  const services = [
+    ['Монтаж', o.mount],
+    ['Молдинг', o.molding],
+    ['Доп. работы', o.extraWork],
+    ['Тату', o.tatu],
+    ['Тонировка', o.toning],
+    ['Доставка', o.delivery],
+  ].filter(([, amount]) => Number(amount) > 0);
+  const listedServicesTotal = services.reduce((sum, [, amount]) => sum + (Number(amount) || 0), 0);
 
-  if (o.phone)      lines.push(`Номер клиента: ${o.phone}`);
-  if (o.mount)      lines.push(`Стоимость монтажа: ${Number(o.mount).toLocaleString('ru')} ₴`);
-  if (o.molding)    lines.push(`Стоимость молдинга: ${Number(o.molding).toLocaleString('ru')} ₴`);
-  if (o.extraWork)  lines.push(`Стоимость доп работа: ${Number(o.extraWork).toLocaleString('ru')} ₴`);
-  if (o.tatu)       lines.push(`Доп услуга: ${Number(o.tatu).toLocaleString('ru')} ₴`);
-  if (o.income)     lines.push(`Стоимость стекла: ${glassTotal.toLocaleString('ru')} ₴`);
-  if (o.delivery)   lines.push(`Стоимость доставки: ${Number(o.delivery).toLocaleString('ru')} ₴`);
-  if (worksTotal)   lines.push(`Общая стоимость услуг: ${worksTotal.toLocaleString('ru')} ₴`);
-  if (glassTotal)   lines.push(`Общая стоимость стекла: ${glassTotal.toLocaleString('ru')} ₴`);
-  if (fullTotal)    lines.push(`Общая стоимость всего заказа: ${fullTotal.toLocaleString('ru')} ₴`);
+  if (o.phone) lines.push(`Телефон: ${o.phone}`);
+  services.forEach(([label, amount]) => lines.push(`${label}: ${fmt(amount)}`));
+  if (services.length === 0 && Number(o.total) > 0) lines.push(`Услуги: ${fmt(o.total)}`);
+  if (services.length > 0 && Number(o.total) > listedServicesTotal) lines.push(`Сумма услуг: ${fmt(o.total)}`);
+  if (Number(o.income) > 0) lines.push(`Цена продажи стекла: ${fmt(o.income)}`);
+  if (fullTotal > 0) {
+    if (lines.length) lines.push('');
+    lines.push(`Общая сумма: ${fmt(fullTotal)}`);
+  }
 
   const text = lines.join('\n');
 
@@ -666,11 +685,20 @@ function populateRefSelects() {
   const svcBox = document.getElementById('service-type-checkboxes');
   if (svcBox) {
     const cur = (document.getElementById('f-service-type')?.value || '').split(',').map(s => s.trim()).filter(Boolean);
-    svcBox.innerHTML = SERVICE_TYPE_OPTIONS.map(name => `
-      <label class="checkbox">
-        <input type="checkbox" value="${name}" ${cur.includes(name) ? 'checked' : ''} onchange="syncServiceTypes()">
-        ${name}
-      </label>
+    const groups = [...new Set(SERVICE_TYPE_OPTIONS.map(item => item.group))];
+    svcBox.innerHTML = groups.map(group => `
+      <div class="service-group">
+        <div class="service-group-title">${group}</div>
+        <div class="service-group-options">
+          ${SERVICE_TYPE_OPTIONS.filter(item => item.group === group).map(item => `
+            <label class="checkbox">
+              <input type="checkbox" value="${item.name}" ${cur.includes(item.name) ? 'checked' : ''} onchange="syncServiceTypes()">
+              <span>${item.name}</span>
+              <small>${item.rate ? item.rate.toLocaleString('ru') + ' ₴' : 'без начислений'}</small>
+            </label>
+          `).join('')}
+        </div>
+      </div>
     `).join('');
   }
 
@@ -1018,6 +1046,7 @@ function openOrderModal(id) {
   renderClientPayments(); // рендерим историю оплат (изначально)
   syncSupplierPaidFromPayments();
   syncClientPaidFromPayments();
+  initOrderVinDecoder();
 
   document.getElementById('order-modal').classList.add('active');
 
@@ -1090,6 +1119,7 @@ function fillOrderForm(o) {
   set('f-client', o.client);
   set('f-phone', o.phone);
   set('f-address', o.address);
+  set('f-vin', o.vin);
   set('f-car', o.car);
   set('f-code', o.code);
   set('f-notes', o.notes);
@@ -1162,7 +1192,7 @@ function fillOrderForm(o) {
 
 function clearOrderForm() {
   const ids = [
-    'f-date','f-time','f-responsible','f-client','f-phone','f-address','f-car','f-code',
+    'f-date','f-time','f-responsible','f-client','f-phone','f-address','f-vin','f-car','f-code',
     'f-notes','f-mount','f-service-type','f-molding',
     'f-extra-work','f-tatu','f-toning','f-delivery','f-warehouse','f-warehouse-code','f-configuration',
     'f-payment-status','f-check','f-supplier-left','f-debt','f-debt-date','f-total',
@@ -1329,6 +1359,7 @@ async function saveOrder() {
     client:          get('f-client'),
     phone:           get('f-phone'),
     address:         get('f-address'),
+    vin:             get('f-vin'),
     car:             get('f-car'),
     code:            get('f-code'),
     notes:           get('f-notes'),
@@ -1430,6 +1461,7 @@ async function saveOrder() {
       const saved = await sbUpdateOrder(data);
       const idx = orders.findIndex(o => o.id === editingOrderId);
       if (idx !== -1) orders[idx] = saved;
+      await _upsertOrderSalaries(saved);
       try {
         await rememberAssistantForResponsible(data.responsible, data.assistant);
       } catch (e) {
@@ -1801,6 +1833,7 @@ async function toggleWorkerDone(orderId) {
   o.workerDone = true;
   try {
     await sbUpdateOrder(o);
+    await _upsertOrderSalaries(o);
     // Автозачисление в кассу если наличка и заказ отмечен выполненным
     if (typeof addCashFromOrder === 'function') {
       await addCashFromOrder(o);
@@ -1837,21 +1870,14 @@ async function _upsertOrderSalaries(order) {
       });
     }
 
-    // 3. Тату-бонус Ромы
-    const romaName = 'Рома';
-    const mainHasRoma = (order.responsible === romaName || order.assistant === romaName);
-    const reworkHasRoma = (order.reworkData?.responsible === romaName || order.reworkData?.assistant === romaName);
-    
-    // Если Рома не участвовал в основной работе, но там было тату:
-    if (!mainHasRoma && (Number(order.tatu) > 0)) {
-       affectedWorkers.add(romaName);
-       amounts[romaName] = (amounts[romaName] || 0) + Math.round(Number(order.tatu) * 0.20);
-    }
-    // Если Рома не участвовал в доработке, но там было тату:
-    if (!reworkHasRoma && (Number(order.reworkData?.tatu) > 0)) {
-       affectedWorkers.add(romaName);
-       amounts[romaName] = (amounts[romaName] || 0) + Math.round(Number(order.reworkData.tatu) * 0.20);
-    }
+    // 3. Глобальные бонусы по тату/тонировке
+    (workers || []).forEach(worker => {
+      const bonus = _calcTatuBonus(worker.name, order) + _calcToningBonus(worker.name, order);
+      if (bonus > 0) {
+        affectedWorkers.add(worker.name);
+        amounts[worker.name] = (amounts[worker.name] || 0) + bonus;
+      }
+    });
 
     // 4. Менеджер — если указан в поле manager заказа и имеет systemRole === 'manager'
     const managerName = order.manager || '';
@@ -1876,8 +1902,6 @@ async function _upsertOrderSalaries(order) {
   for (const workerName of workerNamesToProcess) {
     const amount = amounts[workerName] || 0;
     const existingEntry = existingInDb.find(s => s.worker_name === workerName);
-
-    console.log('[salary]', workerName, '| amount:', amount);
 
     if (amount > 0) {
       if (!existingEntry) {
@@ -2070,6 +2094,67 @@ function syncServiceTypes(recalc = true) {
   const hidden = document.getElementById('f-service-type');
   if (hidden) hidden.value = vals.join(', ');
   if (recalc) recalcTotal();
+}
+
+let _orderVinDecodeTimer = null;
+
+function initOrderVinDecoder() {
+  const vinInput = document.getElementById('f-vin');
+  if (!vinInput || vinInput.dataset.vinDecoderBound === '1') return;
+  vinInput.dataset.vinDecoderBound = '1';
+  vinInput.addEventListener('input', () => {
+    const vin = vinInput.value.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+    vinInput.value = vin;
+    clearTimeout(_orderVinDecodeTimer);
+    setOrderVinTooltip(vin ? 'Введите 17 символов VIN' : '', 'hint');
+    if (vin.length === 17) {
+      setOrderVinTooltip('Декодируем VIN...', 'loading');
+      _orderVinDecodeTimer = setTimeout(() => decodeOrderVin(vin), 450);
+    }
+  });
+}
+
+async function decodeOrderVin(vin) {
+  try {
+    const data = typeof decodeVinNHTSA === 'function'
+      ? await decodeVinNHTSA(vin)
+      : await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVin/${vin}?format=json`)
+          .then(res => res.json())
+          .then(body => {
+            const get = name => body.Results?.find(r => r.Variable === name)?.Value || '';
+            return { make: get('Make'), model: get('Model'), year: get('Model Year'), body: get('Body Class') || get('Vehicle Type') };
+          });
+    const make = data?.make || '—';
+    const model = data?.model || '—';
+    const year = data?.year || (typeof decodeYearFromVin === 'function' ? decodeYearFromVin(vin[9]) : '') || '—';
+    const body = data?.body ? (typeof mapBodyType === 'function' ? (mapBodyType(data.body) || data.body) : data.body) : '—';
+    const hasData = [make, model, year, body].some(value => value && value !== '—');
+    if (hasData) {
+      setOrderVinTooltip(`Марка: ${make} · Модель: ${model} · Кузов: ${body} · Год: ${year}`, 'ok');
+    } else {
+      setOrderVinTooltip('Данные по VIN не найдены', 'error');
+    }
+  } catch (e) {
+    setOrderVinTooltip('Не удалось декодировать VIN', 'error');
+  }
+}
+
+function setOrderVinTooltip(text, type = 'hint') {
+  let el = document.getElementById('order-vin-tooltip');
+  const vinInput = document.getElementById('f-vin');
+  if (!vinInput) return;
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'order-vin-tooltip';
+    el.className = 'vin-status';
+    vinInput.parentElement.appendChild(el);
+  }
+  if (!text) {
+    el.remove();
+    return;
+  }
+  el.className = `vin-status vin-${type}`;
+  el.textContent = text;
 }
 
 // ============================================================

@@ -16,7 +16,7 @@ function canManageAssistantSalary() {
 // ── ЗАГРУЗКА ─────────────────────────────────────────────────
 
 async function loadWorkerSalaries() {
-  if (currentRole === 'owner' || currentRole === 'manager') return;
+  if (currentRole === 'owner') return;
   try {
     workerSalaries = await sbFetchWorkerSalaries(currentWorkerName);
     assistantWorkerSalaries = [];
@@ -73,14 +73,23 @@ function renderProfile() {
   const el = document.getElementById('profile-content');
 
   if (currentRole === 'manager') {
+    const relevantSalaryEntries = workerSalaries.filter(isRelevantSalaryEntry);
+    const accTotal = relevantSalaryEntries.reduce((sum, s) => sum + Number(s.amount), 0);
+    const salaryHistoryHtml = buildWorkerSalaryHistory(currentWorkerName, relevantSalaryEntries);
     el.innerHTML = ''
       + '<div class="profile-header">'
       + '<div class="worker-avatar" style="width:56px;height:56px;font-size:20px;border-radius:16px;flex-shrink:0;">' + getInitials(currentWorkerName) + '</div>'
       + '<div><div style="font-size:20px;font-weight:800;">' + getWorkerDisplayName(currentWorkerName) + '</div>'
       + '<div style="font-size:13px;color:var(--text3);margin-top:2px;">' + (ROLE_LABELS[currentRole] || currentRole) + '</div></div>'
       + '</div>'
-      + '<div style="margin-top:12px;padding:16px;background:var(--surface2);border-radius:14px;text-align:center;color:var(--text3);font-size:14px;">'
-      + 'Зарплата начисляется владельцем'
+      + renderWorkAttendanceCard()
+      + '<div class="profile-summary" style="margin-top:12px;">'
+      + '<div class="profile-summary-card"><div class="profile-summary-label">Накоплено</div><div class="profile-summary-value">' + accTotal.toLocaleString('ru') + ' ₴</div></div>'
+      + '<div class="profile-summary-card"><div class="profile-summary-label">Сегодня</div><div class="profile-summary-value">' + getTodayAttendanceAmount().toLocaleString('ru') + ' ₴</div></div>'
+      + '</div>'
+      + '<div class="profile-today-card" style="margin-top:12px;">'
+      + '<div style="font-size:12px;font-weight:800;color:var(--text3);margin-bottom:12px;letter-spacing:0.04em;">ИСТОРИЯ ЗАРПЛАТ</div>'
+      + '<div style="display:flex;flex-direction:column;gap:12px;">' + salaryHistoryHtml + '</div>'
       + '</div>';
     initIcons();
     return;
@@ -137,6 +146,7 @@ function renderProfile() {
           editable: true
         })
       : '')
+    + renderWorkAttendanceCard()
     + '<div style="padding:14px;background:var(--surface2);border-radius:12px;border:1px solid var(--border);">'
     + '<div class="profile-today-label"><i data-lucide="calendar-check" style="width:15px;height:15px;"></i> Зарплата — ' + formatDate(today) + '</div>'
     + '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px;">'
@@ -252,6 +262,61 @@ function renderTodaySalarySubmission(todayReport, todaySummary, options = {}) {
     disabled,
     hint
   });
+}
+
+function getTodayAttendanceEntry() {
+  const today = getLocalDateString();
+  return (workerSalaries || []).find(entry => isWorkAttendanceEntry(entry) && entry.date === today) || null;
+}
+
+function getTodayAttendanceAmount() {
+  return Number(getTodayAttendanceEntry()?.amount) || 0;
+}
+
+function renderWorkAttendanceCard() {
+  if (typeof getSalaryRule !== 'function') return '';
+  const rule = getSalaryRule(currentWorkerName);
+  const amount = Number(rule.attendanceBase) || 0;
+  if (!amount) return '';
+  const entry = getTodayAttendanceEntry();
+  return ''
+    + '<div style="padding:14px;background:var(--surface2);border-radius:12px;border:1px solid var(--border);">'
+    + '<div class="profile-today-label"><i data-lucide="calendar-check" style="width:15px;height:15px;"></i> Выход в работу</div>'
+    + '<div style="font-size:12px;color:var(--text3);margin-top:6px;">Ставка за день: ' + amount.toLocaleString('ru') + ' ₴</div>'
+    + '<button class="' + (entry ? 'btn-secondary' : 'btn-primary') + '" style="margin-top:12px;width:100%;min-height:44px;font-weight:800;" onclick="toggleWorkAttendance()">'
+    + (entry ? 'Я сегодня в работе ✓' : 'Я в работе')
+    + '</button>'
+    + '</div>';
+}
+
+async function toggleWorkAttendance() {
+  const rule = getSalaryRule(currentWorkerName);
+  const amount = Number(rule.attendanceBase) || 0;
+  if (!amount) {
+    showToast('Для вас ставка выхода не настроена', 'error');
+    return;
+  }
+  const today = getLocalDateString();
+  const existing = getTodayAttendanceEntry();
+  try {
+    if (existing) {
+      await sbDeleteWorkerSalary(existing.id);
+      workerSalaries = workerSalaries.filter(entry => entry.id !== existing.id);
+      showToast('Выход в работу отменён');
+    } else {
+      const created = await sbInsertWorkerSalary({
+        worker_name: currentWorkerName,
+        amount,
+        date: today,
+        order_id: WORK_ATTENDANCE_ORDER_ID,
+      });
+      if (created) workerSalaries.unshift(created);
+      showToast('Выход в работу отмечен ✓');
+    }
+    renderProfile();
+  } catch (e) {
+    showToast('Ошибка: ' + e.message, 'error');
+  }
 }
 
 function renderAssistantSalarySection(assistantWorkers, assistantWorker, todayReport, todaySummary, todayAmount, assistantAccTotal = 0) {
@@ -392,11 +457,22 @@ function buildWorkerSalaryHistory(workerName, entries) {
       const dateEntries = byMonth[ym][date];
       const report = dateEntries.find(isManualSalaryReportEntry) || null;
       const withdrawals = dateEntries.filter(isSalaryWithdrawalEntry);
+      const accruals = dateEntries.filter(entry => !isSalaryWithdrawalEntry(entry));
       const summary = getWorkerCompletedOrdersSummary(workerName, date);
       const reportAmount = Number(report?.amount) || 0;
+      const accrualAmount = accruals.reduce((sum, entry) => sum + Number(entry.amount), 0);
       const withdrawalsAmount = withdrawals.reduce((sum, entry) => sum + Number(entry.amount), 0);
-      const totalForDay = reportAmount + withdrawalsAmount;
+      const totalForDay = accrualAmount + withdrawalsAmount;
       const ordersHtml = renderSalaryOrdersList(summary.orders);
+      const accrualsHtml = accruals.length
+        ? '<div style="margin-top:10px;display:flex;flex-direction:column;gap:6px;">'
+          + accruals.map(entry => '<div style="font-size:12px;color:var(--text2);">'
+            + escapeHtml(entry.order_id === WORK_ATTENDANCE_ORDER_ID ? 'Выход в работу' : (entry.order_id === MANUAL_SALARY_REPORT_ORDER_ID ? 'Дневная ЗП' : `Заказ ${entry.order_id || '—'}`))
+            + ' · '
+            + Number(entry.amount).toLocaleString('ru') + ' ₴'
+            + '</div>').join('')
+          + '</div>'
+        : '';
       const withdrawalsHtml = withdrawals.length
         ? '<div style="margin-top:10px;display:flex;flex-direction:column;gap:6px;">'
           + withdrawals.map(entry => '<div style="font-size:12px;color:#ef4444;">'
@@ -416,8 +492,9 @@ function buildWorkerSalaryHistory(workerName, entries) {
         + '</div>'
         + '<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--text3);">'
         + '<span>Выполнено: ' + summary.count + '</span>'
-        + '<span>ЗП: ' + reportAmount.toLocaleString('ru') + ' \u20B4</span>'
+        + '<span>ЗП: ' + accrualAmount.toLocaleString('ru') + ' \u20B4</span>'
         + '</div>'
+        + accrualsHtml
         + ordersHtml
         + withdrawalsHtml
         + '</div>';
@@ -1082,6 +1159,12 @@ function renderSalaryRuleCard(workerName) {
   if (rule.base) {
     parts.push({ label: 'Ставка за день', value: rule.base.toLocaleString('ru') + ' ₴' });
   }
+  if (rule.dailyBaseIfCompleted) {
+    parts.push({ label: 'Ставка за день с заказами', value: rule.dailyBaseIfCompleted.toLocaleString('ru') + ' ₴' });
+  }
+  if (rule.attendanceBase) {
+    parts.push({ label: 'Ставка по кнопке "Я в работе"', value: rule.attendanceBase.toLocaleString('ru') + ' ₴' });
+  }
   if (rule.baseIfResp) {
     parts.push({ label: 'Доплата за день (если ответственный)', value: rule.baseIfResp.toLocaleString('ru') + ' ₴' });
   }
@@ -1091,8 +1174,23 @@ function renderSalaryRuleCard(workerName) {
   if (rule.servicesPct) {
     parts.push({ label: 'Услуги (монтаж и др.)', value: Math.round(rule.servicesPct * 100) + '%' });
   }
+  if (rule.selectedServices) {
+    const adj = rule.serviceAdjustments || {};
+    const details = [
+      adj.mount ? `монтаж ${adj.mount > 0 ? '+' : ''}${adj.mount}` : '',
+      adj.cut ? `срезка ${adj.cut > 0 ? '+' : ''}${adj.cut}` : '',
+      adj.glue ? `вклейка ${adj.glue > 0 ? '+' : ''}${adj.glue}` : '',
+    ].filter(Boolean).join(', ');
+    parts.push({ label: 'Выбранные услуги', value: details || 'по прайсу' });
+  }
+  if (rule.moldingPct) {
+    parts.push({ label: 'Молдинг', value: Math.round(rule.moldingPct * 100) + '%' });
+  }
   if (rule.tatuBonusPct) {
     parts.push({ label: 'Бонус тату', value: Math.round(rule.tatuBonusPct * 100) + '%' });
+  }
+  if (rule.toningBonusPct) {
+    parts.push({ label: 'Бонус тонировки', value: Math.round(rule.toningBonusPct * 100) + '%' });
   }
 
   if (!parts.length) {
@@ -1109,9 +1207,13 @@ function renderSalaryRuleCard(workerName) {
   // Формула одной строкой
   const formulaParts = [];
   if (rule.base) formulaParts.push(rule.base + ' ₴');
+  if (rule.dailyBaseIfCompleted) formulaParts.push(rule.dailyBaseIfCompleted + ' ₴/день с заказом');
+  if (rule.attendanceBase) formulaParts.push(rule.attendanceBase + ' ₴/выход');
   if (rule.baseIfResp) formulaParts.push(rule.baseIfResp + ' ₴ (если отв.)');
   if (rule.glassMarginPct) formulaParts.push('маржа × ' + Math.round(rule.glassMarginPct * 100) + '%');
+  if (rule.moldingPct) formulaParts.push('молдинг × ' + Math.round(rule.moldingPct * 100) + '%');
   if (rule.servicesPct) formulaParts.push('услуги × ' + Math.round(rule.servicesPct * 100) + '%');
+  if (rule.selectedServices) formulaParts.push('выбранные услуги');
   const formulaStr = formulaParts.join(' + ') || '—';
 
   return '<div style="margin-top:12px;margin-bottom:4px;">'

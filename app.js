@@ -67,7 +67,7 @@ function updateNavbarVisibility() {
     if (bottomNav)  bottomNav.style.display  = '';
     if (navHome)    navHome.style.display    = 'none';
     if (navCash)    navCash.style.display    = 'none';
-    if (navProfile) navProfile.style.display = 'none';
+    if (navProfile) navProfile.style.display = '';
     if (navClients) navClients.style.display = canViewClients() ? '' : 'none';
     if (navWorkers) navWorkers.style.display = 'none';
     document.getElementById('app')?.classList.remove('no-navbar');
@@ -136,8 +136,68 @@ async function loadOrders() {
   }
 }
 
+function getOrdersDataSignature(list = orders) {
+  const stableStringify = value => {
+    if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+    if (value && typeof value === 'object') {
+      return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`;
+    }
+    return JSON.stringify(value);
+  };
+
+  return stableStringify((list || []).slice().sort((a, b) => String(a.id).localeCompare(String(b.id))));
+}
+
+function refreshActiveOrdersViews() {
+  if (document.getElementById('screen-home')?.classList.contains('active')) renderHome();
+  if (document.getElementById('screen-months')?.classList.contains('active')) renderMonths();
+  if (document.getElementById('screen-orders')?.classList.contains('active')) {
+    currentMonthFilter ? renderOrdersForMonth(currentMonthFilter) : renderOrders();
+  }
+  if (document.getElementById('screen-order-detail')?.classList.contains('active') && typeof currentOrderDetailId !== 'undefined' && currentOrderDetailId) {
+    openOrderDetail(currentOrderDetailId);
+  }
+  if (document.getElementById('screen-clients')?.classList.contains('active')) renderClients();
+  if (document.getElementById('screen-client-detail')?.classList.contains('active') && typeof currentClientDetailKey !== 'undefined' && currentClientDetailKey) {
+    openClientDetail(currentClientDetailKey);
+  }
+  if (document.getElementById('screen-workers')?.classList.contains('active')) renderWorkers();
+}
+
 async function refreshOrders() {
-  window.location.reload();
+  const btn = document.getElementById('refresh-btn');
+  const beforeSignature = getOrdersDataSignature();
+
+  if (btn) {
+    btn.disabled = true;
+    btn.dataset.state = 'loading';
+    btn.innerHTML = '<i data-lucide="loader" style="width:15px;height:15px;"></i>';
+    initIcons();
+  }
+
+  try {
+    orders = await sbFetchOrders();
+    const unchanged = beforeSignature === getOrdersDataSignature();
+    refreshActiveOrdersViews();
+    showToast(unchanged ? 'Данные актуальны: изменений в базе нет' : 'Данные из базы обновлены ✓');
+
+    if (btn) {
+      btn.dataset.state = unchanged ? 'unchanged' : 'updated';
+      btn.innerHTML = unchanged
+        ? '<i data-lucide="check" style="width:15px;height:15px;"></i>'
+        : '<i data-lucide="refresh-cw" style="width:15px;height:15px;"></i>';
+      initIcons();
+      setTimeout(() => {
+        btn.dataset.state = '';
+        btn.innerHTML = '<i data-lucide="refresh-cw" style="width:15px;height:15px;"></i>';
+        initIcons();
+      }, 1800);
+    }
+  } catch (e) {
+    showToast('Ошибка обновления: ' + e.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 // --- НАВИГАЦИЯ ---
