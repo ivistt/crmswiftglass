@@ -46,8 +46,8 @@ function renderCarDirectory() {
             <span class="car-dir-code">${c.eurocode || '—'}</span>
           </div>
           <div class="car-dir-col-actions">
-            <button class="icon-action-btn" title="Редактировать" onclick="openCarDirModal('${c.id}')">${icon('pencil')}</button>
-            <button class="icon-action-btn icon-action-danger" title="Удалить" onclick="deleteCarDirEntry('${c.id}')">${icon('trash-2')}</button>
+            <button class="icon-action-btn car-dir-action-btn" title="Редактировать" onclick="openCarDirModal('${c.id}')">${icon('pencil')}</button>
+            <button class="icon-action-btn car-dir-action-btn" title="Удалить" onclick="deleteCarDirEntry('${c.id}')">${icon('trash-2')}</button>
           </div>
         </div>
       `).join('')}
