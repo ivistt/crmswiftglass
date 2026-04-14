@@ -41,6 +41,7 @@ function renderClients() {
       <div class="client-info">
         <div class="client-name">${c.name}</div>
         <div class="client-phone">${c.phone || '—'}</div>
+        <div class="client-phone">${c.address || '—'}</div>
         <div class="client-orders">${icon('clipboard-list')} Заказов: ${c.orders.length}</div>
       </div>
       <div class="client-debt-pill ${c.debt > 0 ? 'has-debt' : 'no-debt'}">
@@ -88,7 +89,7 @@ function openClientDetail(key) {
       <div class="detail-header-top">
         <div>
             <div class="detail-title">${c.name}</div>
-            <div class="detail-subtitle">${c.phone || '—'}</div>
+            <div class="detail-subtitle">${c.phone || '—'}${c.address ? ' · ' + c.address : ''}</div>
           </div>
         ${clientTotalsHtml}
       </div>
@@ -166,6 +167,7 @@ async function loadManualClients() {
 function openClientModal() {
   document.getElementById('c-name').value = '';
   document.getElementById('c-phone').value = '';
+  document.getElementById('c-address').value = '';
   document.getElementById('client-modal').classList.add('active');
   setTimeout(() => document.getElementById('c-name').focus(), 100);
 }
@@ -177,6 +179,7 @@ function closeClientModal() {
 async function saveClient() {
   const name  = document.getElementById('c-name').value.trim();
   const phone = document.getElementById('c-phone').value.trim();
+  const address = document.getElementById('c-address').value.trim();
 
   if (!name) {
     alert('Введите имя клиента');
@@ -196,8 +199,8 @@ async function saveClient() {
   if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '⏳'; }
 
   try {
-    const created = await sbInsertManualClient({ name, phone });
-    manualClients.push(created || { name, phone, orders: [] });
+    const created = await sbInsertManualClient({ name, phone, address });
+    manualClients.push(created || { name, phone, address, orders: [] });
     closeClientModal();
     renderClients();
     showToast('Клиент добавлен ✓');

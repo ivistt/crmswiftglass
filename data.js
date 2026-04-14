@@ -374,6 +374,17 @@ async function sbInsertManualClient(client) {
   return rowToManualClient(Array.isArray(rows) ? rows[0] : rows);
 }
 
+async function sbUpsertManualClient(client) {
+  const res = await fetch(`${WORKER_URL}/api/clients`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+    body: JSON.stringify(manualClientToRow(client)),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const rows = await res.json();
+  return rowToManualClient(Array.isArray(rows) ? rows[0] : rows);
+}
+
 async function loadRefData() {
   try {
     const [cars, wh, eq, ps, part, ss, carDir, drops] = await Promise.all([
@@ -571,6 +582,7 @@ function rowToManualClient(r) {
     id: r.id,
     name: r.name || '',
     phone: r.phone || '',
+    address: r.address || '',
     orders: [],
   };
 }
@@ -579,6 +591,7 @@ function manualClientToRow(c) {
   return {
     name: c.name || '',
     phone: c.phone || null,
+    address: c.address || null,
   };
 }
 
@@ -905,13 +918,16 @@ function getClients() {
   for (const o of orders) {
     if (!o.client) continue;
     const key = o.phone || o.client;
-    if (!map[key]) map[key] = { name: o.client, phone: o.phone, orders: [] };
+    if (!map[key]) map[key] = { name: o.client, phone: o.phone, address: o.address || '', orders: [] };
     map[key].orders.push(o);
+    if (o.address) map[key].address = o.address;
   }
   if (typeof manualClients !== 'undefined') {
     for (const c of manualClients) {
       const key = c.phone || c.name;
-      if (!map[key]) map[key] = { name: c.name, phone: c.phone, orders: [] };
+      if (!map[key]) map[key] = { name: c.name, phone: c.phone, address: c.address || '', orders: [] };
+      if (c.address) map[key].address = c.address;
+      if (c.id) map[key].id = c.id;
     }
   }
   return Object.values(map);

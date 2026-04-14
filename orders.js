@@ -677,6 +677,24 @@ async function rememberAssistantForResponsible(respName, assistantName) {
   responsible.assistant = assistantName;
 }
 
+async function rememberClientAddressFromOrder(order) {
+  const name = String(order?.client || '').trim();
+  const phone = String(order?.phone || '').trim();
+  const address = String(order?.address || '').trim();
+  if (!name || !address || typeof sbUpsertManualClient !== 'function') return;
+
+  const savedClient = await sbUpsertManualClient({ name, phone, address });
+  if (typeof manualClients === 'undefined') return;
+
+  const key = phone || name;
+  const idx = manualClients.findIndex(c => (c.phone || c.name) === key);
+  if (idx !== -1) {
+    manualClients[idx] = { ...manualClients[idx], ...savedClient, name, phone, address };
+  } else {
+    manualClients.push(savedClient || { name, phone, address, orders: [] });
+  }
+}
+
 function populateRefSelects() {
   // Марки авто — теперь datalist
   populateCarDatalist();
@@ -694,7 +712,6 @@ function populateRefSelects() {
             <label class="checkbox">
               <input type="checkbox" value="${item.name}" ${cur.includes(item.name) ? 'checked' : ''} onchange="syncServiceTypes()">
               <span>${item.name}</span>
-              <small>${item.rate ? item.rate.toLocaleString('ru') + ' ₴' : 'без начислений'}</small>
             </label>
           `).join('')}
         </div>
@@ -850,6 +867,19 @@ function syncClientPaidFromPayments() {
   if (!debtEl) return;
   const totalPaid = currentClientPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
   debtEl.value = String(totalPaid || 0);
+  syncClientLeftFromPayments();
+}
+
+function syncClientLeftFromPayments(totalAll = null) {
+  const leftEl = document.getElementById('f-client-left');
+  if (!leftEl) return;
+  const total = totalAll ?? (
+    (Number(document.getElementById('f-total')?.value) || 0) +
+    (Number(document.getElementById('f-income')?.value) || 0) +
+    (Number(document.getElementById('f-delivery')?.value) || 0)
+  );
+  const paid = Number(document.getElementById('f-debt')?.value) || 0;
+  leftEl.value = String(Math.max(0, total - paid));
 }
 
 function syncSupplierPaidFromPayments() {
@@ -1195,7 +1225,7 @@ function clearOrderForm() {
     'f-date','f-time','f-responsible','f-client','f-phone','f-address','f-vin','f-car','f-code',
     'f-notes','f-mount','f-service-type','f-molding',
     'f-extra-work','f-tatu','f-toning','f-delivery','f-warehouse','f-warehouse-code','f-configuration',
-    'f-payment-status','f-check','f-supplier-left','f-debt','f-debt-date','f-total',
+    'f-payment-status','f-check','f-supplier-left','f-debt','f-client-left','f-debt-date','f-total',
     'f-supplier-status','f-purchase','f-income',
     'f-remainder','f-payment-method','f-dropshipper','f-margin-total',
     'f-payout-dropshipper','f-payout-manager-glass','f-payout-resp-glass',
@@ -1304,6 +1334,7 @@ function recalcTotal(mode = 'init') {
     const debtVal = Number(debtInput.value) || 0;
     paymentStatusSel.value = calcClientPaymentStatus(debtVal, totalAll);
   }
+  syncClientLeftFromPayments(totalAll);
 
   // Авторасчет статуса поставщика
   const checkInput = document.getElementById('f-check');
@@ -1456,6 +1487,11 @@ async function saveOrder() {
       } catch (e) {
         console.warn('Failed to remember assistant preference:', e);
       }
+      try {
+        await rememberClientAddressFromOrder(saved);
+      } catch (e) {
+        console.warn('Failed to remember client address:', e);
+      }
       showToast('Запись создана ✓');
     } else {
       const saved = await sbUpdateOrder(data);
@@ -1466,6 +1502,11 @@ async function saveOrder() {
         await rememberAssistantForResponsible(data.responsible, data.assistant);
       } catch (e) {
         console.warn('Failed to remember assistant preference:', e);
+      }
+      try {
+        await rememberClientAddressFromOrder(saved);
+      } catch (e) {
+        console.warn('Failed to remember client address:', e);
       }
       showToast('Запись обновлена ✓');
     }
@@ -2354,6 +2395,9 @@ function acSelect(type, idx) {
     // Автозаполнение телефона
     const phoneEl = document.getElementById('f-phone');
     if (phoneEl && item.client?.phone) phoneEl.value = item.client.phone;
+
+    const addressEl = document.getElementById('f-address');
+    if (addressEl && item.client?.address) addressEl.value = item.client.address;
 
     // Автозаполнение последнего авто этого клиента
     const c = item.client;
