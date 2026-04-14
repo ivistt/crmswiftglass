@@ -1178,6 +1178,14 @@ function toggleExclusiveOrderFlag(flag) {
   if (flag === 'sale' && onlySaleEl?.checked) return;
 }
 
+function syncConfiguration() {
+  const selected = Array.from(document.querySelectorAll('#f-configuration-checkboxes input[type="checkbox"]:checked'))
+    .map(el => el.value)
+    .filter(Boolean);
+  const hidden = document.getElementById('f-configuration');
+  if (hidden) hidden.value = selected.join(',');
+}
+
 function applyOrderFormDateTimeDefaults() {
   const defaultDateIds = ['f-date', 'f-new-supplier-payment-date', 'f-new-payment-date', 'f-debt-date'];
   defaultDateIds.forEach(id => {
@@ -1253,6 +1261,7 @@ function fillOrderForm(o) {
   document.querySelectorAll('#f-configuration-checkboxes input[type="checkbox"]').forEach(el => {
     el.checked = confArr.includes(el.value);
   });
+  syncConfiguration();
 }
 
 function clearOrderForm() {
@@ -1281,6 +1290,7 @@ function clearOrderForm() {
   if (tonExtEl) tonExtEl.checked = false;
   document.querySelectorAll('#service-type-checkboxes input[type="checkbox"]').forEach(el => el.checked = false);
   document.querySelectorAll('#f-configuration-checkboxes input[type="checkbox"]').forEach(el => el.checked = false);
+  syncConfiguration();
 }
 
 function setPriceFieldsLocked(locked) {
