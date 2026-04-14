@@ -557,7 +557,7 @@ function renderCashSection(balance, today) {
 
 function setCashSearchQuery(value) {
   cashSearchQuery = value || '';
-  renderProfile();
+  renderCashScreen();
 }
 
 function _filterCashLogByComment(log, query) {
@@ -735,7 +735,7 @@ function openCashEntryModal() {
             <div class="form-group">
               <label class="form-label">Комментарий</label>
               <input class="form-input" type="text" id="cash-comment-input"
-                placeholder="Напр. куплен клей, заказ SG-0042...">
+                placeholder="Напр. куплен клей, заказ SG-0042..." required>
             </div>
           </div>
         </div>
@@ -797,17 +797,23 @@ async function saveCashEntry() {
 
   const amount = rawAmt * sign;
   const btn = document.getElementById('cash-entry-save-btn');
+  if (!comment) {
+    showToast('Введите комментарий', 'error');
+    document.getElementById('cash-comment-input')?.focus();
+    return;
+  }
   if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
 
   try {
     const entry = await sbInsertCashEntry({
       worker_name: currentWorkerName,
       amount,
-      comment: comment || null,
+      comment,
     });
     workerCashLog.unshift(entry);
+    if (Array.isArray(window.allCashLog) && entry) window.allCashLog.unshift(entry);
     closeCashEntryModal();
-    renderProfile();
+    renderCashScreen();
     showToast('Записано в кассу ✓');
   } catch (e) {
     showToast('Ошибка: ' + e.message, 'error');

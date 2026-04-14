@@ -62,6 +62,17 @@ async function sbUpdateOrder(o) {
   return rows[0] ? rowToOrder(rows[0]) : o;
 }
 
+async function sbPatchOrderFields(id, fields) {
+  const res = await fetch(`${WORKER_URL}/api/orders/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+    body: JSON.stringify(fields),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const rows = await res.json();
+  return rows[0] ? rowToOrder(rows[0]) : null;
+}
+
 async function sbDeleteOrder(id) {
   const res = await fetch(`${WORKER_URL}/api/orders/${encodeURIComponent(id)}`, {
     method: 'DELETE',

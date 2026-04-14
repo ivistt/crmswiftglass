@@ -1394,7 +1394,6 @@ function validateOrderRequiredFields(data) {
     if (!data.phone) missing.push('номер телефона');
     if (!data.car) missing.push('автомобиль');
     if (!data.manager) missing.push('менеджер');
-    if (!data.onlySale && !data.mount) missing.push('монтаж');
   }
 
   if (!missing.length) return true;
@@ -1898,8 +1897,12 @@ async function toggleWorkerDone(orderId) {
   if (o.workerDone) return;
   o.workerDone = true;
   try {
-    await sbUpdateOrder(o);
-    await _upsertOrderSalaries(o);
+    const saved = await sbPatchOrderFields(o.id, { worker_done: true });
+    if (saved) {
+      const idx = orders.findIndex(x => x.id === orderId);
+      if (idx !== -1) orders[idx] = { ...o, ...saved, workerDone: true };
+    }
+    await _upsertOrderSalaries(orders.find(x => x.id === orderId) || o);
     // Автозачисление в кассу если наличка и заказ отмечен выполненным
     if (typeof addCashFromOrder === 'function') {
       await addCashFromOrder(o);
