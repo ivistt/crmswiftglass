@@ -4,6 +4,7 @@
 
 let currentWarehouseFilter = null;
 let currentDropshipperFilter = null;
+let warehousePaymentFilter = 'all';
 
 function getSupplierDebt(order) {
   return Math.max(0, (Number(order.purchase) || 0) - (Number(order.check) || 0));
@@ -74,40 +75,147 @@ function renderWarehouseDetail() {
     return;
   }
 
-  const debtOrders = list.filter(o => getSupplierDebt(o) > 0);
-  const paidOrders = list.filter(o => getSupplierDebt(o) <= 0);
-  container.innerHTML = renderWarehouseOrderGroup('Не оплаченные (с долгом)', debtOrders, true)
-    + renderWarehouseOrderGroup('Все остальные записи', paidOrders, false);
+  const filteredList = list.filter(o => {
+    if (warehousePaymentFilter === 'all') return true;
+    const hasDebt = getSupplierDebt(o) > 0;
+    return warehousePaymentFilter === 'debt' ? hasDebt : !hasDebt;
+  });
+
+  container.innerHTML = renderWarehousePaymentFilters()
+    + (filteredList.length ? renderWarehouseOrderTree(filteredList) : '<div class="empty-state">Записей по фильтру нет</div>');
   initIcons();
 }
 
-function renderWarehouseOrderGroup(title, list, isDebt) {
-  if (!list.length) return '';
+function renderWarehousePaymentFilters() {
   return `
-    <div style="font-size:15px;font-weight:800;color:${isDebt ? 'var(--red)' : 'var(--text2)'};margin:16px 0 10px;">${title}</div>
-    <div style="display:flex;flex-direction:column;gap:8px;">
-      ${list.map(o => {
-        const debt = getSupplierDebt(o);
+    <div class="orders-tabs" style="border-bottom:none;margin-bottom:14px;padding-bottom:0;">
+      <button class="orders-tab ${warehousePaymentFilter === 'all' ? 'active' : ''}" onclick="setWarehousePaymentFilter('all')">Все</button>
+      <button class="orders-tab ${warehousePaymentFilter === 'debt' ? 'active' : ''}" onclick="setWarehousePaymentFilter('debt')">С долгом</button>
+      <button class="orders-tab ${warehousePaymentFilter === 'paid' ? 'active' : ''}" onclick="setWarehousePaymentFilter('paid')">Оплаченные</button>
+    </div>
+  `;
+}
+
+function setWarehousePaymentFilter(type) {
+  warehousePaymentFilter = type || 'all';
+  renderWarehouseDetail();
+}
+
+function renderWarehouseOrderTree(list) {
+  if (!list.length) return '';
+  const tree = {};
+  list.forEach(o => {
+    const date = o.date || 'Без даты';
+    const year = date === 'Без даты' ? 'Без даты' : date.slice(0, 4);
+    const month = date === 'Без даты' ? 'Без даты' : date.slice(0, 7);
+    if (!tree[year]) tree[year] = {};
+    if (!tree[year][month]) tree[year][month] = {};
+    if (!tree[year][month][date]) tree[year][month][date] = [];
+    tree[year][month][date].push(o);
+  });
+
+  const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+  const sumDebt = rows => rows.reduce((sum, o) => sum + getSupplierDebt(o), 0);
+  const years = Object.keys(tree).sort((a, b) => b.localeCompare(a));
+
+  return years.map(year => {
+    const months = Object.keys(tree[year]).sort((a, b) => b.localeCompare(a));
+    const yearOrders = months.flatMap(month => Object.values(tree[year][month]).flat());
+    const yearDebt = sumDebt(yearOrders);
+    const yearKey = 'warehouse-year-' + year.replace(/[^a-zA-Z0-9а-яА-Я_-]/g, '-');
+
+    const monthsHtml = months.map(month => {
+      const days = Object.keys(tree[year][month]).sort((a, b) => b.localeCompare(a));
+      const monthOrders = Object.values(tree[year][month]).flat();
+      const monthDebt = sumDebt(monthOrders);
+      const monthKey = 'warehouse-month-' + month.replace(/[^a-zA-Z0-9а-яА-Я_-]/g, '-');
+      const monthTitle = month === 'Без даты' ? 'Без даты' : monthNames[Number(month.slice(5, 7)) - 1];
+
+      const daysHtml = days.map(day => {
+        const rows = tree[year][month][day].sort((a, b) => (b.time || '').localeCompare(a.time || ''));
+        const dayDebt = sumDebt(rows);
+        const dayKey = 'warehouse-day-' + day.replace(/[^a-zA-Z0-9а-яА-Я_-]/g, '-');
+        const ordersHtml = rows.map(o => renderWarehouseOrderCard(o)).join('');
+
         return `
-          <div class="order-card" onclick="openOrderDetail('${o.id}')">
-            <div class="order-card-top">
-              <div class="order-card-left">
-                <span class="order-id">${o.id}</span>
-                <span class="order-name">${o.car || '—'}</span>
+          <div style="border-bottom:1px solid var(--border);">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 12px;cursor:pointer;" onclick="toggleProfileMonth('${dayKey}')">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <i data-lucide="chevron-right" style="width:13px;height:13px;color:var(--text3);transition:transform 0.2s;" id="pchevron-${dayKey}"></i>
+                <div>
+                  <div style="font-size:13px;color:var(--text2);font-weight:700;">${day === 'Без даты' ? 'Без даты' : formatDate(day)}</div>
+                  <div style="font-size:11px;color:var(--text3);">Записей: ${rows.length}</div>
+                </div>
               </div>
-              <div style="font-size:13px;font-weight:800;color:${debt > 0 ? 'var(--red)' : 'var(--accent)'};">
-                ${debt > 0 ? 'Долг: ' + debt.toLocaleString('ru') + ' ₴' : 'Оплачено'}
+              <div style="font-size:13px;font-weight:800;color:${dayDebt > 0 ? 'var(--red)' : 'var(--accent)'};white-space:nowrap;">
+                ${dayDebt > 0 ? dayDebt.toLocaleString('ru') + ' ₴' : 'Без долга'}
               </div>
             </div>
-            <div class="order-card-meta">
-              <span class="order-meta-item">${icon('calendar')} ${formatDate(o.date)}</span>
-              <span class="order-meta-item">${icon('clock')} ${o.time || '—'}</span>
-              <span class="order-meta-item">${icon('user')} ${o.client || '—'}</span>
-              ${o.warehouseCode ? `<span class="order-meta-item mono">${icon('hash')} ${o.warehouseCode}</span>` : ''}
+            <div id="profile-month-body-${dayKey}" style="display:none;padding:0 12px 12px 34px;">
+              <div style="display:flex;flex-direction:column;gap:8px;">${ordersHtml}</div>
             </div>
           </div>
         `;
-      }).join('')}
+      }).join('');
+
+      return `
+        <div style="border-bottom:1px solid var(--border);">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 12px;cursor:pointer;" onclick="toggleProfileMonth('${monthKey}')">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <i data-lucide="chevron-right" style="width:14px;height:14px;color:var(--text3);transition:transform 0.2s;" id="pchevron-${monthKey}"></i>
+              <div>
+                <div style="font-size:14px;font-weight:800;color:var(--text2);">${monthTitle}</div>
+                <div style="font-size:11px;color:var(--text3);">${days.length} дней · ${monthOrders.length} записей</div>
+              </div>
+            </div>
+            <div style="font-size:14px;font-weight:800;color:${monthDebt > 0 ? 'var(--red)' : 'var(--accent)'};white-space:nowrap;">
+              ${monthDebt > 0 ? monthDebt.toLocaleString('ru') + ' ₴' : 'Без долга'}
+            </div>
+          </div>
+          <div id="profile-month-body-${monthKey}" style="display:none;padding-left:12px;background:var(--surface2);border-radius:0 0 8px 8px;">${daysHtml}</div>
+        </div>
+      `;
+    }).join('');
+
+    return `
+      <div class="fin-month-card" style="margin-bottom:8px;">
+        <div class="fin-month-header" onclick="toggleProfileMonth('${yearKey}')">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <i data-lucide="chevron-right" style="width:16px;height:16px;color:var(--text3);transition:transform 0.2s;" id="pchevron-${yearKey}"></i>
+            <div>
+              <div class="fin-month-name">${year === 'Без даты' ? 'Без даты' : year + ' год'}</div>
+              <div class="fin-month-sub">${months.length} мес. · ${yearOrders.length} записей</div>
+            </div>
+          </div>
+          <div style="font-size:18px;font-weight:800;color:${yearDebt > 0 ? 'var(--red)' : 'var(--accent)'};">
+            ${yearDebt > 0 ? yearDebt.toLocaleString('ru') + ' ₴' : 'Без долга'}
+          </div>
+        </div>
+        <div id="profile-month-body-${yearKey}" style="display:none;padding:0 0 8px;">${monthsHtml}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderWarehouseOrderCard(o) {
+  const debt = getSupplierDebt(o);
+  return `
+    <div class="order-card" onclick="openOrderDetail('${o.id}')">
+      <div class="order-card-top">
+        <div class="order-card-left">
+          <span class="order-id">${o.id}</span>
+          <span class="order-name">${o.car || '—'}</span>
+        </div>
+        <div style="font-size:13px;font-weight:800;color:${debt > 0 ? 'var(--red)' : 'var(--accent)'};">
+          ${debt > 0 ? 'Долг: ' + debt.toLocaleString('ru') + ' ₴' : 'Оплачено'}
+        </div>
+      </div>
+      <div class="order-card-meta">
+        <span class="order-meta-item">${icon('clock')} ${o.time || '—'}</span>
+        <span class="order-meta-item">${icon('user')} ${o.client || '—'}</span>
+        ${o.warehouseCode ? `<span class="order-meta-item mono">${icon('hash')} ${o.warehouseCode}</span>` : ''}
+        ${Number(o.purchase) > 0 ? `<span class="order-meta-item">${icon('package')} ${Number(o.purchase).toLocaleString('ru')} ₴</span>` : ''}
+      </div>
     </div>
   `;
 }
