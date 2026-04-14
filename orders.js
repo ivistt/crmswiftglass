@@ -2089,14 +2089,14 @@ function recalcFullMargins() {
 
   const payoutDropshipper = document.getElementById('f-dropshipper')?.value ? marginGlass : 0;
 
-  // Менеджер — только Саша Менеджер через поле f-manager
+  // Менеджер — только Sasha Manager через поле f-manager
   const managerValue = document.getElementById('f-manager')?.value || '';
-  const payoutManagerGlass = (managerValue === 'Саша Менеджер' && marginGlass > 0)
+  const payoutManagerGlass = (managerValue === 'Sasha Manager' && marginGlass > 0)
     ? Math.round(marginGlass * 0.10) : 0;
 
-  // Старший responsible — Костя или Саша Смоков: 10% от маржи стекла
+  // Старший responsible — Kostya или Sasha Smokov: 10% от маржи стекла
   const responsibleName = document.getElementById('f-responsible')?.value || '';
-  const payoutRespGlass = (['Костя', 'Саша Смоков'].includes(responsibleName) && incomeGlass > 0)
+  const payoutRespGlass = (['Kostya', 'Sasha Smokov'].includes(responsibleName) && incomeGlass > 0)
     ? Math.round(marginGlass * 0.10) : 0;
 
   // Рома: 20% от tatu (всегда, если tatu > 0)

@@ -611,22 +611,17 @@ async function sbUpdateWorkerFormula(workerId, formula) {
 // ── РАСЧЁТ ЗАРПЛАТ ───────────────────────────────────────────
 //
 const SALARY_CONFIG = {
-  'Артем':      { selectedServices: true, dailyBaseIfCompleted: 500 },
-  'Артём':      { selectedServices: true, dailyBaseIfCompleted: 500 },
-  'Рома':       { selectedServices: true, dailyBaseIfCompleted: 500, tatuBonusPct: 0.20, globalTatuBonus: true },
-  'Витя':       { selectedServices: true },
-  'Женя':       { selectedServices: true },
-  'Саша Дога':  { selectedServices: true },
-  'Саша Смоков':{ selectedServices: true, serviceAdjustments: { mount: 100, cut: 50, glue: 50 }, glassMarginPct: 0.10, moldingPct: 0.10, dailyBaseIfCompleted: 800 },
-  'Серёжа':     { selectedServices: true, serviceAdjustments: { mount: -100, cut: -50, glue: -50 } },
-  'Сережа':     { selectedServices: true, serviceAdjustments: { mount: -100, cut: -50, glue: -50 } },
-  'Костя':      { glassMarginPct: 0.10, moldingPct: 0.10, dailyBaseIfCompleted: 800 },
-  'Саша Менеджер': { glassMarginPct: 0.10, attendanceBase: 800, managerOnly: true },
+  'Artyom':     { selectedServices: true, dailyBaseIfCompleted: 500 },
+  'Roma':       { selectedServices: true, dailyBaseIfCompleted: 500, tatuBonusPct: 0.20, globalTatuBonus: true },
+  'Vitya':      { selectedServices: true },
+  'Zhenya':     { selectedServices: true },
+  'Sasha Doga': { selectedServices: true },
+  'Sasha Smokov': { selectedServices: true, serviceAdjustments: { mount: 100, cut: 50, glue: 50 }, glassMarginPct: 0.10, moldingPct: 0.10, dailyBaseIfCompleted: 800 },
+  'Seryozha':   { selectedServices: true, serviceAdjustments: { mount: -100, cut: -50, glue: -50 } },
+  'Kostya':     { glassMarginPct: 0.10, moldingPct: 0.10, dailyBaseIfCompleted: 800 },
   'Sasha Manager': { glassMarginPct: 0.10, attendanceBase: 800, managerOnly: true },
-  'Настя':      { attendanceBase: 2000 },
   'Nastya':      { attendanceBase: 2000 },
-  'Лёша':       { selectedServices: true, toningBonusPct: 0.20, globalToningBonus: true },
-  'Леша':       { selectedServices: true, toningBonusPct: 0.20, globalToningBonus: true },
+  'Lyosha':     { selectedServices: true, toningBonusPct: 0.20, globalToningBonus: true },
 
   // ── Дефолты по роли ──────────────────────────────────────
   _senior:  { selectedServices: true },
@@ -751,13 +746,13 @@ function _calcToningBonus(workerName, order) {
 
 // Обратная совместимость — старое имя функции
 function _calcRomaTatuBonus(order) {
-  return _calcTatuBonus('Рома', order);
+  return _calcTatuBonus('Roma', order);
 }
 
 // ЗП менеджера: ставка + % от маржи стекла
 // Начисляется только если он указан в поле order.manager
 function _calcManagerSalary(order) {
-  const rule = getSalaryRule(order.manager || 'Саша Менеджер');
+  const rule = getSalaryRule(order.manager || 'Sasha Manager');
   const glassMargin = _orderGlassMargin(order);
   return Math.round(glassMargin * (rule.glassMarginPct || 0));
 }
