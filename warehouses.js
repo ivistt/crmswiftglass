@@ -1,8 +1,13 @@
 // ============================================================
-// WAREHOUSES.JS — Склады и долги перед поставщиками
+// WAREHOUSES.JS — склады и дропшипперы
 // ============================================================
 
 let currentWarehouseFilter = null;
+let currentDropshipperFilter = null;
+
+function getSupplierDebt(order) {
+  return Math.max(0, (Number(order.purchase) || 0) - (Number(order.check) || 0));
+}
 
 function openWarehousesScreen() {
   currentWarehouseFilter = null;
@@ -13,46 +18,34 @@ function openWarehousesScreen() {
 function renderWarehousesScreen() {
   const container = document.getElementById('warehouses-list');
   if (!container) return;
-  // Ищем все неоплаченные/частично оплаченные заказы
-  const debtOrders = orders.filter(o => 
-    !o.isCancelled &&
-    (o.supplierStatus === 'Не оплачено' || o.supplierStatus === 'Частично')
-  );
 
-  if (!debtOrders.length) {
-    container.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-state-icon">${icon('check')}</div>
-        <h3>Все поставщики оплачены</h3>
-      </div>
-    `;
+  const warehouseOrders = orders.filter(o => !o.isCancelled);
+  if (!warehouseOrders.length) {
+    container.innerHTML = `<div class="empty-state"><div class="empty-state-icon">${icon('package')}</div><h3>Записей нет</h3></div>`;
     return;
   }
 
-  // Группируем по складам
   const map = {};
-  for (const o of debtOrders) {
+  for (const o of warehouseOrders) {
     const w = o.warehouse || 'Без склада';
     if (!map[w]) map[w] = [];
     map[w].push(o);
   }
 
-  const keys = Object.keys(map).sort();
-  container.innerHTML = keys.map(w => {
+  container.innerHTML = Object.keys(map).sort().map(w => {
     const list = map[w];
-    const totalDebt = list.reduce((sum, o) => {
-      const debt = (Number(o.purchase) || 0) - (Number(o.check) || 0);
-      return sum + (debt > 0 ? debt : 0);
-    }, 0);
-
+    const debtList = list.filter(o => getSupplierDebt(o) > 0);
+    const totalDebt = debtList.reduce((sum, o) => sum + getSupplierDebt(o), 0);
     return `
-      <div class="home-card" style="display:flex;flex-direction:column;min-height:110px;" onclick="openWarehouseDetail('${escapeAttr(w)}')">
+      <div class="home-card" style="display:flex;flex-direction:column;min-height:120px;" onclick="openWarehouseDetail('${escapeAttr(w)}')">
         <div style="font-size:12px;color:var(--text3);font-weight:600;letter-spacing:0.04em;">
-          Заказов: ${list.length}
+          Записей: ${list.length} · С долгом: ${debtList.length}
         </div>
         <div style="margin-top:auto;padding-top:12px;">
           <div style="font-size:20px;font-weight:800;line-height:1.2;margin-bottom:6px;">${escapeHtml(w)}</div>
-          <div style="font-size:18px;color:var(--red);font-weight:700;">Долг: ${totalDebt.toLocaleString('ru')} ₴</div>
+          <div style="font-size:18px;color:${totalDebt > 0 ? 'var(--red)' : 'var(--accent)'};font-weight:700;">
+            ${totalDebt > 0 ? 'Долг: ' + totalDebt.toLocaleString('ru') + ' ₴' : 'Без долга'}
+          </div>
         </div>
       </div>
     `;
@@ -72,74 +65,135 @@ function renderWarehouseDetail() {
   const container = document.getElementById('warehouse-detail-body');
   if (!container) return;
   const w = currentWarehouseFilter;
-  
-  const debtOrders = orders.filter(o => 
-    !o.isCancelled &&
-    (o.warehouse || 'Без склада') === w &&
-    (o.supplierStatus === 'Не оплачено' || o.supplierStatus === 'Частично')
-  );
+  const list = orders
+    .filter(o => !o.isCancelled && (o.warehouse || 'Без склада') === w)
+    .sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.time || '').localeCompare(a.time || ''));
 
-  if (!debtOrders.length) {
-    container.innerHTML = '<div class="empty-state">Нет неоплаченных заказов</div>';
+  if (!list.length) {
+    container.innerHTML = '<div class="empty-state">Записей нет</div>';
     return;
   }
 
-  // Группировка Год -> Месяц -> День
-  const tree = {};
-  for (const o of debtOrders) {
-    if (!o.date) continue; // Формат "YYYY-MM-DD"
-    const year = o.date.slice(0, 4);
-    const month = o.date.slice(5, 7);
-    const day = o.date; // full date
-    
-    if (!tree[year]) tree[year] = {};
-    if (!tree[year][month]) tree[year][month] = {};
-    if (!tree[year][month][day]) tree[year][month][day] = [];
-    
-    tree[year][month][day].push(o);
-  }
+  const debtOrders = list.filter(o => getSupplierDebt(o) > 0);
+  const paidOrders = list.filter(o => getSupplierDebt(o) <= 0);
+  container.innerHTML = renderWarehouseOrderGroup('Не оплаченные (с долгом)', debtOrders, true)
+    + renderWarehouseOrderGroup('Все остальные записи', paidOrders, false);
+  initIcons();
+}
 
-  const MONTH_NAMES = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
-  
-  let html = '';
-  const years = Object.keys(tree).sort((a,b) => b.localeCompare(a)); // по убыванию
-  
-  for (const year of years) {
-    html += `<div style="font-size:18px;font-weight:800;color:var(--text);margin:24px 0 12px;">${year} год</div>`;
-    const months = Object.keys(tree[year]).sort((a,b) => b.localeCompare(a));
-    
-    for (const month of months) {
-      html += `<div style="font-size:15px;font-weight:700;color:var(--text2);margin:16px 0 8px;padding-left:8px;border-left:2px solid var(--border);">${MONTH_NAMES[parseInt(month)-1]}</div>`;
-      const days = Object.keys(tree[year][month]).sort((a,b) => b.localeCompare(a));
-      
-      for (const day of days) {
-        html += `<div style="font-size:13px;font-weight:600;color:var(--text3);margin:12px 0 8px 16px;">${formatDate(day)}</div>`;
-        const dayOrders = tree[year][month][day].sort((a,b) => (b.time || '').localeCompare(a.time || ''));
-        
-        for (const o of dayOrders) {
-          const debt = (Number(o.purchase) || 0) - (Number(o.check) || 0);
-          const badgeColor = o.supplierStatus === 'Частично' ? 'var(--yellow)' : 'var(--red)';
-          html += `
-            <div class="order-card" style="margin-left:16px; margin-bottom:8px;" onclick="openOrderDetail('${o.id}')">
-              <div class="order-card-top">
-                <div class="order-card-left">
-                  <span class="order-id">${o.id}</span>
-                  <span class="order-name">${o.car || '—'}</span>
-                </div>
-                <div style="font-size:11px;font-weight:700;padding:2px 6px;border-radius:4px;border:1px solid ${badgeColor};color:${badgeColor};">${o.supplierStatus}</div>
+function renderWarehouseOrderGroup(title, list, isDebt) {
+  if (!list.length) return '';
+  return `
+    <div style="font-size:15px;font-weight:800;color:${isDebt ? 'var(--red)' : 'var(--text2)'};margin:16px 0 10px;">${title}</div>
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      ${list.map(o => {
+        const debt = getSupplierDebt(o);
+        return `
+          <div class="order-card" onclick="openOrderDetail('${o.id}')">
+            <div class="order-card-top">
+              <div class="order-card-left">
+                <span class="order-id">${o.id}</span>
+                <span class="order-name">${o.car || '—'}</span>
               </div>
-              <div class="order-card-meta" style="flex-wrap:nowrap;justify-content:space-between;align-items:center;">
-                <span class="order-meta-item" style="color:var(--text3);">⏰ ${o.time || '—'}</span>
-                ${o.warehouseCode ? `<span class="order-meta-item" style="color:var(--text2);font-family:'JetBrains Mono',monospace;font-size:12px;">${icon('hash')} ${o.warehouseCode}</span>` : ''}
-                <span class="order-meta-item" style="font-weight:800;color:var(--red);font-size:14px;">Долг: ${debt.toLocaleString('ru')} ₴</span>
+              <div style="font-size:13px;font-weight:800;color:${debt > 0 ? 'var(--red)' : 'var(--accent)'};">
+                ${debt > 0 ? 'Долг: ' + debt.toLocaleString('ru') + ' ₴' : 'Оплачено'}
               </div>
             </div>
-          `;
-        }
-      }
-    }
-  }
+            <div class="order-card-meta">
+              <span class="order-meta-item">${icon('calendar')} ${formatDate(o.date)}</span>
+              <span class="order-meta-item">${icon('clock')} ${o.time || '—'}</span>
+              <span class="order-meta-item">${icon('user')} ${o.client || '—'}</span>
+              ${o.warehouseCode ? `<span class="order-meta-item mono">${icon('hash')} ${o.warehouseCode}</span>` : ''}
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+}
 
+function openDropshippersScreen() {
+  currentDropshipperFilter = null;
+  renderDropshippersScreen();
+  showScreen('dropshippers');
+}
+
+function renderDropshippersScreen() {
+  const container = document.getElementById('dropshippers-list');
+  if (!container) return;
+  const list = orders.filter(o => !o.isCancelled && o.dropshipper && Number(o.dropshipperPayout) > 0);
+  if (!list.length) {
+    container.innerHTML = `<div class="empty-state"><div class="empty-state-icon">${icon('handshake')}</div><h3>Выплат нет</h3></div>`;
+    return;
+  }
+  const map = {};
+  list.forEach(o => {
+    if (!map[o.dropshipper]) map[o.dropshipper] = [];
+    map[o.dropshipper].push(o);
+  });
+  container.innerHTML = Object.keys(map).sort().map(name => {
+    const rows = map[name];
+    const total = rows.reduce((sum, o) => sum + (Number(o.dropshipperPayout) || 0), 0);
+    return `
+      <div class="home-card" onclick="openDropshipperDetail('${escapeAttr(name)}')">
+        <div style="font-size:12px;color:var(--text3);font-weight:600;">Записей: ${rows.length}</div>
+        <div style="margin-top:auto;padding-top:12px;">
+          <div style="font-size:20px;font-weight:800;margin-bottom:6px;">${escapeHtml(name)}</div>
+          <div style="font-size:20px;font-weight:800;color:var(--yellow);">${total.toLocaleString('ru')} ₴</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function openDropshipperDetail(name) {
+  currentDropshipperFilter = name;
+  const titleEl = document.getElementById('dropshipper-detail-title');
+  if (titleEl) titleEl.textContent = `Дропшиппер: ${name}`;
+  renderDropshipperDetail();
+  showScreen('dropshipper-detail');
+}
+
+function renderDropshipperDetail() {
+  const container = document.getElementById('dropshipper-detail-body');
+  if (!container) return;
+  const list = orders.filter(o => !o.isCancelled && o.dropshipper === currentDropshipperFilter && Number(o.dropshipperPayout) > 0);
+  const tree = {};
+  list.forEach(o => {
+    if (!o.date) return;
+    const year = o.date.slice(0, 4);
+    const month = o.date.slice(5, 7);
+    if (!tree[year]) tree[year] = {};
+    if (!tree[year][month]) tree[year][month] = {};
+    if (!tree[year][month][o.date]) tree[year][month][o.date] = [];
+    tree[year][month][o.date].push(o);
+  });
+  const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+  let html = '';
+  Object.keys(tree).sort((a, b) => b.localeCompare(a)).forEach(year => {
+    html += `<div style="font-size:18px;font-weight:800;margin:22px 0 10px;">${year}</div>`;
+    Object.keys(tree[year]).sort((a, b) => b.localeCompare(a)).forEach(month => {
+      html += `<div style="font-size:15px;font-weight:800;color:var(--text2);margin:14px 0 8px;">${monthNames[Number(month) - 1]}</div>`;
+      Object.keys(tree[year][month]).sort((a, b) => b.localeCompare(a)).forEach(day => {
+        const rows = tree[year][month][day];
+        const total = rows.reduce((sum, o) => sum + (Number(o.dropshipperPayout) || 0), 0);
+        html += `<div style="font-size:13px;font-weight:700;color:var(--text3);margin:12px 0 8px;">${formatDate(day)} · ${total.toLocaleString('ru')} ₴</div>`;
+        html += rows.map(o => `
+          <div class="order-card" onclick="openOrderDetail('${o.id}')">
+            <div class="order-card-top">
+              <div class="order-card-left"><span class="order-id">${o.id}</span><span class="order-name">${o.car || '—'}</span></div>
+              <div style="font-size:15px;font-weight:900;color:var(--yellow);">${Number(o.dropshipperPayout).toLocaleString('ru')} ₴</div>
+            </div>
+            <div class="order-card-meta">
+              <span class="order-meta-item">${icon('clock')} ${o.time || '—'}</span>
+              <span class="order-meta-item">${icon('user')} ${o.client || '—'}</span>
+              <span class="order-meta-item">${icon('phone')} ${o.phone || '—'}</span>
+            </div>
+          </div>
+        `).join('');
+      });
+    });
+  });
   container.innerHTML = html;
   initIcons();
 }

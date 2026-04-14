@@ -279,6 +279,9 @@
             <option>Не оплачено</option>
             <option>Частично</option>
           </select>
+          <select class="filter-select" id="filter-worker" onchange="refreshOrdersView()">
+            <option value="">Все сотрудники</option>
+          </select>
           <input class="filter-input" type="date" id="filter-date"
             oninput="refreshOrdersView()" style="width:100%;">
         </div>
@@ -499,7 +502,7 @@
       <div class="page-header">
         <div class="page-title" style="display:flex;align-items:center;gap:10px;">
           <span class="ico page-title-icon"><i data-lucide="package" style="width:22px;height:22px;"></i></span>
-          Склады (Долги)
+          Склады
         </div>
       </div>
       <div class="home-cards" id="warehouses-list"></div>
@@ -517,6 +520,36 @@
         <div class="page-title" id="warehouse-detail-title">Склад</div>
       </div>
       <div id="warehouse-detail-body"></div>
+    </div>
+
+    <!-- DROPSHIPPERS -->
+    <div class="screen" id="screen-dropshippers">
+      <div class="detail-topbar">
+        <button class="back-btn" onclick="goHome()" style="display:flex;align-items:center;gap:6px;">
+          <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
+          <span data-back-home-label>Назад</span>
+        </button>
+      </div>
+      <div class="page-header">
+        <div class="page-title" style="display:flex;align-items:center;gap:10px;">
+          <span class="ico page-title-icon"><i data-lucide="handshake" style="width:22px;height:22px;"></i></span>
+          Дропшипперы
+        </div>
+      </div>
+      <div class="home-cards" id="dropshippers-list"></div>
+    </div>
+
+    <div class="screen" id="screen-dropshipper-detail">
+      <div class="detail-topbar">
+        <button class="back-btn" onclick="openDropshippersScreen()" style="display:flex;align-items:center;gap:6px;">
+          <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
+          Назад
+        </button>
+      </div>
+      <div class="page-header" style="margin-top:-10px;">
+        <div class="page-title" id="dropshipper-detail-title">Дропшиппер</div>
+      </div>
+      <div id="dropshipper-detail-body"></div>
     </div>
 
   </div>
@@ -601,12 +634,6 @@
           <div class="form-row form-row-flags">
             <div class="form-group">
               <label class="checkbox order-flag-checkbox">
-                <input type="checkbox" id="f-only-cut" onchange="toggleExclusiveOrderFlag('cut')">
-                <span>✂️ Только срезка (ЗП ÷ 2)</span>
-              </label>
-            </div>
-            <div class="form-group">
-              <label class="checkbox order-flag-checkbox">
                 <input type="checkbox" id="f-only-sale" onchange="toggleExclusiveOrderFlag('sale')">
                 <span>🧾 Только продажа</span>
               </label>
@@ -640,11 +667,7 @@
           </div>
           <div class="form-group">
             <label class="form-label">📋 Ответственный менеджер</label>
-            <select class="form-select" id="f-manager">
-              <option value="">— выбрать —</option>
-              <option value="Макс">Макс</option>
-              <option value="Sasha Manager">Саша Менеджер</option>
-            </select>
+            <select class="form-select" id="f-manager"></select>
           </div>
           <div class="form-group">
             <label class="form-label">👤 Клиент</label>
@@ -785,53 +808,6 @@
           </div>
         </div>
       </div>
-
-      <!-- ── СЕКЦИЯ 4: ДОРАБОТКА (свёрнута по умолчанию) ── -->
-      <div class="form-section form-section--collapsible" id="rework-section" data-order-modal-panel="work">
-        <div class="form-section-title form-section-title--toggle" onclick="toggleReworkSection()">
-          <span style="display:flex;align-items:center;gap:6px;">
-            <i data-lucide="tool" style="width:13px;height:13px;"></i>
-            Доработка
-          </span>
-          <i data-lucide="chevron-down" id="rework-chevron" style="width:14px;height:14px;transition:transform 0.2s; transform: rotate(180deg);"></i>
-        </div>
-        <div class="form-section-body" id="rework-section-body" style="display:none;">
-          <div class="form-grid col-1" style="margin-top:14px;">
-            <div class="form-group">
-              <label class="form-label">Ответственный</label>
-              <select class="form-select" id="f-rework-responsible"></select>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Помощник</label>
-              <select class="form-select" id="f-rework-assistant"></select>
-            </div>
-          </div>
-          <div class="form-grid" style="margin-top:14px;">
-            <div class="form-group">
-              <label class="form-label">🔩 Монтаж</label>
-              <input class="form-input" type="number" id="f-rework-mount" placeholder="0">
-            </div>
-            <div class="form-group">
-              <label class="form-label">*️⃣ Молдинг (Резинка)</label>
-              <input class="form-input" type="number" id="f-rework-molding" placeholder="0">
-            </div>
-            <div class="form-group">
-              <label class="form-label">⚙️ Доп. работы</label>
-              <input class="form-input" type="number" id="f-rework-extra" placeholder="0">
-            </div>
-            <div class="form-group">
-              <label class="form-label">*️⃣ Тату ⚫</label>
-              <input class="form-input" type="number" id="f-rework-tatu" placeholder="0">
-            </div>
-            <div class="form-group">
-              <label class="form-label">Тонировка</label>
-              <input class="form-input" type="number" id="f-rework-toning" placeholder="0">
-            </div>
-          </div>
-        </div>
-      </div>
-
-
 
       <!-- ── СЕКЦИЯ 5: ФИНАНСЫ (свёрнута по умолчанию) ── -->
       <div class="form-section form-section--collapsible" id="finance-section" data-order-modal-panel="finance">

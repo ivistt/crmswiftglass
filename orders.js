@@ -257,13 +257,14 @@ function renderOrderCard(o) {
         </div>
       </div>
       <div class="order-card-meta">
+        <span class="order-meta-item">${icon('user')} ${o.client || '—'}</span>
         <span class="order-meta-item">${icon('phone')} ${o.phone || '—'}</span>
         <span class="order-meta-item">${icon('calendar')} ${formatDate(o.date)}</span>
         <span class="order-meta-item">${icon('hard-hat')} ${getWorkerDisplayPair(o.responsible, o.assistant)}</span>
         ${o.manager ? `<span class="order-meta-item">${icon('user')} ${getWorkerDisplayName(o.manager)}</span>` : ''}
         ${o.warehouse ? `<span class="order-meta-item">${icon('warehouse')} ${o.warehouse}</span>` : ''}
         ${(Number(o.check) > 0 || Number(o.purchase) > 0) ? `<span class="order-meta-item" style="font-weight:700;"><span style="color:var(--yellow);">${(Number(o.check) || 0).toLocaleString('ru')}</span><span style="color:var(--text3);font-weight:600;">/</span><span style="color:var(--accent);">${(Number(o.purchase) || 0).toLocaleString('ru')}</span></span>` : ''}
-        <span class="order-meta-item">${o.client || '—'}</span>
+        
       </div>
       ${canQuickConfirm ? `
         <div onclick="event.stopPropagation()" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:10px;">
@@ -375,9 +376,11 @@ function _renderOrdersListWithLoadMore(container, list, signature) {
 
 // ---------- РЕНДЕР СПИСКА ----------
 function renderOrders() {
+  populateOrderWorkerFilter();
   const search = (document.getElementById('filter-search')?.value || '').toLowerCase();
   const dateF  = document.getElementById('filter-date')?.value || '';
   const statF  = document.getElementById('filter-status')?.value || '';
+  const workerF = document.getElementById('filter-worker')?.value || '';
   const sort   = document.getElementById('filter-sort')?.value || 'desc';
 
   let list = [...orders];
@@ -406,6 +409,7 @@ function renderOrders() {
   );
   if (dateF) list = list.filter(o => o.date === dateF);
   if (statF) list = list.filter(o => getEffectivePaymentStatus(o) === statF);
+  if (workerF) list = list.filter(o => o.responsible === workerF || o.assistant === workerF || o.manager === workerF);
 
   list.sort((a, b) => {
     const ad = a.date || '';
@@ -414,7 +418,7 @@ function renderOrders() {
   });
 
   const container = document.getElementById('orders-list');
-  const signature = _getOrdersListSignature('all', { search, dateF, statF, sort });
+  const signature = _getOrdersListSignature('all', { search, dateF, statF, sort, workerF });
 
   if (!list.length) {
     lastOrdersListSignature = signature;
@@ -437,6 +441,23 @@ function renderOrders() {
   _renderOrdersListWithLoadMore(container, list, signature);
 }
 
+function renderOrderPaymentsForDetail(payments, emptyLabel) {
+  if (!payments || !payments.length) {
+    return '<div style="font-size:12px;color:var(--text3);margin-top:8px;">' + emptyLabel + '</div>';
+  }
+  return '<div style="display:flex;flex-direction:column;gap:6px;margin-top:8px;">'
+    + payments.map(payment => `
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;">
+        <div>
+          <div style="font-size:12px;font-weight:700;color:var(--text2);">${formatDate(payment.date)}</div>
+          ${payment.method ? `<div style="font-size:11px;color:var(--text3);margin-top:2px;">${escapeHtml(normalizePaymentMethod(payment.method))}</div>` : ''}
+        </div>
+        <div style="font-size:13px;font-weight:800;color:var(--accent);white-space:nowrap;">${(Number(payment.amount) || 0).toLocaleString('ru')} ₴</div>
+      </div>
+    `).join('')
+    + '</div>';
+}
+
 // ---------- ДЕТАЛЬНЫЙ ЭКРАН ЗАКАЗА ----------
 function openOrderDetail(id) {
   const o = orders.find(x => x.id === id);
@@ -445,9 +466,16 @@ function openOrderDetail(id) {
 
   const el = document.getElementById('order-detail-content');
   const fullOrderTotal = getOrderClientTotal(o);
+  const clientPaid = Number(o.debt) || 0;
+  const clientLeft = Math.max(0, fullOrderTotal - clientPaid);
+  const supplierPaid = Number(o.check) || 0;
+  const supplierLeft = Math.max(0, (Number(o.purchase) || 0) - supplierPaid);
+  const clientPaymentsHtml = renderOrderPaymentsForDetail(o.clientPayments || [], 'Оплат клиента нет');
+  const supplierPaymentsHtml = renderOrderPaymentsForDetail(o.supplierPayments || [], 'Оплат поставщику нет');
 
   const canEdit   = currentRole === 'owner' || currentRole === 'manager';
   const canDelete = canDeleteOrder();
+  const isSpecialistDetail = currentRole !== 'owner' && currentRole !== 'manager';
 
   // Кнопки в топ-баре рядом с "назад"
   const actionsEl = document.getElementById('order-detail-actions');
@@ -475,7 +503,54 @@ function openOrderDetail(id) {
     </div>
 
     <div class="detail-section">
-      <div class="detail-section-title">${icon('banknote')} Ключевые суммы</div>
+      <div class="detail-section-title">${icon('user')} Клиент</div>
+      <div class="detail-grid">
+        ${field(`${icon('calendar')} Дата`, formatDate(o.date))}
+        ${field(`${icon('clock')} Время`, o.time)}
+        ${field(`${icon('hard-hat')} Ответственный`, getWorkerDisplayName(o.responsible))}
+        ${field(`${icon('users')} Помощник`, getWorkerDisplayName(o.assistant))}
+        ${field(`${icon('clipboard-list')} Менеджер`, getWorkerDisplayName(o.manager))}
+        ${field(`${icon('user')} Клиент`, o.client)}
+        ${field(`${icon('phone')} Телефон`, phoneCallLink(o.phone), 'mono detail-phone-value')}
+        ${field(`${icon('map-pin')} Место`, o.address)}
+        ${isSpecialistDetail ? '' : field(`${icon('users')} Создал`, getWorkerDisplayName(o.author))}
+      </div>
+      ${o.notes ? `<div style="margin-top:14px;padding:12px;background:var(--surface2);border-radius:8px;font-size:13px;color:var(--text2);">📝 ${o.notes}</div>` : ''}
+    </div>
+
+    <div class="detail-section">
+      <div class="detail-section-title">${icon('car')} Авто и логистика</div>
+      <div class="detail-grid">
+        ${field(`${icon('car')} Авто`, o.car)}
+        ${field('VIN', o.vin, 'mono')}
+        ${field(`${icon('hash')} Єврокод`, o.code, 'mono')}
+        ${field(`${icon('warehouse')} Склад`, o.warehouse)}
+        ${field(`${icon('hash')} Код склада`, o.warehouseCode, 'mono')}
+        ${field(`${icon('list-checks')} Комплектация`, o.configuration)}
+        ${o.newPost ? field(`${icon('mail')} Новая почта`, 'Да') : ''}
+      </div>
+    </div>
+
+    <div class="detail-section">
+      <div class="detail-section-title">${icon('wrench')} Работы</div>
+      <div class="detail-grid">
+        ${field(`${icon('tool')} Вид послуги`, o.serviceType)}
+        ${field(`${icon('wrench')} Стоимость работ`, o.total ? o.total + ' ₴' : '')}
+        ${field(`${icon('wrench')} Монтаж`, o.mount ? o.mount + ' ₴' : '')}
+        ${field(`${icon('receipt')} Только продажа`, o.onlySale ? 'Да' : '')}
+        ${field(`${icon('hash')} Молдинг`, o.molding)}
+        ${field(`${icon('wrench')} Доп. работы`, o.extraWork)}
+        ${field(`${icon('hash')} Доп услуги`, o.tatu)}
+        ${field('Тонировка', o.toning)}
+        ${o.toningExternal ? field('Тонировка внешняя', 'Да') : ''}
+        ${field(`${icon('truck')} Доставка`, o.delivery ? o.delivery + ' ₴' : '')}
+        ${isSpecialistDetail ? field(`${icon('handshake')} Дропшиппер`, o.dropshipper) : ''}
+      </div>
+    </div>
+
+    ${isSpecialistDetail ? `
+    <div class="detail-section">
+      <div class="detail-section-title">${icon('banknote')} Финансы</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;">
         <div style="padding:14px;background:linear-gradient(135deg,rgba(29,233,182,.16),rgba(29,233,182,.05));border:1px solid rgba(29,233,182,.22);border-radius:14px;">
           <div style="font-size:11px;font-weight:800;color:var(--text3);letter-spacing:0.05em;">ОБЩАЯ СУММА ЗАКАЗА</div>
@@ -491,74 +566,51 @@ function openOrderDetail(id) {
         </div>
       </div>
     </div>
+    ` : ''}
 
+    ${isSpecialistDetail ? '' : `
     <div class="detail-section">
-      <div class="detail-section-title">${icon('clipboard-list')} Клиент и запись</div>
-      <div class="detail-grid">
-        ${field(`${icon('user')} Клиент`, o.client)}
-        ${field(`${icon('phone')} Телефон`, phoneCallLink(o.phone), 'mono detail-phone-value')}
-        ${field(`${icon('map-pin')} Место`, o.address)}
-        ${field('VIN', o.vin, 'mono')}
-        ${field(`${icon('mail')} Новая почта`, o.newPost ? 'Да' : '')}
-        ${field(`${icon('clock')} Время`, o.time)}
-        ${field(`${icon('users')} Менеджер`, getWorkerDisplayName(o.author))}
-        ${field(`${icon('clipboard-list')} Отв. менеджер`, getWorkerDisplayName(o.manager))}
+      <div class="detail-section-title">${icon('banknote')} Финансы</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:14px;">
+        <div style="padding:14px;background:linear-gradient(135deg,rgba(29,233,182,.16),rgba(29,233,182,.05));border:1px solid rgba(29,233,182,.22);border-radius:14px;">
+          <div style="font-size:11px;font-weight:800;color:var(--text3);letter-spacing:0.05em;">ОБЩАЯ СУММА ЗАКАЗА</div>
+          <div style="font-size:28px;font-weight:900;color:var(--accent);margin-top:8px;">${fullOrderTotal.toLocaleString('ru')} ₴</div>
+        </div>
+        <div style="padding:14px;background:var(--surface2);border:1px solid var(--border);border-radius:14px;">
+          <div style="font-size:11px;font-weight:800;color:var(--text3);letter-spacing:0.05em;">ПРОДАЖА СТЕКЛА</div>
+          <div style="font-size:24px;font-weight:900;color:var(--text);margin-top:8px;">${(Number(o.income) || 0).toLocaleString('ru')} ₴</div>
+        </div>
+        <div style="padding:14px;background:var(--surface2);border:1px solid var(--border);border-radius:14px;">
+          <div style="font-size:11px;font-weight:800;color:var(--text3);letter-spacing:0.05em;">СУММА РАБОТ</div>
+          <div style="font-size:24px;font-weight:900;color:var(--text);margin-top:8px;">${(Number(o.total) || 0).toLocaleString('ru')} ₴</div>
+        </div>
       </div>
-      ${o.notes ? `<div style="margin-top:14px;padding:12px;background:var(--surface2);border-radius:8px;font-size:13px;color:var(--text2);">📝 ${o.notes}</div>` : ''}
-    </div>
-
-    <div class="detail-section">
-      <div class="detail-section-title">${icon('car')} Авто и склад</div>
-      <div class="detail-grid">
-        ${field(`${icon('car')} Авто`, o.car)}
-        ${field(`${icon('warehouse')} Склад`, [o.warehouse, o.warehouseCode ? `<span style="color:var(--text3);">·</span> <span class="mono">${o.warehouseCode}</span>` : ''].filter(Boolean).join(' '))}
-        ${field(`${icon('hash')} Єврокод`, o.code, 'mono')}
-      </div>
-    </div>
-
-    <div class="detail-section">
-      <div class="detail-section-title">${icon('wrench')} Работы и услуги</div>
-      <div class="detail-grid">
-        ${field(`${icon('wrench')} Монтаж`, o.mount ? o.mount + ' ₴' : '')}
-        ${field(`${icon('tool')} Вид послуги`, o.serviceType)}
-        ${field(`${icon('receipt')} Только продажа`, o.onlySale ? 'Да' : '')}
-        ${field(`${icon('hash')} Молдинг`, o.molding)}
-        ${field(`${icon('wrench')} Доп. работы`, o.extraWork)}
-        ${field(`${icon('hash')} Доп услуги`, o.tatu)}
-        ${field('Тонировка', o.toning)}
-        ${field(`${icon('truck')} Доставка`, o.delivery ? o.delivery + ' ₴' : '')}
-      </div>
-    </div>
-
-    <div class="detail-section">
-      <div class="detail-section-title">${icon('banknote')} Финансы и расчёты</div>
       <div class="detail-grid">
         ${field('Статус оплаты клиента', getEffectivePaymentStatus(o))}
-        ${field('Оплачено клиентом', o.debt ? o.debt + ' ₴' : '')}
+        ${field('Оплачено клиентом', clientPaid.toLocaleString('ru') + ' ₴')}
+        ${field('Клиенту осталось оплатить', clientLeft.toLocaleString('ru') + ' ₴')}
         ${field('Дата расчёта долга', formatDate(o.debtDate))}
-        ${field(`${icon('pin')} Общая сумма работ`, o.total ? o.total + ' ₴' : '', 'mono')}
-        ${field('Общая сумма заказа', fullOrderTotal ? fullOrderTotal + ' ₴' : '', 'mono')}
         ${field('Сумма продажи стекла', o.income ? o.income + ' ₴' : '')}
         ${field('Сумма покупки стекла', o.purchase ? o.purchase + ' ₴' : '')}
-        ${field('Оплачено поставщику', o.check ? o.check + ' ₴' : '')}
+        ${field('Оплачено поставщику', supplierPaid.toLocaleString('ru') + ' ₴')}
+        ${field('Поставщику осталось оплатить', supplierLeft.toLocaleString('ru') + ' ₴')}
         ${field(`${icon('package')} Статус оплати постачальнику`, getEffectiveSupplierStatus(o))}
         ${field('Маржа стекло', o.remainder !== undefined ? o.remainder + ' ₴' : '')}
-        ${field('Маржа общая', o.marginTotal !== undefined ? o.marginTotal + ' ₴' : '')}
-        ${field('Способ оплаты', normalizePaymentMethod(o.paymentMethod))}
-        ${field('Молдинг Автор', o.moldingAuthor)}
-        ${field(`${icon('handshake')} Партнер`, o.partner)}
         ${field('Дропшиппер', o.dropshipper)}
         ${field('Выплата дропшипперу', o.dropshipperPayout ? o.dropshipperPayout + ' ₴' : '')}
-        ${field('Выплата менеджеру (стекло)', o.payoutManagerGlass ? o.payoutManagerGlass + ' ₴' : '')}
-        ${field('Выплата ответственному (стекло)', o.payoutRespGlass ? o.payoutRespGlass + ' ₴' : '')}
-        ${field('Выплата Лёше (тонировка)', o.payoutLesha ? o.payoutLesha + ' ₴' : '')}
-        ${field('Выплата Роме (тату)', o.payoutRoma ? o.payoutRoma + ' ₴' : '')}
-        ${field('Выплата за доп. работы (ответств.)', o.payoutExtraResp ? o.payoutExtraResp + ' ₴' : '')}
-        ${field('Выплата за доп. работы (помощ.)', o.payoutExtraAssist ? o.payoutExtraAssist + ' ₴' : '')}
-        ${field('Выплата за молдинг (ответств.)', o.payoutMoldingResp ? o.payoutMoldingResp + ' ₴' : '')}
-        ${field('Выплата за молдинг (помощ.)', o.payoutMoldingAssist ? o.payoutMoldingAssist + ' ₴' : '')}
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:14px;">
+        <div style="padding:12px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;">
+          <div style="font-size:12px;font-weight:800;color:var(--text3);letter-spacing:0.04em;">ОПЛАТЫ КЛИЕНТА</div>
+          ${clientPaymentsHtml}
+        </div>
+        <div style="padding:12px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;">
+          <div style="font-size:12px;font-weight:800;color:var(--text3);letter-spacing:0.04em;">ОПЛАТЫ ПОСТАВЩИКУ</div>
+          ${supplierPaymentsHtml}
+        </div>
       </div>
     </div>
+    `}
   `;
 
   showScreen('order-detail');
@@ -785,23 +837,25 @@ function populateRefSelects() {
     respSel.onchange = () => applyAssistantForResponsible(respSel.value);
   }
 
-  // Ответственный — доработка
-  const reworkRespSel = document.getElementById('f-rework-responsible');
-  if (reworkRespSel) {
-    const cur = reworkRespSel.value;
-    reworkRespSel.innerHTML = '<option value="">— выбрать —</option>' +
-      workers.filter(w => ['senior', 'extra'].includes(w.systemRole)).map(w => `<option value="${w.name}">${getWorkerDisplayName(w.name)} (${w.role})</option>`).join('');
-    if (cur) reworkRespSel.value = cur;
+  const managerSel = document.getElementById('f-manager');
+  if (managerSel) {
+    const cur = managerSel.value;
+    const managerWorkers = workers.filter(w => w.systemRole === 'manager');
+    managerSel.innerHTML = '<option value="">— выбрать —</option>' +
+      managerWorkers.map(w => `<option value="${escapeAttr(w.name)}">${escapeHtml(getWorkerDisplayName(w.name))}</option>`).join('');
+    if (cur) managerSel.value = cur;
   }
 
-  // Помощник — доработка
-  const reworkAsSel = document.getElementById('f-rework-assistant');
-  if (reworkAsSel) {
-    const cur = reworkAsSel.value;
-    reworkAsSel.innerHTML = '<option value="">— нет —</option>' +
-      workers.filter(w => ['senior', 'junior', 'extra'].includes(w.systemRole)).map(w => `<option value="${w.name}">${getWorkerDisplayName(w.name)} (${w.role})</option>`).join('');
-    if (cur) reworkAsSel.value = cur;
-  }
+  populateOrderWorkerFilter();
+}
+
+function populateOrderWorkerFilter() {
+  const sel = document.getElementById('filter-worker');
+  if (!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">Все сотрудники</option>' +
+    (workers || []).map(w => `<option value="${escapeAttr(w.name)}">${escapeHtml(getWorkerDisplayName(w.name))}</option>`).join('');
+  if (cur) sel.value = cur;
 }
 
 let currentClientPayments = [];
@@ -809,14 +863,7 @@ let currentSupplierPayments = [];
 
 // ---------- ФУНКЦИИ ИСТОРИИ ОПЛАТ И ДОРАБОТКИ ----------
 
-function toggleReworkSection() {
-  const body = document.getElementById('rework-section-body');
-  const chevron = document.getElementById('rework-chevron');
-  if (!body) return;
-  const isOpen = body.style.display !== 'none';
-  body.style.display = isOpen ? 'none' : 'block';
-  if (chevron) chevron.style.transform = isOpen ? '' : 'rotate(180deg)';
-}
+function toggleReworkSection() {}
 
 function renderClientPayments() {
   const listEl = document.getElementById('client-payments-list');
@@ -1024,9 +1071,7 @@ function openOrderModal(id) {
   // f-code теперь управляется через acFilter/acSelect (автокомплит)
 
   // Авторасчёт total из полей работ и доработки
-  ['f-mount','f-molding','f-extra-work','f-tatu','f-toning',
-   'f-rework-mount','f-rework-molding','f-rework-extra',
-   'f-rework-tatu','f-rework-toning'].forEach(fid => {
+  ['f-mount','f-molding','f-extra-work','f-tatu','f-toning'].forEach(fid => {
     const el = document.getElementById(fid);
     if (!el) return;
     const newEl = el.cloneNode(true);
@@ -1120,14 +1165,8 @@ function updateOrderSaveButtonLabel() {
 }
 
 function toggleExclusiveOrderFlag(flag) {
-  const onlyCutEl = document.getElementById('f-only-cut');
   const onlySaleEl = document.getElementById('f-only-sale');
-  if (flag === 'cut' && onlyCutEl?.checked && onlySaleEl) {
-    onlySaleEl.checked = false;
-  }
-  if (flag === 'sale' && onlySaleEl?.checked && onlyCutEl) {
-    onlyCutEl.checked = false;
-  }
+  if (flag === 'sale' && onlySaleEl?.checked) return;
 }
 
 function applyOrderFormDateTimeDefaults() {
@@ -1184,7 +1223,7 @@ function fillOrderForm(o) {
     syncServiceTypes(false);
   }
   set('f-margin-total', o.marginTotal);
-  set('f-payout-dropshipper', o.payoutDropshipper);
+  set('f-payout-dropshipper', o.dropshipperPayout);
   set('f-payout-manager-glass', o.payoutManagerGlass);
   set('f-payout-resp-glass', o.payoutRespGlass);
   set('f-payout-lesha', o.payoutLesha);
@@ -1194,21 +1233,8 @@ function fillOrderForm(o) {
   set('f-payout-molding-resp', o.payoutMoldingResp);
   set('f-payout-molding-assist', o.payoutMoldingAssist);
   
-  const onlyCutEl = document.getElementById('f-only-cut');
-  if (onlyCutEl) onlyCutEl.checked = !!o.onlyCut;
   const onlySaleEl = document.getElementById('f-only-sale');
   if (onlySaleEl) onlySaleEl.checked = !!o.onlySale;
-  if (onlyCutEl?.checked && onlySaleEl?.checked) onlySaleEl.checked = false;
-
-  if (o.reworkData) {
-    set('f-rework-responsible', o.reworkData.responsible);
-    set('f-rework-assistant', o.reworkData.assistant);
-    set('f-rework-mount', o.reworkData.mount);
-    set('f-rework-molding', o.reworkData.molding);
-    set('f-rework-extra', o.reworkData.extraWork);
-    set('f-rework-tatu', o.reworkData.tatu);
-    set('f-rework-toning', o.reworkData.toning);
-  }
 
   const statusEl = document.getElementById('f-order-status');
   if (statusEl) { if (o.isCancelled) statusEl.value = 'cancelled'; else if (o.inWork) statusEl.value = 'inWork'; else statusEl.value = ''; }
@@ -1231,8 +1257,6 @@ function clearOrderForm() {
     'f-payout-dropshipper','f-payout-manager-glass','f-payout-resp-glass',
     'f-payout-lesha','f-payout-roma','f-payout-extra-resp','f-payout-extra-assist',
     'f-payout-molding-resp','f-payout-molding-assist','f-assistant','f-manager',
-    'f-rework-responsible','f-rework-assistant','f-rework-mount','f-rework-molding',
-    'f-rework-extra','f-rework-tatu','f-rework-toning',
     'f-new-payment-amount','f-new-payment-date','f-new-supplier-payment-amount','f-new-supplier-payment-date','f-new-supplier-payment-method'
   ];
   ids.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
@@ -1240,8 +1264,6 @@ function clearOrderForm() {
   currentSupplierPayments = [];
   const orderStatusEl = document.getElementById('f-order-status');
   if (orderStatusEl) orderStatusEl.value = '';
-  const onlyCutEl = document.getElementById('f-only-cut');
-  if (onlyCutEl) onlyCutEl.checked = false;
   const onlySaleEl = document.getElementById('f-only-sale');
   if (onlySaleEl) onlySaleEl.checked = false;
   const newPostEl = document.getElementById('f-new-post');
@@ -1363,7 +1385,6 @@ function validateOrderRequiredFields(data) {
     if (!data.phone) missing.push('номер телефона');
     if (!data.car) missing.push('автомобиль');
     if (!data.manager) missing.push('менеджер');
-    if (!data.warehouse) missing.push('склад');
     if (!data.onlySale && !data.mount) missing.push('монтаж');
   }
 
@@ -1440,17 +1461,8 @@ async function saveOrder() {
     payoutExtraAssist:     getN('f-payout-extra-assist'),
     payoutMoldingResp:     getN('f-payout-molding-resp'),
     payoutMoldingAssist:   getN('f-payout-molding-assist'),
-    onlyCut:         document.getElementById('f-only-cut')?.checked || false,
     onlySale:        document.getElementById('f-only-sale')?.checked || false,
-    reworkData: {
-      responsible: get('f-rework-responsible'),
-      assistant: get('f-rework-assistant'),
-      mount: getN('f-rework-mount'),
-      molding: getN('f-rework-molding'),
-      extraWork: getN('f-rework-extra'),
-      tatu: getN('f-rework-tatu'),
-      toning: getN('f-rework-toning'),
-    },
+    reworkData: {},
     clientPayments: currentClientPayments,
     supplierPayments: currentSupplierPayments,
   };
@@ -1809,9 +1821,11 @@ function openMonthOrders(ym) {
 }
 
 function renderOrdersForMonth(ym) {
+  populateOrderWorkerFilter();
   const search = (document.getElementById('filter-search')?.value || '').toLowerCase();
   const dateF  = document.getElementById('filter-date')?.value || '';
   const statF  = document.getElementById('filter-status')?.value || '';
+  const workerF = document.getElementById('filter-worker')?.value || '';
   const sort   = document.getElementById('filter-sort')?.value || 'desc';
 
   let list = orders.filter(o => o.date && o.date.slice(0, 7) === ym);
@@ -1840,6 +1854,7 @@ function renderOrdersForMonth(ym) {
   );
   if (dateF) list = list.filter(o => o.date === dateF);
   if (statF) list = list.filter(o => getEffectivePaymentStatus(o) === statF);
+  if (workerF) list = list.filter(o => o.responsible === workerF || o.assistant === workerF || o.manager === workerF);
   list.sort((a, b) => {
     const ad = a.date || '';
     const bd = b.date || '';
@@ -1847,7 +1862,7 @@ function renderOrdersForMonth(ym) {
   });
 
   const container = document.getElementById('orders-list');
-  const signature = _getOrdersListSignature('month', { search, dateF, statF, sort, ym });
+  const signature = _getOrdersListSignature('month', { search, dateF, statF, sort, workerF, ym });
 
   if (!list.length) {
     lastOrdersListSignature = signature;
@@ -1924,9 +1939,7 @@ async function _upsertOrderSalaries(order) {
     const managerName = order.manager || '';
     if (managerName && workers.find(x => x.name === managerName && x.systemRole === 'manager')) {
       affectedWorkers.add(managerName);
-      if (!amounts[managerName]) {
-        amounts[managerName] = _calcManagerSalary(order);
-      }
+      amounts[managerName] = (amounts[managerName] || 0) + _calcManagerSalary(order);
     }
   }
 
@@ -2089,15 +2102,13 @@ function recalcFullMargins() {
 
   const payoutDropshipper = document.getElementById('f-dropshipper')?.value ? marginGlass : 0;
 
-  // Менеджер — только Sasha Manager через поле f-manager
   const managerValue = document.getElementById('f-manager')?.value || '';
-  const payoutManagerGlass = (managerValue === 'Sasha Manager' && marginGlass > 0)
-    ? Math.round(marginGlass * 0.10) : 0;
+  const managerRule = managerValue && typeof getSalaryRule === 'function' ? getSalaryRule(managerValue) : {};
+  const payoutManagerGlass = marginGlass > 0 ? Math.round(marginGlass * (managerRule.glassMarginPct || 0)) : 0;
 
-  // Старший responsible — Kostya или Sasha Smokov: 10% от маржи стекла
   const responsibleName = document.getElementById('f-responsible')?.value || '';
-  const payoutRespGlass = (['Kostya', 'Sasha Smokov'].includes(responsibleName) && incomeGlass > 0)
-    ? Math.round(marginGlass * 0.10) : 0;
+  const responsibleRule = responsibleName && typeof getSalaryRule === 'function' ? getSalaryRule(responsibleName) : {};
+  const payoutRespGlass = marginGlass > 0 ? Math.round(marginGlass * (responsibleRule.glassMarginPct || 0)) : 0;
 
   // Рома: 20% от tatu (всегда, если tatu > 0)
   const payoutRoma = tatuSum > 0 ? Math.round(tatuSum * 0.20) : 0;
@@ -2398,17 +2409,6 @@ function acSelect(type, idx) {
 
     const addressEl = document.getElementById('f-address');
     if (addressEl && item.client?.address) addressEl.value = item.client.address;
-
-    // Автозаполнение последнего авто этого клиента
-    const c = item.client;
-    if (c && c.orders && c.orders.length) {
-      const lastCar = c.orders[c.orders.length - 1].car || '';
-      const carEl   = document.getElementById('f-car');
-      if (carEl && lastCar) {
-        carEl.value = lastCar;
-        onCarInputChange(lastCar);
-      }
-    }
   }
 
   if (type === 'car') {

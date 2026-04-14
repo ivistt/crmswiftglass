@@ -99,76 +99,33 @@ function renderProfile() {
   const selectedAssistant = getSelectedAssistantWorker();
   const workedAssistants = getSeniorWorkedAssistants();
   const relevantSalaryEntries = workerSalaries.filter(isRelevantSalaryEntry);
-  const manualReports = relevantSalaryEntries.filter(isManualSalaryReportEntry);
   const accTotal = relevantSalaryEntries.reduce((sum, s) => sum + Number(s.amount), 0);
-  const todayReport = manualReports.find(s => s.date === today) || null;
-  const todayAmount = Number(todayReport?.amount) || 0;
+  const todayAmount = getSalaryAccrualForDate(relevantSalaryEntries, today);
   const todaySummary = getWorkerCompletedOrdersSummary(currentWorkerName, today);
   const salaryHistoryHtml = buildWorkerSalaryHistory(currentWorkerName, relevantSalaryEntries);
   const assistantRelevantEntries = assistantWorkerSalaries.filter(isRelevantSalaryEntry);
-  const assistantManualReports = assistantRelevantEntries.filter(isManualSalaryReportEntry);
-  const assistantTodayReport = selectedAssistant
-    ? (assistantManualReports.find(s => s.date === today) || null)
-    : null;
-  const assistantTodayAmount = Number(assistantTodayReport?.amount) || 0;
+  const assistantTodayAmount = selectedAssistant ? getSalaryAccrualForDate(assistantRelevantEntries, today) : 0;
   const assistantAccTotal = assistantRelevantEntries.reduce((sum, s) => sum + Number(s.amount), 0);
   const assistantTodaySummary = selectedAssistant
     ? getWorkerCompletedOrdersSummary(selectedAssistant.name, today)
     : null;
-  const todayOrdersHtml = renderSalaryOrdersList(todaySummary.orders);
-  const summaryCardsHtml = ''
-    + '<div class="profile-summary" style="margin-top:12px;">'
-    + '<div class="profile-summary-card">'
-    + '<div class="profile-summary-label">Накоплено</div>'
-    + '<div class="profile-summary-value">' + accTotal.toLocaleString('ru') + ' \u20B4</div>'
-    + '<div style="font-size:11px;color:var(--text3);margin-top:6px;">Доступно к снятию</div>'
-    + '</div>'
-    + '<div class="profile-summary-card">'
-    + '<div class="profile-summary-label">За сегодня</div>'
-    + '<div class="profile-summary-value">' + todayAmount.toLocaleString('ru') + ' \u20B4</div>'
-    + '<div style="font-size:11px;color:var(--text3);margin-top:6px;">Выполнено заказов: ' + todaySummary.count + '</div>'
-    + '</div>'
-    + '</div>';
   const salaryGroupHtml = ''
-    + summaryCardsHtml
-    + '<div class="profile-today-card" style="margin-top:12px;">'
-    + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px;">'
-    + '<div>'
-    + '<div class="profile-today-label"><i data-lucide="wallet-cards" style="width:15px;height:15px;"></i> Ваша зарплата</div>'
-    + '<div style="font-size:12px;color:var(--text3);margin-top:6px;">Начисление за день, итог за сегодня и снятие накоплений</div>'
-    + '</div>'
-    + '<button class="btn-primary" style="padding:0 24px;min-height:44px;border-radius:14px;font-weight:800;" onclick="withdrawSalary()" ' + (accTotal <= 0 ? 'disabled' : '') + '>Снять ЗП</button>'
-    + '</div>'
-    + '<div style="display:grid;grid-template-columns:minmax(0,1fr);gap:12px;">'
-    + (currentRole !== 'junior'
-      ? renderTodaySalarySubmission(todayReport, todaySummary, {
-          workerName: currentWorkerName,
-          editable: true
-        })
-      : '')
-    + renderWorkAttendanceCard()
-    + '<div style="padding:14px;background:var(--surface2);border-radius:12px;border:1px solid var(--border);">'
-    + '<div class="profile-today-label"><i data-lucide="calendar-check" style="width:15px;height:15px;"></i> Зарплата — ' + formatDate(today) + '</div>'
-    + '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px;">'
-    + '<div style="font-size:24px;font-weight:800;color:var(--accent);">' + todayAmount.toLocaleString('ru') + ' \u20B4</div>'
-    + '<div style="font-size:11px;color:var(--text3);padding:4px 10px;background:var(--surface3);border-radius:8px;">'
-    + (currentRole === 'junior' ? 'записал старший' : 'записано')
-    + '</div>'
-    + '</div>'
-    + '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:12px;color:var(--text3);">'
-    + '<span>Выполнено: ' + todaySummary.count + '</span>'
-    + '</div>'
-    + todayOrdersHtml
-    + '</div>'
-    + '</div>'
-    + (canManageAssistantSalary() && workedAssistants.length
-      ? renderAssistantSalarySection(workedAssistants, selectedAssistant, assistantTodayReport, assistantTodaySummary, assistantTodayAmount, assistantAccTotal)
-      : '')
-    + buildWithdrawalsBlock(relevantSalaryEntries)
+    + renderWorkerSalarySection({
+        title: 'Ваша зарплата',
+        accumulated: accTotal,
+        todayAmount,
+        todaySummary,
+        withdrawAction: 'withdrawSalary()',
+        withdrawDisabled: accTotal <= 0,
+        attendanceHtml: renderWorkAttendanceCard()
+      })
     + '<div class="profile-today-card" style="margin-top:12px;">'
     + '<div style="font-size:12px;font-weight:800;color:var(--text3);margin-bottom:12px;letter-spacing:0.04em;">ИСТОРИЯ ЗАРПЛАТ</div>'
     + '<div style="display:flex;flex-direction:column;gap:12px;">' + salaryHistoryHtml + '</div>'
-    + '</div>';
+    + '</div>'
+    + (canManageAssistantSalary() && workedAssistants.length
+      ? renderAssistantSalarySection(workedAssistants, selectedAssistant, null, assistantTodaySummary, assistantTodayAmount, assistantAccTotal)
+      : '');
 
   el.innerHTML = ''
     + '<div class="profile-header">'
@@ -213,55 +170,37 @@ function renderCashScreen() {
   initIcons();
 }
 
-function renderSalarySubmissionCard({ title, inputId, buttonLabel, buttonAction, value, disabled, hint, label = 'Сумма ЗП за сегодня' }) {
-  return ''
-    + '<div style="padding:14px;background:var(--surface2);border-radius:12px;border:1px solid var(--border);">'
-    + '<div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:10px;letter-spacing:0.04em;">' + title + '</div>'
-    + '<div style="display:flex;gap:10px;align-items:end;flex-wrap:wrap;">'
-    + '<label style="flex:1;min-width:180px;display:flex;flex-direction:column;gap:6px;">'
-    + '<span style="font-size:12px;color:var(--text3);">' + label + '</span>'
-    + '<input class="form-input" type="number" id="' + inputId + '" placeholder="0" value="' + escapeHtml(String(value)) + '" ' + disabled + '>'
-    + '</label>'
-    + '<button class="btn-primary" style="min-height:44px;padding:0 24px;" onclick="' + buttonAction + '" ' + disabled + '>' + buttonLabel + '</button>'
-    + '</div>'
-    + '<div style="font-size:11px;color:var(--text3);margin-top:8px;">' + hint + '</div>'
-    + '</div>';
+function getSalaryAccrualForDate(entries, date) {
+  return (entries || [])
+    .filter(entry => entry.date === date && !isSalaryWithdrawalEntry(entry))
+    .reduce((sum, entry) => sum + Number(entry.amount), 0);
 }
 
-function renderTodaySalarySubmission(todayReport, todaySummary, options = {}) {
-  const currentValue = Number(todayReport?.amount) || '';
-  const editable = options.editable !== false;
-  const disabled = !editable || todaySummary.count < 1 ? 'disabled' : '';
-  const hint = !editable
-    ? (options.readOnlyHint || 'Эту сумму вносит старший специалист')
-    : (todaySummary.count < 1
-      ? 'Сначала нужен хотя бы 1 выполненный заказ за сегодня'
-      : `Выполнено ${todaySummary.count} заказ(ов) за сегодня`);
-
-  if (!editable) {
-    return ''
-      + '<div style="padding:14px;background:var(--surface2);border-radius:12px;border:1px solid var(--border);">'
-      + '<div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:10px;letter-spacing:0.04em;">СЕГОДНЯШНЯЯ ЗП</div>'
-      + '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">'
-      + '<div>'
-      + '<div style="font-size:12px;color:var(--text3);">Сумма за сегодня</div>'
-      + '<div style="font-size:28px;font-weight:800;color:var(--accent);margin-top:4px;">' + Number(currentValue || 0).toLocaleString('ru') + ' \u20B4</div>'
-      + '</div>'
-      + '<div style="font-size:11px;color:var(--text3);padding:4px 10px;background:var(--surface3);border-radius:8px;">заполняет старший</div>'
-      + '</div>'
-      + '<div style="font-size:11px;color:var(--text3);margin-top:8px;">' + hint + '</div>'
-      + '</div>';
-  }
-
-  return renderSalarySubmissionCard({
-    title: 'ВНЕСТИ СЕГОДНЯШНЮЮ ЗП',
-    inputId: 'today-salary-input',
-    buttonLabel: 'Сохранить',
-    buttonAction: 'saveTodaySalaryReport()',
-    value: currentValue,
-    disabled,
-    hint
-  });
+function renderWorkerSalarySection({ title, accumulated, todayAmount, todaySummary, withdrawAction, withdrawDisabled, attendanceHtml = '' }) {
+  const safeSummary = todaySummary || { count: 0, orders: [] };
+  return ''
+    + '<div class="profile-today-card" style="margin-top:12px;">'
+    + '<div class="profile-today-label"><i data-lucide="wallet-cards" style="width:15px;height:15px;"></i> ' + escapeHtml(title) + '</div>'
+    + '<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;margin-top:14px;">'
+    + '<div style="padding:14px;background:var(--surface2);border-radius:12px;border:1px solid var(--border);">'
+    + '<div style="font-size:11px;font-weight:800;color:var(--text3);letter-spacing:0.05em;">НАКОПЛЕНО</div>'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:8px;flex-wrap:wrap;">'
+    + '<div style="font-size:28px;font-weight:900;color:var(--accent);">' + accumulated.toLocaleString('ru') + ' ₴</div>'
+    + '<button class="btn-primary" style="min-height:40px;padding:0 18px;border-radius:8px;font-weight:800;" onclick="' + withdrawAction + '" ' + (withdrawDisabled ? 'disabled' : '') + '>Снять</button>'
+    + '</div>'
+    + '</div>'
+    + '<div style="padding:14px;background:var(--surface2);border-radius:12px;border:1px solid var(--border);">'
+    + '<div style="font-size:11px;font-weight:800;color:var(--text3);letter-spacing:0.05em;">ЗА СЕГОДНЯ</div>'
+    + '<div style="font-size:28px;font-weight:900;color:var(--accent);margin-top:8px;">' + todayAmount.toLocaleString('ru') + ' ₴</div>'
+    + '<div style="font-size:11px;color:var(--text3);margin-top:6px;">Выполнено заказов: ' + safeSummary.count + '</div>'
+    + '</div>'
+    + '</div>'
+    + (attendanceHtml ? '<div style="margin-top:12px;">' + attendanceHtml + '</div>' : '')
+    + '<div style="margin-top:16px;">'
+    + '<div style="font-size:12px;font-weight:800;color:var(--text3);letter-spacing:0.04em;margin-bottom:8px;">ЗАКАЗЫ ЗА СЕГОДНЯ</div>'
+    + renderSalaryOrdersList(safeSummary.orders)
+    + '</div>'
+    + '</div>';
 }
 
 function getTodayAttendanceEntry() {
@@ -327,50 +266,27 @@ function renderAssistantSalarySection(assistantWorkers, assistantWorker, todayRe
   const safeSummary = todaySummary || { count: 0, orders: [] };
 
   return ''
-    + '<div style="padding:14px;background:rgba(29,233,182,.06);border-radius:12px;border:1px solid rgba(29,233,182,.2);">'
-    + '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px;">'
-    + '<div>'
-    + '<div style="font-size:12px;font-weight:700;color:var(--text2);letter-spacing:0.04em;">ПОМОЩНИК</div>'
-    + '<div style="font-size:11px;color:var(--text3);margin-top:4px;">Выберите помощника, с которым вы работали</div>'
-    + '</div>'
-    + '<div style="font-size:11px;color:var(--text3);padding:4px 10px;background:rgba(255,255,255,.04);border-radius:999px;">по совместным заказам</div>'
-    + '</div>'
-    + '<div style="margin-bottom:12px;">'
+    + '<div class="profile-today-card" style="margin-top:12px;background:rgba(29,233,182,.06);border-color:rgba(29,233,182,.2);">'
+    + '<div class="profile-today-label"><i data-lucide="users" style="width:15px;height:15px;"></i> Помощник</div>'
+    + '<div style="margin-top:12px;margin-bottom:12px;">'
     + '<select class="form-select" id="assistant-salary-select" onchange="changeAssistantSalaryWorker(this.value)">' + optionsHtml + '</select>'
     + '</div>'
-    + '<div style="padding:14px;margin-bottom:12px;background:var(--surface2);border-radius:12px;border:1px solid var(--border);">'
-    + '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">'
-    + '<div>'
-    + '<div style="font-size:12px;font-weight:700;color:var(--text3);letter-spacing:0.04em;">НАКОПИЛОСЬ У ПОМОЩНИКА</div>'
-    + '<div style="font-size:24px;font-weight:800;color:var(--accent);margin-top:4px;">' + assistantAccTotal.toLocaleString('ru') + ' \u20B4</div>'
+    + '<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;">'
+    + '<div style="padding:14px;background:var(--surface2);border-radius:12px;border:1px solid var(--border);">'
+    + '<div style="font-size:11px;font-weight:800;color:var(--text3);letter-spacing:0.05em;">НАКОПЛЕНО</div>'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:8px;flex-wrap:wrap;">'
+    + '<div style="font-size:28px;font-weight:900;color:var(--accent);">' + assistantAccTotal.toLocaleString('ru') + ' ₴</div>'
+    + '<button class="btn-primary" style="min-height:40px;padding:0 18px;border-radius:8px;font-weight:800;" onclick="withdrawAssistantSalary()" ' + (!hasSelectedAssistant || assistantAccTotal <= 0 ? 'disabled' : '') + '>Снять</button>'
     + '</div>'
-    + '<button class="btn-primary" style="padding:0 22px;min-height:42px;border-radius:14px;font-weight:800;" onclick="withdrawAssistantSalary()" ' + (!hasSelectedAssistant || assistantAccTotal <= 0 ? 'disabled' : '') + '>Снять</button>'
     + '</div>'
-    + '<div style="font-size:11px;color:var(--text3);margin-top:8px;">Списание пойдёт из вашей кассы и запишется как выплата ЗП помощнику</div>'
+    + '<div style="padding:14px;background:var(--surface2);border-radius:12px;border:1px solid var(--border);">'
+    + '<div style="font-size:11px;font-weight:800;color:var(--text3);letter-spacing:0.05em;">ЗА СЕГОДНЯ</div>'
+    + '<div style="font-size:28px;font-weight:900;color:var(--accent);margin-top:8px;">' + todayAmount.toLocaleString('ru') + ' ₴</div>'
+    + '<div style="font-size:11px;color:var(--text3);margin-top:6px;">Выполнено заказов: ' + safeSummary.count + '</div>'
     + '</div>'
-    + renderSalarySubmissionCard({
-      title: 'ВНЕСТИ СЕГОДНЯШНЮЮ ЗП ПОМОЩНИКУ',
-      inputId: 'assistant-today-salary-input',
-      buttonLabel: 'Сохранить',
-      buttonAction: 'saveAssistantTodaySalaryReport()',
-      value: Number(todayReport?.amount) || '',
-      disabled: !hasSelectedAssistant || safeSummary.count < 1 ? 'disabled' : '',
-      hint: !hasSelectedAssistant
-        ? 'Сначала выберите помощника'
-        : safeSummary.count < 1
-        ? 'У помощника пока нет выполненных заказов за сегодня'
-        : `У помощника выполнено ${safeSummary.count} заказ(ов) за сегодня`,
-      label: 'Сумма ЗП помощнику за сегодня'
-    })
-    + '<div style="padding:14px;margin-top:12px;background:var(--surface2);border-radius:12px;border:1px solid var(--border);">'
-    + '<div class="profile-today-label"><i data-lucide="calendar-check" style="width:15px;height:15px;"></i> ЗП помощника — ' + formatDate(getLocalDateString()) + '</div>'
-    + '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px;">'
-    + '<div style="font-size:24px;font-weight:800;color:var(--accent);">' + todayAmount.toLocaleString('ru') + ' \u20B4</div>'
-    + '<div style="font-size:11px;color:var(--text3);padding:4px 10px;background:var(--surface3);border-radius:8px;">записано вами</div>'
     + '</div>'
-    + '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:12px;color:var(--text3);">'
-    + '<span>Выполнено: ' + safeSummary.count + '</span>'
-    + '</div>'
+    + '<div style="margin-top:16px;">'
+    + '<div style="font-size:12px;font-weight:800;color:var(--text3);letter-spacing:0.04em;margin-bottom:8px;">ЗАКАЗЫ ЗА СЕГОДНЯ</div>'
     + renderSalaryOrdersList(safeSummary.orders)
     + '</div>'
     + '</div>';
@@ -421,94 +337,117 @@ function renderSalaryOrdersList(orderItems) {
     return '<div style="font-size:12px;color:var(--text3);margin-top:8px;">Заказов нет</div>';
   }
   return '<div style="display:flex;flex-direction:column;gap:6px;margin-top:10px;">'
-    + orderItems.map(item => '<div style="font-size:12px;color:var(--text3);">'
-      + escapeHtml(item.id) + ' · ' + escapeHtml(item.car || '—')
+    + orderItems.map(item => '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:12px;color:var(--text3);">'
+      + '<span>' + escapeHtml(item.id) + ' · ' + escapeHtml(item.car || '—') + '</span>'
+      + '<span style="font-weight:800;color:var(--accent);white-space:nowrap;">' + (Number(item.amount) || 0).toLocaleString('ru') + ' ₴</span>'
       + '</div>').join('')
     + '</div>';
 }
 
 function buildWorkerSalaryHistory(workerName, entries) {
   const reportEntries = (entries || []).filter(isRelevantSalaryEntry);
-  const byMonth = {};
+  const tree = {};
 
   for (const entry of reportEntries) {
+    if (!entry.date) continue;
+    const year = entry.date.slice(0, 4);
     const ym = entry.date.slice(0, 7);
-    if (!byMonth[ym]) byMonth[ym] = {};
-    if (!byMonth[ym][entry.date]) byMonth[ym][entry.date] = [];
-    byMonth[ym][entry.date].push(entry);
+    if (!tree[year]) tree[year] = {};
+    if (!tree[year][ym]) tree[year][ym] = {};
+    if (!tree[year][ym][entry.date]) tree[year][ym][entry.date] = [];
+    tree[year][ym][entry.date].push(entry);
   }
 
   const MONTH_NAMES = ['Январь','Февраль','Март','Апрель','Май','Июнь',
     'Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
-  const sortedMonths = Object.keys(byMonth).sort((a, b) => b.localeCompare(a));
+  const years = Object.keys(tree).sort((a, b) => b.localeCompare(a));
 
-  if (!sortedMonths.length) {
+  if (!years.length) {
     return `<div class="empty-state"><div class="empty-state-icon">${icon('coins')}</div><h3>Записей нет</h3>`
       + '<p>Дневная зарплата появится здесь после сохранения</p></div>';
   }
 
-  return sortedMonths.map(ym => {
-    const parts = ym.split('-');
-    const monthName = MONTH_NAMES[parseInt(parts[1]) - 1];
-    const days = Object.keys(byMonth[ym]).sort((a, b) => b.localeCompare(a));
-    const monthSum = days.reduce((sum, date) => sum + byMonth[ym][date].reduce((acc, e) => acc + Number(e.amount), 0), 0);
+  return years.map(year => {
+    const months = Object.keys(tree[year]).sort((a, b) => b.localeCompare(a));
+    const yearSum = months.reduce((sum, ym) => sum + Object.values(tree[year][ym]).flat().reduce((acc, e) => acc + Number(e.amount), 0), 0);
+    const yearKey = 'sal-year-' + year;
 
-    const daysHtml = days.map(date => {
-      const dateEntries = byMonth[ym][date];
-      const report = dateEntries.find(isManualSalaryReportEntry) || null;
-      const withdrawals = dateEntries.filter(isSalaryWithdrawalEntry);
-      const accruals = dateEntries.filter(entry => !isSalaryWithdrawalEntry(entry));
-      const summary = getWorkerCompletedOrdersSummary(workerName, date);
-      const reportAmount = Number(report?.amount) || 0;
-      const accrualAmount = accruals.reduce((sum, entry) => sum + Number(entry.amount), 0);
-      const withdrawalsAmount = withdrawals.reduce((sum, entry) => sum + Number(entry.amount), 0);
-      const totalForDay = accrualAmount + withdrawalsAmount;
-      const ordersHtml = renderSalaryOrdersList(summary.orders);
-      const accrualsHtml = accruals.length
-        ? '<div style="margin-top:10px;display:flex;flex-direction:column;gap:6px;">'
-          + accruals.map(entry => '<div style="font-size:12px;color:var(--text2);">'
-            + escapeHtml(entry.order_id === WORK_ATTENDANCE_ORDER_ID ? 'Выход в работу' : (entry.order_id === MANUAL_SALARY_REPORT_ORDER_ID ? 'Дневная ЗП' : `Заказ ${entry.order_id || '—'}`))
-            + ' · '
-            + Number(entry.amount).toLocaleString('ru') + ' ₴'
-            + '</div>').join('')
-          + '</div>'
-        : '';
-      const withdrawalsHtml = withdrawals.length
-        ? '<div style="margin-top:10px;display:flex;flex-direction:column;gap:6px;">'
-          + withdrawals.map(entry => '<div style="font-size:12px;color:#ef4444;">'
-            + escapeHtml(formatDate(date))
-            + ' · '
-            + escapeHtml(getSalaryWithdrawalActor(entry) ? `снял ${getWorkerDisplayName(getSalaryWithdrawalActor(entry))}` : 'снятие ЗП')
-            + ' · '
-            + Number(entry.amount).toLocaleString('ru') + ' ₴'
-            + '</div>').join('')
-          + '</div>'
-        : '';
+    const monthsHtml = months.map(ym => {
+      const parts = ym.split('-');
+      const monthName = MONTH_NAMES[parseInt(parts[1]) - 1];
+      const days = Object.keys(tree[year][ym]).sort((a, b) => b.localeCompare(a));
+      const monthSum = days.reduce((sum, date) => sum + tree[year][ym][date].reduce((acc, e) => acc + Number(e.amount), 0), 0);
+      const monthKey = 'sal-month-' + ym;
 
-      return '<div style="padding:12px 0;border-bottom:1px solid var(--border);">'
-        + '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px;">'
-        + '<div style="font-size:14px;color:var(--text2);font-weight:600;">' + formatDate(date) + '</div>'
-        + '<div style="font-weight:800;color:var(--accent);">' + totalForDay.toLocaleString('ru') + ' \u20B4</div>'
+      const daysHtml = days.map(date => {
+        const dateEntries = tree[year][ym][date];
+        const withdrawals = dateEntries.filter(isSalaryWithdrawalEntry);
+        const accruals = dateEntries.filter(entry => !isSalaryWithdrawalEntry(entry));
+        const summary = getWorkerCompletedOrdersSummary(workerName, date);
+        const orderIds = new Set((summary.orders || []).map(order => order.id));
+        const otherAccruals = accruals.filter(entry => !orderIds.has(entry.order_id));
+        const accrualAmount = accruals.reduce((sum, entry) => sum + Number(entry.amount), 0);
+        const withdrawalsAmount = withdrawals.reduce((sum, entry) => sum + Number(entry.amount), 0);
+        const totalForDay = accrualAmount + withdrawalsAmount;
+        const dayKey = 'sal-day-' + date;
+        const ordersHtml = renderSalaryOrdersList(summary.orders);
+        const accrualsHtml = otherAccruals.length
+          ? '<div style="margin-top:10px;display:flex;flex-direction:column;gap:6px;">'
+            + otherAccruals.map(entry => '<div style="display:flex;justify-content:space-between;gap:12px;font-size:12px;color:var(--text2);">'
+              + '<span>' + escapeHtml(entry.order_id === WORK_ATTENDANCE_ORDER_ID ? 'Выход в работу' : (entry.order_id === MANUAL_SALARY_REPORT_ORDER_ID ? 'Дневная ЗП' : `Заказ ${entry.order_id || '—'}`)) + '</span>'
+              + '<span style="font-weight:800;color:var(--accent);white-space:nowrap;">' + Number(entry.amount).toLocaleString('ru') + ' ₴</span>'
+              + '</div>').join('')
+            + '</div>'
+          : '';
+        const withdrawalsHtml = withdrawals.length
+          ? '<div style="margin-top:10px;display:flex;flex-direction:column;gap:6px;">'
+            + withdrawals.map(entry => '<div style="display:flex;justify-content:space-between;gap:12px;font-size:12px;color:#ef4444;">'
+              + '<span>' + escapeHtml(getSalaryWithdrawalActor(entry) ? `снял ${getWorkerDisplayName(getSalaryWithdrawalActor(entry))}` : 'снятие ЗП') + '</span>'
+              + '<span style="font-weight:800;white-space:nowrap;">' + Number(entry.amount).toLocaleString('ru') + ' ₴</span>'
+              + '</div>').join('')
+            + '</div>'
+          : '';
+
+        return '<div style="border-bottom:1px solid var(--border);">'
+          + '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 12px;cursor:pointer;" onclick="toggleProfileMonth(\'' + dayKey + '\')">'
+          + '<div style="display:flex;align-items:center;gap:8px;">'
+          + '<i data-lucide="chevron-right" style="width:13px;height:13px;color:var(--text3);transition:transform 0.2s;" id="pchevron-' + dayKey + '"></i>'
+          + '<div><div style="font-size:13px;color:var(--text2);font-weight:700;">' + formatDate(date) + '</div>'
+          + '<div style="font-size:11px;color:var(--text3);">Заказов: ' + summary.count + ' · ЗП: ' + accrualAmount.toLocaleString('ru') + ' ₴</div></div>'
+          + '</div>'
+          + '<div style="font-size:13px;font-weight:800;color:' + (totalForDay >= 0 ? 'var(--accent)' : '#ef4444') + ';white-space:nowrap;">' + totalForDay.toLocaleString('ru') + ' ₴</div>'
+          + '</div>'
+          + '<div id="profile-month-body-' + dayKey + '" style="display:none;padding:0 12px 12px 34px;">'
+          + accrualsHtml
+          + ordersHtml
+          + withdrawalsHtml
+          + '</div>'
+          + '</div>';
+      }).join('');
+
+      return '<div style="border-bottom:1px solid var(--border);">'
+        + '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 12px;cursor:pointer;" onclick="toggleProfileMonth(\'' + monthKey + '\')">'
+        + '<div style="display:flex;align-items:center;gap:8px;">'
+        + '<i data-lucide="chevron-right" style="width:14px;height:14px;color:var(--text3);transition:transform 0.2s;" id="pchevron-' + monthKey + '"></i>'
+        + '<div><div style="font-size:14px;font-weight:800;color:var(--text2);">' + monthName + '</div>'
+        + '<div style="font-size:11px;color:var(--text3);">' + days.length + ' дней</div></div>'
         + '</div>'
-        + '<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--text3);">'
-        + '<span>Выполнено: ' + summary.count + '</span>'
-        + '<span>ЗП: ' + accrualAmount.toLocaleString('ru') + ' \u20B4</span>'
+        + '<div style="font-size:14px;font-weight:800;color:var(--accent);white-space:nowrap;">' + monthSum.toLocaleString('ru') + ' ₴</div>'
         + '</div>'
-        + accrualsHtml
-        + ordersHtml
-        + withdrawalsHtml
+        + '<div id="profile-month-body-' + monthKey + '" style="display:none;padding-left:12px;background:var(--surface2);border-radius:0 0 8px 8px;">' + daysHtml + '</div>'
         + '</div>';
     }).join('');
 
-    return '<div class="fin-month-card">'
-      + '<div class="fin-month-header" onclick="toggleProfileMonth(\'sal-' + ym + '\')">'
-      + '<div><div class="fin-month-name">' + monthName + ' ' + parts[0] + '</div>'
-      + '<div class="fin-month-sub">' + days.length + ' дней</div></div>'
-      + '<div style="display:flex;align-items:center;gap:14px;">'
-      + '<div style="font-size:18px;font-weight:800;color:var(--accent);">' + monthSum.toLocaleString('ru') + ' \u20B4</div>'
-      + '<i data-lucide="chevron-down" style="width:16px;height:16px;color:var(--text3);transition:transform 0.2s;" id="pchevron-sal-' + ym + '"></i>'
-      + '</div></div>'
-      + '<div id="profile-month-body-sal-' + ym + '" style="display:none;padding:0 16px 16px;">' + daysHtml + '</div>'
+    return '<div class="fin-month-card" style="margin-bottom:8px;">'
+      + '<div class="fin-month-header" onclick="toggleProfileMonth(\'' + yearKey + '\')">'
+      + '<div style="display:flex;align-items:center;gap:10px;">'
+      + '<i data-lucide="chevron-right" style="width:16px;height:16px;color:var(--text3);transition:transform 0.2s;" id="pchevron-' + yearKey + '"></i>'
+      + '<div><div class="fin-month-name">' + year + ' год</div>'
+      + '<div class="fin-month-sub">' + months.length + ' мес.</div></div>'
+      + '</div>'
+      + '<div style="font-size:18px;font-weight:800;color:var(--accent);">' + yearSum.toLocaleString('ru') + ' ₴</div>'
+      + '</div>'
+      + '<div id="profile-month-body-' + yearKey + '" style="display:none;padding:0 0 8px;">' + monthsHtml + '</div>'
       + '</div>';
   }).join('');
 }
@@ -877,90 +816,6 @@ async function saveCashEntry() {
       btn.innerHTML = '<i data-lucide="save" style="width:14px;height:14px;"></i> Сохранить';
       initIcons();
     }
-  }
-}
-
-async function saveTodaySalaryReport() {
-  const today = getLocalDateString();
-  const summary = getWorkerCompletedOrdersSummary(currentWorkerName, today);
-  if (summary.count < 1) {
-    showToast('Нет выполненных заказов за сегодня', 'error');
-    return;
-  }
-
-  const input = document.getElementById('today-salary-input');
-  const amount = Number(input?.value);
-  if (!amount || amount <= 0) {
-    showToast('Введите сумму ЗП', 'error');
-    return;
-  }
-
-  const existing = workerSalaries.find(entry => isManualSalaryReportEntry(entry) && entry.date === today);
-
-  try {
-    if (existing) {
-      const updated = await sbUpdateWorkerSalary(existing.id, amount);
-      const idx = workerSalaries.findIndex(entry => entry.id === existing.id);
-      if (idx !== -1) workerSalaries[idx] = updated || { ...existing, amount };
-    } else {
-      const created = await sbInsertWorkerSalary({
-        worker_name: currentWorkerName,
-        amount,
-        date: today,
-        order_id: MANUAL_SALARY_REPORT_ORDER_ID,
-      });
-      if (created) workerSalaries.unshift(created);
-    }
-
-    renderProfile();
-    showToast('Дневная ЗП сохранена ✓');
-  } catch (e) {
-    showToast('Ошибка сохранения ЗП: ' + e.message, 'error');
-  }
-}
-
-async function saveAssistantTodaySalaryReport() {
-  const assistant = getSelectedAssistantWorker();
-  if (!canManageAssistantSalary() || !assistant?.name) {
-    showToast('Помощник не найден', 'error');
-    return;
-  }
-
-  const today = getLocalDateString();
-  const summary = getWorkerCompletedOrdersSummary(assistant.name, today);
-  if (summary.count < 1) {
-    showToast('У помощника нет выполненных заказов за сегодня', 'error');
-    return;
-  }
-
-  const input = document.getElementById('assistant-today-salary-input');
-  const amount = Number(input?.value);
-  if (!amount || amount <= 0) {
-    showToast('Введите сумму ЗП помощнику', 'error');
-    return;
-  }
-
-  const existing = assistantWorkerSalaries.find(entry => isManualSalaryReportEntry(entry) && entry.date === today);
-
-  try {
-    if (existing) {
-      const updated = await sbUpdateWorkerSalary(existing.id, amount);
-      const idx = assistantWorkerSalaries.findIndex(entry => entry.id === existing.id);
-      if (idx !== -1) assistantWorkerSalaries[idx] = updated || { ...existing, amount };
-    } else {
-      const created = await sbInsertWorkerSalary({
-        worker_name: assistant.name,
-        amount,
-        date: today,
-        order_id: MANUAL_SALARY_REPORT_ORDER_ID,
-      });
-      if (created) assistantWorkerSalaries.unshift(created);
-    }
-
-    renderProfile();
-    showToast('ЗП помощнику сохранена ✓');
-  } catch (e) {
-    showToast('Ошибка сохранения ЗП помощнику: ' + e.message, 'error');
   }
 }
 

@@ -479,7 +479,6 @@ function rowToOrder(r) {
     assistant:       r.assistant || '',
     isCancelled:     r.is_cancelled || false,
     manager:         r.manager || '',
-    onlyCut:         r.only_cut || false,
     onlySale:        r.only_sale || false,
     reworkData:      r.rework_data || {},
     clientPayments:  r.client_payments || [],
@@ -543,7 +542,6 @@ function orderToRow(o) {
     assistant:        o.assistant  || null,
     is_cancelled:     o.isCancelled || false,
     manager:          o.manager    || null,
-    only_cut:         o.onlyCut || false,
     only_sale:        o.onlySale || false,
     rework_data:      o.reworkData || {},
     client_payments:  o.clientPayments || [],
@@ -672,7 +670,7 @@ function _getCompletedOrdersForWorkerDate(workerName, date) {
     o.workerDone &&
     !o.isCancelled &&
     o.date === date &&
-    _workerParticipatesInOrder(o, workerName)
+    calcWorkerOrderSalary(workerName, o) > 0
   );
 }
 
@@ -712,10 +710,24 @@ function calcOrderSalary(workerName, order) {
   const fromMolding = Math.round(molding * (rule.moldingPct || 0));
   const fromServ    = _selectedServicesSalary(workerName, order);
 
-  let finalSalary = fromGlass + fromMolding + fromServ;
-  if (order.onlyCut) finalSalary = Math.round(finalSalary / 2);
+  return fromGlass + fromMolding + fromServ;
+}
 
-  return finalSalary;
+function calcWorkerOrderSalary(workerName, order) {
+  if (!workerName || !order || !order.workerDone || order.isCancelled) return 0;
+  let total = 0;
+  if (order.responsible === workerName || order.assistant === workerName) {
+    total += calcOrderSalary(workerName, order);
+  }
+  if (order.reworkData?.responsible === workerName || order.reworkData?.assistant === workerName) {
+    total += calcReworkSalary(workerName, order.reworkData);
+  }
+  if (order.manager === workerName) {
+    total += _calcManagerSalary(order);
+  }
+  total += _calcTatuBonus(workerName, order);
+  total += _calcToningBonus(workerName, order);
+  return total;
 }
 
 // ЗП за доработку
@@ -832,6 +844,7 @@ function getWorkerCompletedOrdersSummary(workerName, date) {
     orders: dayOrders.map(order => ({
       id: order.id,
       car: order.car || order.client || '—',
+      amount: calcWorkerOrderSalary(workerName, order),
     })),
   };
 }

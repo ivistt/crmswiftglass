@@ -72,12 +72,12 @@ function updateNavbarVisibility() {
     if (navWorkers) navWorkers.style.display = 'none';
     document.getElementById('app')?.classList.remove('no-navbar');
   } else {
-    // Специалисты: Записи + Касса + ЗП (без кнопки добавить)
+    // Специалисты: Записи + ЗП, касса только для старших
     if (navClients) navClients.style.display = 'none';
     if (navWorkers) navWorkers.style.display = 'none';
     if (bottomNav) bottomNav.style.display = '';
     if (navHome)   navHome.style.display   = 'none';
-    if (navCash)   navCash.style.display   = '';
+    if (navCash)   navCash.style.display   = currentRole === 'junior' ? 'none' : '';
     if (navProfile) navProfile.style.display = '';
     document.getElementById('app')?.classList.remove('no-navbar');
   }
@@ -298,6 +298,19 @@ function renderHome() {
         <h3>Склады</h3>
         <p>Долги поставщикам</p>
         <div class="home-card-count" style="font-size:20px; color: var(--red);">${debtSum.toLocaleString('ru')} ₴</div>
+      </div>
+    `;
+
+    const dropshipperOrders = orders.filter(o => !o.isCancelled && o.dropshipper && Number(o.dropshipperPayout) > 0);
+    const dropshipperTotal = dropshipperOrders.reduce((sum, o) => sum + (Number(o.dropshipperPayout) || 0), 0);
+    container.innerHTML += `
+      <div class="home-card" onclick="openDropshippersScreen()">
+        <div class="home-card-icon-wrap home-card-icon-dim">
+          <i data-lucide="handshake" style="width:22px;height:22px;"></i>
+        </div>
+        <h3>Дропшипперы</h3>
+        <p>${dropshipperOrders.length} записей</p>
+        <div class="home-card-count" style="font-size:20px; color: var(--yellow);">${dropshipperTotal.toLocaleString('ru')} ₴</div>
       </div>
     `;
   }

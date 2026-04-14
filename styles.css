@@ -435,6 +435,13 @@ body {
 .owner-dashboard-cards {
   gap: 10px;
 }
+
+@media (min-width: 901px) {
+  .home-cards.owner-dashboard-cards {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
 .owner-dashboard-screen .home-header {
   padding: 18px;
   margin-bottom: 14px;
