@@ -3,7 +3,7 @@
 // ============================================================
 
 let currentMonthFilter = null;
-let ownerPaymentFilters = { client: true, supplier: true };
+let ownerPaymentFilters = { client: true, supplier: true, dropshipper: true };
 
 // Fallback если data.js старой версии (без carDirectory)
 if (typeof carDirectory === 'undefined') {
@@ -464,6 +464,24 @@ function getOwnerPaymentEntries() {
         order,
       });
     });
+
+    let dropshipperPaidSoFar = 0;
+    (order.dropshipperPayments || []).forEach(payment => {
+      const method = normalizePaymentMethod(payment.method);
+      const amount = Number(payment.amount) || 0;
+      if (amount > 0) dropshipperPaidSoFar += amount;
+      if (!amount || !method) return;
+      entries.push({
+        type: 'dropshipper',
+        title: `Выплата дропшипперу${order.dropshipper ? ': ' + order.dropshipper : ''}`,
+        amount: -amount,
+        method,
+        date: payment.date || order.date || '',
+        paidSoFar: dropshipperPaidSoFar,
+        totalDue: Number(order.dropshipperPayout) || 0,
+        order,
+      });
+    });
   }
 
   return entries.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
@@ -474,7 +492,9 @@ function renderOwnerPaymentProgress(entry) {
   const total = Number(entry?.totalDue) || 0;
   if (!paid && !total) return '';
 
-  const label = entry.type === 'supplier' ? 'Поставщику оплачено' : 'Клиент оплатил';
+  const label = entry.type === 'supplier'
+    ? 'Поставщику оплачено'
+    : (entry.type === 'dropshipper' ? 'Дропшипперу выплачено' : 'Клиент оплатил');
   return `
     <span class="order-meta-item" style="color:var(--yellow);font-weight:700;">
       ${label}: ${paid.toLocaleString('ru')} / ${total.toLocaleString('ru')} ₴
@@ -497,6 +517,10 @@ function renderOwnerPaymentFilters() {
       <label class="checkbox order-flag-checkbox">
         <input type="checkbox" ${ownerPaymentFilters.supplier ? 'checked' : ''} onchange="setOwnerPaymentFilter('supplier', this.checked)">
         <span>Расходы поставщику</span>
+      </label>
+      <label class="checkbox order-flag-checkbox">
+        <input type="checkbox" ${ownerPaymentFilters.dropshipper ? 'checked' : ''} onchange="setOwnerPaymentFilter('dropshipper', this.checked)">
+        <span>Выплаты дропшипперам</span>
       </label>
     </div>
   `;

@@ -242,16 +242,23 @@ function renderDropshippersScreen() {
   container.innerHTML = Object.keys(map).sort().map(name => {
     const rows = map[name];
     const total = rows.reduce((sum, o) => sum + (Number(o.dropshipperPayout) || 0), 0);
+    const paid = rows.reduce((sum, o) => sum + getDropshipperPaid(o), 0);
+    const left = Math.max(0, total - paid);
     return `
       <div class="home-card" onclick="openDropshipperDetail('${escapeAttr(name)}')">
-        <div style="font-size:12px;color:var(--text3);font-weight:600;">Записей: ${rows.length}</div>
+        <div style="font-size:12px;color:var(--text3);font-weight:600;">Записей: ${rows.length} · Осталось: ${left.toLocaleString('ru')} ₴</div>
         <div style="margin-top:auto;padding-top:12px;">
           <div style="font-size:20px;font-weight:800;margin-bottom:6px;">${escapeHtml(name)}</div>
           <div style="font-size:20px;font-weight:800;color:var(--yellow);">${total.toLocaleString('ru')} ₴</div>
+          <div style="font-size:12px;color:var(--accent);font-weight:800;margin-top:4px;">Выплачено: ${paid.toLocaleString('ru')} ₴</div>
         </div>
       </div>
     `;
   }).join('');
+}
+
+function getDropshipperPaid(order) {
+  return (order?.dropshipperPayments || []).reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
 }
 
 function openDropshipperDetail(name) {
@@ -266,6 +273,9 @@ function renderDropshipperDetail() {
   const container = document.getElementById('dropshipper-detail-body');
   if (!container) return;
   const list = orders.filter(o => !o.isCancelled && o.dropshipper === currentDropshipperFilter && Number(o.dropshipperPayout) > 0);
+  const totalDue = list.reduce((sum, o) => sum + (Number(o.dropshipperPayout) || 0), 0);
+  const totalPaid = list.reduce((sum, o) => sum + getDropshipperPaid(o), 0);
+  const totalLeft = Math.max(0, totalDue - totalPaid);
   const tree = {};
   list.forEach(o => {
     if (!o.date) return;
@@ -277,7 +287,23 @@ function renderDropshipperDetail() {
     tree[year][month][o.date].push(o);
   });
   const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
-  let html = '';
+  let html = `
+    <div class="profile-summary" style="margin-bottom:14px;">
+      <div class="profile-summary-card">
+        <div class="profile-summary-label">К выплате</div>
+        <div class="profile-summary-value" style="color:var(--yellow);">${totalDue.toLocaleString('ru')} ₴</div>
+      </div>
+      <div class="profile-summary-card">
+        <div class="profile-summary-label">Выплачено</div>
+        <div class="profile-summary-value">${totalPaid.toLocaleString('ru')} ₴</div>
+      </div>
+      <div class="profile-summary-card">
+        <div class="profile-summary-label">Осталось</div>
+        <div class="profile-summary-value" style="color:${totalLeft > 0 ? 'var(--red)' : 'var(--accent)'};">${totalLeft.toLocaleString('ru')} ₴</div>
+      </div>
+    </div>
+    <button class="btn-primary" style="width:100%;min-height:44px;margin-bottom:14px;font-weight:800;" onclick="openDropshipperPaymentModal()" ${totalLeft <= 0 ? 'disabled' : ''}>Выплатить</button>
+  `;
   Object.keys(tree).sort((a, b) => b.localeCompare(a)).forEach(year => {
     html += `<div style="font-size:18px;font-weight:800;margin:22px 0 10px;">${year}</div>`;
     Object.keys(tree[year]).sort((a, b) => b.localeCompare(a)).forEach(month => {
@@ -285,17 +311,20 @@ function renderDropshipperDetail() {
       Object.keys(tree[year][month]).sort((a, b) => b.localeCompare(a)).forEach(day => {
         const rows = tree[year][month][day];
         const total = rows.reduce((sum, o) => sum + (Number(o.dropshipperPayout) || 0), 0);
+        const paid = rows.reduce((sum, o) => sum + getDropshipperPaid(o), 0);
         html += `<div style="font-size:13px;font-weight:700;color:var(--text3);margin:12px 0 8px;">${formatDate(day)} · ${total.toLocaleString('ru')} ₴</div>`;
         html += rows.map(o => `
           <div class="order-card" onclick="openOrderDetail('${o.id}')">
             <div class="order-card-top">
               <div class="order-card-left"><span class="order-id">${o.id}</span><span class="order-name">${o.car || '—'}</span></div>
-              <div style="font-size:15px;font-weight:900;color:var(--yellow);">${Number(o.dropshipperPayout).toLocaleString('ru')} ₴</div>
+              <div style="font-size:15px;font-weight:900;color:${Math.max(0, Number(o.dropshipperPayout) - getDropshipperPaid(o)) > 0 ? 'var(--yellow)' : 'var(--accent)'};">${Number(o.dropshipperPayout).toLocaleString('ru')} ₴</div>
             </div>
             <div class="order-card-meta">
               <span class="order-meta-item">${icon('clock')} ${o.time || '—'}</span>
               <span class="order-meta-item">${icon('user')} ${o.client || '—'}</span>
               <span class="order-meta-item">${icon('phone')} ${o.phone || '—'}</span>
+              <span class="order-meta-item">Выплачено: ${getDropshipperPaid(o).toLocaleString('ru')} ₴</span>
+              <span class="order-meta-item">Осталось: ${Math.max(0, Number(o.dropshipperPayout) - getDropshipperPaid(o)).toLocaleString('ru')} ₴</span>
             </div>
           </div>
         `).join('');
@@ -304,4 +333,114 @@ function renderDropshipperDetail() {
   });
   container.innerHTML = html;
   initIcons();
+}
+
+function openDropshipperPaymentModal() {
+  const list = orders.filter(o => !o.isCancelled && o.dropshipper === currentDropshipperFilter && Number(o.dropshipperPayout) > 0);
+  const totalLeft = list.reduce((sum, o) => sum + Math.max(0, (Number(o.dropshipperPayout) || 0) - getDropshipperPaid(o)), 0);
+  let modal = document.getElementById('dropshipper-payment-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'dropshipper-payment-modal';
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+      <div class="modal" style="max-width:420px;">
+        <div class="modal-header">
+          <div class="modal-title">Выплата дропшипперу</div>
+          <button class="modal-close" onclick="closeDropshipperPaymentModal()">
+            <i data-lucide="x" style="width:16px;height:16px;"></i>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="form-grid col-1">
+            <div class="form-group">
+              <label class="form-label">Дропшиппер</label>
+              <input class="form-input" id="dropshipper-payment-name" disabled>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Сумма выплаты</label>
+              <input class="form-input" type="number" id="dropshipper-payment-amount" placeholder="0">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Дата</label>
+              <input class="form-input" type="date" id="dropshipper-payment-date">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Способ оплаты</label>
+              <select class="form-select" id="dropshipper-payment-method"></select>
+            </div>
+            <div style="font-size:11px;color:var(--text3);">Выплата распределится по неоплаченным заказам этого дропшиппера.</div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" onclick="closeDropshipperPaymentModal()">Отмена</button>
+          <button class="btn-primary" id="dropshipper-payment-save-btn" onclick="saveDropshipperPayment()">Сохранить</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+  }
+
+  document.getElementById('dropshipper-payment-name').value = currentDropshipperFilter || '';
+  document.getElementById('dropshipper-payment-amount').value = totalLeft || '';
+  document.getElementById('dropshipper-payment-date').value = todayStr();
+  const methodEl = document.getElementById('dropshipper-payment-method');
+  if (methodEl) {
+    methodEl.innerHTML = '<option value="">— выбрать —</option>' +
+      (PAYMENT_METHOD_OPTIONS || []).map(method => `<option value="${escapeAttr(method)}">${escapeHtml(method)}</option>`).join('');
+  }
+  modal.classList.add('active');
+  initIcons();
+}
+
+function closeDropshipperPaymentModal() {
+  document.getElementById('dropshipper-payment-modal')?.classList.remove('active');
+}
+
+async function saveDropshipperPayment() {
+  const amount = Number(document.getElementById('dropshipper-payment-amount')?.value) || 0;
+  const date = document.getElementById('dropshipper-payment-date')?.value || todayStr();
+  const method = normalizePaymentMethod(document.getElementById('dropshipper-payment-method')?.value || '');
+  if (!currentDropshipperFilter) return;
+  if (amount <= 0) return showToast('Введите сумму выплаты', 'error');
+  if (!method) return showToast('Выберите способ оплаты', 'error');
+
+  const eligible = orders
+    .filter(o => !o.isCancelled && o.dropshipper === currentDropshipperFilter && Number(o.dropshipperPayout) > 0)
+    .map(o => ({ order: o, left: Math.max(0, (Number(o.dropshipperPayout) || 0) - getDropshipperPaid(o)) }))
+    .filter(item => item.left > 0)
+    .sort((a, b) => String(a.order.date || '').localeCompare(String(b.order.date || '')) || String(a.order.time || '').localeCompare(String(b.order.time || '')));
+  const totalLeft = eligible.reduce((sum, item) => sum + item.left, 0);
+  if (amount > totalLeft) return showToast('Сумма больше остатка по дропшипперу', 'error');
+
+  const btn = document.getElementById('dropshipper-payment-save-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Сохранение...'; }
+
+  let remaining = amount;
+  const timestamp = new Date().toISOString();
+  try {
+    for (const item of eligible) {
+      if (remaining <= 0) break;
+      const part = Math.min(item.left, remaining);
+      const nextOrder = {
+        ...item.order,
+        dropshipperPayments: [
+          ...(item.order.dropshipperPayments || []),
+          { amount: part, date, method, dropshipper: currentDropshipperFilter, timestamp },
+        ],
+      };
+      const saved = await sbUpdateOrder(nextOrder);
+      const idx = orders.findIndex(o => o.id === item.order.id);
+      if (idx !== -1) orders[idx] = saved || nextOrder;
+      remaining -= part;
+    }
+    closeDropshipperPaymentModal();
+    renderDropshipperDetail();
+    if (document.getElementById('screen-owner-payments')?.classList.contains('active')) renderOwnerPaymentsScreen();
+    showToast('Выплата записана ✓');
+  } catch (e) {
+    showToast('Ошибка выплаты: ' + e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Сохранить'; }
+  }
 }

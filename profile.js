@@ -117,6 +117,7 @@ function renderProfile() {
         todaySummary,
         withdrawAction: 'withdrawSalary()',
         withdrawDisabled: accTotal <= 0,
+        showWithdraw: currentRole !== 'junior',
         attendanceHtml: renderWorkAttendanceCard()
       })
     + '<div class="profile-today-card" style="margin-top:12px;">'
@@ -176,7 +177,7 @@ function getSalaryAccrualForDate(entries, date) {
     .reduce((sum, entry) => sum + Number(entry.amount), 0);
 }
 
-function renderWorkerSalarySection({ title, accumulated, todayAmount, todaySummary, withdrawAction, withdrawDisabled, attendanceHtml = '' }) {
+function renderWorkerSalarySection({ title, accumulated, todayAmount, todaySummary, withdrawAction, withdrawDisabled, showWithdraw = true, attendanceHtml = '' }) {
   const safeSummary = todaySummary || { count: 0, orders: [] };
   return ''
     + '<div class="profile-today-card" style="margin-top:12px;">'
@@ -186,7 +187,7 @@ function renderWorkerSalarySection({ title, accumulated, todayAmount, todaySumma
     + '<div style="font-size:11px;font-weight:800;color:var(--text3);letter-spacing:0.05em;">НАКОПЛЕНО</div>'
     + '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:8px;flex-wrap:wrap;">'
     + '<div style="font-size:28px;font-weight:900;color:var(--accent);">' + accumulated.toLocaleString('ru') + ' ₴</div>'
-    + '<button class="btn-primary" style="min-height:40px;padding:0 18px;border-radius:8px;font-weight:800;" onclick="' + withdrawAction + '" ' + (withdrawDisabled ? 'disabled' : '') + '>Снять</button>'
+    + (showWithdraw ? '<button class="btn-primary" style="min-height:40px;padding:0 18px;border-radius:8px;font-weight:800;" onclick="' + withdrawAction + '" ' + (withdrawDisabled ? 'disabled' : '') + '>Снять</button>' : '')
     + '</div>'
     + '</div>'
     + '<div style="padding:14px;background:var(--surface2);border-radius:12px;border:1px solid var(--border);">'

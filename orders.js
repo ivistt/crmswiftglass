@@ -470,8 +470,11 @@ function openOrderDetail(id) {
   const clientLeft = Math.max(0, fullOrderTotal - clientPaid);
   const supplierPaid = Number(o.check) || 0;
   const supplierLeft = Math.max(0, (Number(o.purchase) || 0) - supplierPaid);
+  const dropshipperPaid = (o.dropshipperPayments || []).reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
+  const dropshipperLeft = Math.max(0, (Number(o.dropshipperPayout) || 0) - dropshipperPaid);
   const clientPaymentsHtml = renderOrderPaymentsForDetail(o.clientPayments || [], 'Оплат клиента нет');
   const supplierPaymentsHtml = renderOrderPaymentsForDetail(o.supplierPayments || [], 'Оплат поставщику нет');
+  const dropshipperPaymentsHtml = renderOrderPaymentsForDetail(o.dropshipperPayments || [], 'Выплат дропшипперу нет');
 
   const canEdit   = currentRole === 'owner' || currentRole === 'manager';
   const canDelete = canDeleteOrder();
@@ -598,6 +601,8 @@ function openOrderDetail(id) {
         ${field('Маржа стекло', o.remainder !== undefined ? o.remainder + ' ₴' : '')}
         ${field('Дропшиппер', o.dropshipper)}
         ${field('Выплата дропшипперу', o.dropshipperPayout ? o.dropshipperPayout + ' ₴' : '')}
+        ${field('Дропшипперу выплачено', dropshipperPaid.toLocaleString('ru') + ' ₴')}
+        ${field('Дропшипперу осталось', dropshipperLeft.toLocaleString('ru') + ' ₴')}
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:14px;">
         <div style="padding:12px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;">
@@ -607,6 +612,10 @@ function openOrderDetail(id) {
         <div style="padding:12px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;">
           <div style="font-size:12px;font-weight:800;color:var(--text3);letter-spacing:0.04em;">ОПЛАТЫ ПОСТАВЩИКУ</div>
           ${supplierPaymentsHtml}
+        </div>
+        <div style="padding:12px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;">
+          <div style="font-size:12px;font-weight:800;color:var(--text3);letter-spacing:0.04em;">ВЫПЛАТЫ ДРОПШИППЕРУ</div>
+          ${dropshipperPaymentsHtml}
         </div>
       </div>
     </div>
@@ -1439,6 +1448,7 @@ async function saveOrder() {
     paymentMethod:   normalizePaymentMethod(get('f-payment-method')),
     dropshipper:     get('f-dropshipper'),
     dropshipperPayout: getN('f-payout-dropshipper'),
+    dropshipperPayments: existingOrder ? (existingOrder.dropshipperPayments || []) : [],
     statusDone:      existingOrder ? existingOrder.statusDone : false,
     inWork:          (currentRole === 'owner' || currentRole === 'manager')
       ? (document.getElementById('f-order-status')?.value === 'inWork')
