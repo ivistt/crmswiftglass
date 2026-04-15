@@ -161,8 +161,10 @@ function renderCashScreen() {
   const today = getLocalDateString();
   const regularCashLog = (workerCashLog || []).filter(entry => !isFopCashEntry(entry));
   const fopCashLog = (workerCashLog || []).filter(isFopCashEntry);
+  const confirmedFopCashLog = fopCashLog.filter(entry => entry.fop_confirmed === true);
+  const pendingFopCashLog = fopCashLog.filter(entry => entry.fop_confirmed !== true);
   const balance = calcCashBalance(regularCashLog);
-  const fopBalance = calcCashBalance(fopCashLog);
+  const fopBalance = calcCashBalance(confirmedFopCashLog);
 
   el.innerHTML = ''
     + '<div class="profile-header">'
@@ -172,7 +174,7 @@ function renderCashScreen() {
     + '</div>'
     + renderCashSection(regularCashLog, balance, today, { title: 'Касса (наличка)', account: 'cash', buttonText: '+ Запись' })
     + (currentWorkerName === FOP_CASH_WORKER_NAME
-      ? renderCashSection(fopCashLog, fopBalance, today, { title: 'Касса ФОП', account: 'fop', buttonText: '+ ФОП' })
+      ? renderCashSection(confirmedFopCashLog, fopBalance, today, { title: 'Касса БАБЕНКО', account: 'fop', buttonText: '+ БАБЕНКО', pendingEntries: pendingFopCashLog })
       : '');
 
   initIcons();
@@ -507,10 +509,15 @@ function isFopCashEntry(entry) {
   return String(entry?.cash_account || '').toLowerCase() === 'fop';
 }
 
+function isConfirmedFopCashEntry(entry) {
+  return isFopCashEntry(entry) && entry?.fop_confirmed === true;
+}
+
 function renderCashSection(log, balance, today, options = {}) {
   const title = options.title || 'Касса (наличка)';
   const account = options.account || 'cash';
   const buttonText = options.buttonText || '+ Запись';
+  const pendingEntries = options.pendingEntries || [];
   const balanceColor = balance >= 0 ? 'var(--accent)' : '#ef4444';
   const filteredLog = _filterCashLogByComment(log, cashSearchQuery);
 
@@ -547,6 +554,8 @@ function renderCashSection(log, balance, today, options = {}) {
     + '<input class="form-input" type="text" placeholder="Поиск по комментарию..." value="' + escapeHtml(cashSearchQuery) + '" oninput="setCashSearchQuery(this.value)">'
     + '</div>'
 
+    + (pendingEntries.length ? renderFopPendingEntries(pendingEntries) : '')
+
     // ── ТЕКУЩАЯ КАССА (сегодня) ──
     + '<div style="margin-bottom:16px;">'
     + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">'
@@ -567,6 +576,55 @@ function renderCashSection(log, balance, today, options = {}) {
     + '</div>'
 
     + '</div>';
+}
+
+function renderFopPendingEntries(entries) {
+  const total = (entries || []).reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
+  const totalColor = total >= 0 ? 'var(--accent)' : '#ef4444';
+  const rows = (entries || []).map(entry => {
+    const amount = Number(entry.amount) || 0;
+    const sign = amount >= 0 ? '+' : '';
+    const color = amount >= 0 ? 'var(--accent)' : '#ef4444';
+    return '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);">'
+      + '<div style="min-width:0;">'
+      + '<div style="font-size:13px;color:var(--text2);font-weight:700;">' + escapeHtml(entry.comment || 'БАБЕНКО') + '</div>'
+      + '<div style="font-size:11px;color:var(--text3);margin-top:2px;">' + escapeHtml(entry.fop_date || _cashEntryDate(entry) || '') + '</div>'
+      + '</div>'
+      + '<div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">'
+      + '<div style="font-size:15px;font-weight:900;color:' + color + ';white-space:nowrap;">' + sign + amount.toLocaleString('ru') + ' \u20B4</div>'
+      + '<button class="btn-primary" style="min-height:34px;padding:0 12px;border-radius:8px;font-size:12px;font-weight:800;" onclick="confirmFopCashEntry(\'' + escapeJsString(entry.id) + '\')">Подтвердить</button>'
+      + '</div>'
+      + '</div>';
+  }).join('');
+
+  return '<div style="margin-bottom:16px;">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">'
+    + '<div style="font-size:12px;font-weight:800;color:var(--text3);letter-spacing:0.04em;">ОЖИДАЮТ ПОДТВЕРЖДЕНИЯ</div>'
+    + '<div style="font-size:15px;font-weight:900;color:' + totalColor + ';">' + (total >= 0 ? '+' : '') + total.toLocaleString('ru') + ' \u20B4</div>'
+    + '</div>'
+    + '<div style="background:var(--surface2);border-radius:10px;padding:0 12px;">'
+    + rows
+    + '</div>'
+    + '</div>';
+}
+
+function escapeJsString(value) {
+  return String(value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+async function confirmFopCashEntry(id) {
+  if (!id) return;
+  try {
+    const updated = await sbUpdateCashEntry(id, { fop_confirmed: true });
+    workerCashLog = (workerCashLog || []).map(entry => entry.id === id ? { ...entry, ...updated, fop_confirmed: true } : entry);
+    if (Array.isArray(window.allCashLog)) {
+      window.allCashLog = window.allCashLog.map(entry => entry.id === id ? { ...entry, ...updated, fop_confirmed: true } : entry);
+    }
+    renderCashScreen();
+    showToast('БАБЕНКО подтверждено ✓');
+  } catch (e) {
+    showToast('Ошибка: ' + e.message, 'error');
+  }
 }
 
 function setCashSearchQuery(value) {
@@ -770,7 +828,7 @@ function openCashEntryModal(account = 'cash') {
   document.getElementById('cash-amount-input').value = '';
   document.getElementById('cash-comment-input').value = '';
   const titleEl = modal.querySelector('.modal-title');
-  if (titleEl) titleEl.innerHTML = icon('banknote') + (window._cashAccount === 'fop' ? ' Запись в кассу ФОП' : ' Запись в кассу');
+  if (titleEl) titleEl.innerHTML = icon('banknote') + (window._cashAccount === 'fop' ? ' Запись в кассу БАБЕНКО' : ' Запись в кассу');
   window._cashSign = 1;
   _updateCashSignButtons();
 
@@ -827,6 +885,8 @@ async function saveCashEntry() {
       amount,
       comment,
       cash_account: window._cashAccount === 'fop' ? 'fop' : 'cash',
+      fop_confirmed: false,
+      fop_date: window._cashAccount === 'fop' ? getLocalDateString() : null,
     });
     workerCashLog.unshift(entry);
     if (Array.isArray(window.allCashLog) && entry) window.allCashLog.unshift(entry);

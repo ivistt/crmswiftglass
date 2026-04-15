@@ -481,12 +481,13 @@ function getOwnerPaymentEntries() {
         const amount = Number(payment.amount) || 0;
         const method = normalizePaymentMethod(payment.method);
         const isFop = isFopPaymentMethod(method);
+        if (isFop) return;
         clientPaidSoFar += amount;
         entries.push({
-          type: isFop ? 'fop' : 'client',
-          title: isFop ? 'ФОП · Оплата клиента' : 'Оплата клиента',
+          type: 'client',
+          title: 'Оплата клиента',
           amount,
-          method: isFop ? 'ФОП' : method,
+          method,
           date: payment.date || order.date || '',
           paidSoFar: clientPaidSoFar,
           totalDue: clientTotal,
@@ -497,17 +498,19 @@ function getOwnerPaymentEntries() {
     } else if (order.paymentMethod && Number(order.debt) > 0) {
       const method = normalizePaymentMethod(order.paymentMethod);
       const isFop = isFopPaymentMethod(method);
-      entries.push({
-        type: isFop ? 'fop' : 'client',
-        title: isFop ? 'ФОП · Оплата клиента' : 'Оплата клиента',
-        amount: Number(order.debt) || 0,
-        method: isFop ? 'ФОП' : method,
-        date: order.date || '',
-        paidSoFar: Number(order.debt) || 0,
-        totalDue: clientTotal,
-        progressLabel: 'Клиент оплатил',
-        order,
-      });
+      if (!isFop) {
+        entries.push({
+          type: 'client',
+          title: 'Оплата клиента',
+          amount: Number(order.debt) || 0,
+          method,
+          date: order.date || '',
+          paidSoFar: Number(order.debt) || 0,
+          totalDue: clientTotal,
+          progressLabel: 'Клиент оплатил',
+          order,
+        });
+      }
     }
 
     let supplierPaidSoFar = 0;
@@ -515,13 +518,13 @@ function getOwnerPaymentEntries() {
       const method = normalizePaymentMethod(payment.method);
       const amount = Number(payment.amount) || 0;
       const isFop = isFopPaymentMethod(method);
+      if (!amount || !method || isCashPaymentMethod(method) || isFop) return;
       if (amount > 0) supplierPaidSoFar += amount;
-      if (!amount || !method || isCashPaymentMethod(method)) return;
       entries.push({
-        type: isFop ? 'fop' : 'supplier',
-        title: isFop ? 'ФОП · Оплата поставщику' : 'Оплата поставщику',
+        type: 'supplier',
+        title: 'Оплата поставщику',
         amount: -amount,
-        method: isFop ? 'ФОП' : method,
+        method,
         date: payment.date || order.date || '',
         paidSoFar: supplierPaidSoFar,
         totalDue: Number(order.purchase) || 0,
@@ -535,13 +538,13 @@ function getOwnerPaymentEntries() {
       const method = normalizePaymentMethod(payment.method);
       const amount = Number(payment.amount) || 0;
       const isFop = isFopPaymentMethod(method);
+      if (!amount || !method || isFop) return;
       if (amount > 0) dropshipperPaidSoFar += amount;
-      if (!amount || !method) return;
       entries.push({
-        type: isFop ? 'fop' : 'dropshipper',
-        title: `${isFop ? 'ФОП · ' : ''}Выплата дропшипперу${order.dropshipper ? ': ' + order.dropshipper : ''}`,
+        type: 'dropshipper',
+        title: `Выплата дропшипперу${order.dropshipper ? ': ' + order.dropshipper : ''}`,
         amount: -amount,
-        method: isFop ? 'ФОП' : method,
+        method,
         date: payment.date || order.date || '',
         paidSoFar: dropshipperPaidSoFar,
         totalDue: Number(order.dropshipperPayout) || 0,
@@ -552,14 +555,14 @@ function getOwnerPaymentEntries() {
   }
 
   (window.allCashLog || [])
-    .filter(entry => String(entry?.cash_account || '').toLowerCase() === 'fop')
+    .filter(entry => String(entry?.cash_account || '').toLowerCase() === 'fop' && entry.fop_confirmed === true)
     .forEach(entry => {
       entries.push({
         type: 'fop',
-        title: 'Касса ФОП',
+        title: 'Касса БАБЕНКО',
         amount: Number(entry.amount) || 0,
-        method: 'ФОП',
-        date: _ownerCashEntryDate(entry),
+        method: 'БАБЕНКО',
+        date: entry.fop_date || _ownerCashEntryDate(entry),
         cashEntry: entry,
       });
     });
@@ -604,7 +607,7 @@ function renderOwnerPaymentFilters() {
       </label>
       <label class="checkbox order-flag-checkbox">
         <input type="checkbox" ${ownerPaymentFilters.fop ? 'checked' : ''} onchange="setOwnerPaymentFilter('fop', this.checked)">
-        <span>ФОП</span>
+        <span>БАБЕНКО</span>
       </label>
     </div>
   `;
@@ -784,7 +787,7 @@ function renderOwnerPaymentsScreen() {
                 <div class="order-card" style="margin:8px 0 0;cursor:default;">
                   <div class="order-card-top">
                     <div class="order-card-left">
-                      <span class="order-id">ФОП</span>
+                      <span class="order-id">БАБЕНКО</span>
                       <span class="order-name">${escapeHtml(cashEntry.comment || '—')}</span>
                     </div>
                     <div style="font-size:16px;font-weight:800;color:${isExpense ? 'var(--red)' : 'var(--accent)'};">${amount.toLocaleString('ru')} ₴</div>

@@ -273,6 +273,17 @@ async function sbInsertCashEntry(entry) {
   return rows[0];
 }
 
+async function sbUpdateCashEntry(id, updates) {
+  const res = await fetch(`${WORKER_URL}/api/cash/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const rows = await res.json();
+  return rows[0];
+}
+
 // ── REF DATA ─────────────────────────────────────────────────
 
 async function sbFetchRef(table) {
