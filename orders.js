@@ -1531,7 +1531,6 @@ async function saveOrder() {
       const saved = await sbUpdateOrder(data);
       const idx = orders.findIndex(o => o.id === editingOrderId);
       if (idx !== -1) orders[idx] = saved;
-      await _upsertOrderSalaries(saved);
       try {
         await rememberAssistantForResponsible(data.responsible, data.assistant);
       } catch (e) {
