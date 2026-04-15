@@ -3,7 +3,7 @@
 // ============================================================
 
 let currentMonthFilter = null;
-let ownerPaymentFilters = { client: true, supplier: true, dropshipper: true };
+let ownerPaymentFilters = { client: true, supplier: true, dropshipper: true, fop: true };
 const THEME_STORAGE_KEY = 'crm_theme';
 
 // Fallback если data.js старой версии (без carDirectory)
@@ -149,14 +149,16 @@ function openFinanceScreen() {
   showScreen('finance');
 }
 
-function openOwnerCashScreen() {
+async function openOwnerCashScreen() {
   if (currentRole !== 'owner') return;
+  try { window.allCashLog = await sbFetchAllCashLog(); } catch(e) { window.allCashLog = window.allCashLog || []; }
   renderOwnerCashScreen();
   showScreen('owner-cash');
 }
 
-function openOwnerPaymentsScreen() {
+async function openOwnerPaymentsScreen() {
   if (currentRole !== 'owner') return;
+  try { window.allCashLog = await sbFetchAllCashLog(); } catch(e) { window.allCashLog = window.allCashLog || []; }
   renderOwnerPaymentsScreen();
   showScreen('owner-payments');
 }
@@ -206,11 +208,16 @@ function refreshActiveOrdersViews() {
     openClientDetail(currentClientDetailKey);
   }
   if (document.getElementById('screen-workers')?.classList.contains('active')) renderWorkers();
+  if (document.getElementById('screen-owner-payments')?.classList.contains('active')) renderOwnerPaymentsScreen();
+  if (document.getElementById('screen-owner-cash')?.classList.contains('active')) renderOwnerCashScreen();
 }
 
 async function refreshOrders() {
   const btn = document.getElementById('refresh-btn');
   const beforeSignature = getOrdersDataSignature();
+  const beforeCashSignature = currentRole === 'owner'
+    ? JSON.stringify((window.allCashLog || []).slice().sort((a, b) => String(a.id || a.created_at).localeCompare(String(b.id || b.created_at))))
+    : '';
 
   if (btn) {
     btn.disabled = true;
@@ -221,7 +228,13 @@ async function refreshOrders() {
 
   try {
     orders = await sbFetchOrders();
-    const unchanged = beforeSignature === getOrdersDataSignature();
+    if (currentRole === 'owner') {
+      try { window.allCashLog = await sbFetchAllCashLog(); } catch(e) { window.allCashLog = window.allCashLog || []; }
+    }
+    const afterCashSignature = currentRole === 'owner'
+      ? JSON.stringify((window.allCashLog || []).slice().sort((a, b) => String(a.id || a.created_at).localeCompare(String(b.id || b.created_at))))
+      : '';
+    const unchanged = beforeSignature === getOrdersDataSignature() && beforeCashSignature === afterCashSignature;
     refreshActiveOrdersViews();
     showToast(unchanged ? 'Данные актуальны: изменений в базе нет' : 'Данные из базы обновлены ✓');
 
@@ -466,27 +479,33 @@ function getOwnerPaymentEntries() {
       let clientPaidSoFar = 0;
       clientPayments.forEach(payment => {
         const amount = Number(payment.amount) || 0;
+        const method = normalizePaymentMethod(payment.method);
+        const isFop = isFopPaymentMethod(method);
         clientPaidSoFar += amount;
         entries.push({
-          type: 'client',
-          title: 'Оплата клиента',
+          type: isFop ? 'fop' : 'client',
+          title: isFop ? 'ФОП · Оплата клиента' : 'Оплата клиента',
           amount,
-          method: normalizePaymentMethod(payment.method),
+          method: isFop ? 'ФОП' : method,
           date: payment.date || order.date || '',
           paidSoFar: clientPaidSoFar,
           totalDue: clientTotal,
+          progressLabel: 'Клиент оплатил',
           order,
         });
       });
     } else if (order.paymentMethod && Number(order.debt) > 0) {
+      const method = normalizePaymentMethod(order.paymentMethod);
+      const isFop = isFopPaymentMethod(method);
       entries.push({
-        type: 'client',
-        title: 'Оплата клиента',
+        type: isFop ? 'fop' : 'client',
+        title: isFop ? 'ФОП · Оплата клиента' : 'Оплата клиента',
         amount: Number(order.debt) || 0,
-        method: normalizePaymentMethod(order.paymentMethod),
+        method: isFop ? 'ФОП' : method,
         date: order.date || '',
         paidSoFar: Number(order.debt) || 0,
         totalDue: clientTotal,
+        progressLabel: 'Клиент оплатил',
         order,
       });
     }
@@ -495,16 +514,18 @@ function getOwnerPaymentEntries() {
     (order.supplierPayments || []).forEach(payment => {
       const method = normalizePaymentMethod(payment.method);
       const amount = Number(payment.amount) || 0;
+      const isFop = isFopPaymentMethod(method);
       if (amount > 0) supplierPaidSoFar += amount;
       if (!amount || !method || isCashPaymentMethod(method)) return;
       entries.push({
-        type: 'supplier',
-        title: 'Оплата поставщику',
+        type: isFop ? 'fop' : 'supplier',
+        title: isFop ? 'ФОП · Оплата поставщику' : 'Оплата поставщику',
         amount: -amount,
-        method,
+        method: isFop ? 'ФОП' : method,
         date: payment.date || order.date || '',
         paidSoFar: supplierPaidSoFar,
         totalDue: Number(order.purchase) || 0,
+        progressLabel: 'Поставщику оплачено',
         order,
       });
     });
@@ -513,20 +534,35 @@ function getOwnerPaymentEntries() {
     (order.dropshipperPayments || []).forEach(payment => {
       const method = normalizePaymentMethod(payment.method);
       const amount = Number(payment.amount) || 0;
+      const isFop = isFopPaymentMethod(method);
       if (amount > 0) dropshipperPaidSoFar += amount;
       if (!amount || !method) return;
       entries.push({
-        type: 'dropshipper',
-        title: `Выплата дропшипперу${order.dropshipper ? ': ' + order.dropshipper : ''}`,
+        type: isFop ? 'fop' : 'dropshipper',
+        title: `${isFop ? 'ФОП · ' : ''}Выплата дропшипперу${order.dropshipper ? ': ' + order.dropshipper : ''}`,
         amount: -amount,
-        method,
+        method: isFop ? 'ФОП' : method,
         date: payment.date || order.date || '',
         paidSoFar: dropshipperPaidSoFar,
         totalDue: Number(order.dropshipperPayout) || 0,
+        progressLabel: 'Дропшипперу выплачено',
         order,
       });
     });
   }
+
+  (window.allCashLog || [])
+    .filter(entry => String(entry?.cash_account || '').toLowerCase() === 'fop')
+    .forEach(entry => {
+      entries.push({
+        type: 'fop',
+        title: 'Касса ФОП',
+        amount: Number(entry.amount) || 0,
+        method: 'ФОП',
+        date: _ownerCashEntryDate(entry),
+        cashEntry: entry,
+      });
+    });
 
   return entries.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
 }
@@ -536,9 +572,9 @@ function renderOwnerPaymentProgress(entry) {
   const total = Number(entry?.totalDue) || 0;
   if (!paid && !total) return '';
 
-  const label = entry.type === 'supplier'
+  const label = entry.progressLabel || (entry.type === 'supplier'
     ? 'Поставщику оплачено'
-    : (entry.type === 'dropshipper' ? 'Дропшипперу выплачено' : 'Клиент оплатил');
+    : (entry.type === 'dropshipper' ? 'Дропшипперу выплачено' : 'Клиент оплатил'));
   return `
     <span class="order-meta-item" style="color:var(--yellow);font-weight:700;">
       ${label}: ${paid.toLocaleString('ru')} / ${total.toLocaleString('ru')} ₴
@@ -565,6 +601,10 @@ function renderOwnerPaymentFilters() {
       <label class="checkbox order-flag-checkbox">
         <input type="checkbox" ${ownerPaymentFilters.dropshipper ? 'checked' : ''} onchange="setOwnerPaymentFilter('dropshipper', this.checked)">
         <span>Выплаты дропшипперам</span>
+      </label>
+      <label class="checkbox order-flag-checkbox">
+        <input type="checkbox" ${ownerPaymentFilters.fop ? 'checked' : ''} onchange="setOwnerPaymentFilter('fop', this.checked)">
+        <span>ФОП</span>
       </label>
     </div>
   `;
@@ -738,6 +778,24 @@ function renderOwnerPaymentsScreen() {
             const amount = Number(entry.amount) || 0;
             const isExpense = amount < 0;
             const total = Number(entry.totalDue) || 0;
+            if (entry.type === 'fop' && entry.cashEntry) {
+              const cashEntry = entry.cashEntry || {};
+              return `
+                <div class="order-card" style="margin:8px 0 0;cursor:default;">
+                  <div class="order-card-top">
+                    <div class="order-card-left">
+                      <span class="order-id">ФОП</span>
+                      <span class="order-name">${escapeHtml(cashEntry.comment || '—')}</span>
+                    </div>
+                    <div style="font-size:16px;font-weight:800;color:${isExpense ? 'var(--red)' : 'var(--accent)'};">${amount.toLocaleString('ru')} ₴</div>
+                  </div>
+                  <div class="order-card-meta">
+                    <span class="order-meta-item">${escapeHtml(cashEntry.worker_name || '—')}</span>
+                    <span class="order-meta-item">${entry.title}</span>
+                  </div>
+                </div>
+              `;
+            }
             return `
               <div class="order-card" style="margin:8px 0 0;cursor:pointer;" onclick="openOrderDetail('${order.id}')">
                 <div class="order-card-top">
@@ -838,6 +896,7 @@ function renderOwnerCashScreen() {
     .map(w => w.name);
 
   const logs = [...(window.allCashLog || [])]
+    .filter(entry => String(entry?.cash_account || '').toLowerCase() !== 'fop')
     .filter(entry => seniorNames.includes(entry.worker_name))
     .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
 

@@ -8,6 +8,7 @@ let workerCashLog  = [];  // записи кассы текущего специ
 let assistantWorkerSalaries = [];
 let cashSearchQuery = '';
 let selectedAssistantSalaryName = '';
+const FOP_CASH_WORKER_NAME = 'Oleg Starshiy';
 
 function canManageAssistantSalary() {
   return currentRole === 'senior' || currentRole === 'extra';
@@ -158,7 +159,10 @@ function renderCashScreen() {
   }
 
   const today = getLocalDateString();
-  const balance = calcCashBalance(workerCashLog);
+  const regularCashLog = (workerCashLog || []).filter(entry => !isFopCashEntry(entry));
+  const fopCashLog = (workerCashLog || []).filter(isFopCashEntry);
+  const balance = calcCashBalance(regularCashLog);
+  const fopBalance = calcCashBalance(fopCashLog);
 
   el.innerHTML = ''
     + '<div class="profile-header">'
@@ -166,7 +170,10 @@ function renderCashScreen() {
     + '<div><div style="font-size:20px;font-weight:800;">' + getWorkerDisplayName(currentWorkerName) + '</div>'
     + '<div style="font-size:13px;color:var(--text3);margin-top:2px;">Касса</div></div>'
     + '</div>'
-    + renderCashSection(balance, today);
+    + renderCashSection(regularCashLog, balance, today, { title: 'Касса (наличка)', account: 'cash', buttonText: '+ Запись' })
+    + (currentWorkerName === FOP_CASH_WORKER_NAME
+      ? renderCashSection(fopCashLog, fopBalance, today, { title: 'Касса ФОП', account: 'fop', buttonText: '+ ФОП' })
+      : '');
 
   initIcons();
 }
@@ -496,9 +503,16 @@ function buildWithdrawalsBlock(entries) {
 // ── КАССА — РЕНДЕР СЕКЦИИ ────────────────────────────────────
 // Разбита на: Текущая (сегодня) + Архив (года → месяцы → дни)
 
-function renderCashSection(balance, today) {
+function isFopCashEntry(entry) {
+  return String(entry?.cash_account || '').toLowerCase() === 'fop';
+}
+
+function renderCashSection(log, balance, today, options = {}) {
+  const title = options.title || 'Касса (наличка)';
+  const account = options.account || 'cash';
+  const buttonText = options.buttonText || '+ Запись';
   const balanceColor = balance >= 0 ? 'var(--accent)' : '#ef4444';
-  const filteredLog = _filterCashLogByComment(workerCashLog, cashSearchQuery);
+  const filteredLog = _filterCashLogByComment(log, cashSearchQuery);
 
   // Разделяем лог на сегодня и архив
   const todayLog   = filteredLog.filter(e => _cashEntryDate(e) === today);
@@ -520,12 +534,12 @@ function renderCashSection(balance, today) {
     // Заголовок с балансом и кнопками
     + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">'
     + '<div>'
-    + '<div class="profile-today-label"><i data-lucide="wallet" style="width:15px;height:15px;"></i> Касса (наличка)</div>'
+    + '<div class="profile-today-label"><i data-lucide="wallet" style="width:15px;height:15px;"></i> ' + escapeHtml(title) + '</div>'
     + '<div style="font-size:28px;font-weight:800;color:' + balanceColor + ';margin-top:4px;">' + balance.toLocaleString('ru') + ' \u20B4</div>'
     + '<div style="font-size:11px;color:var(--text3);">общий баланс</div>'
     + '</div>'
     + '<div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">'
-    + '<button class="btn-secondary" style="font-size:12px;padding:6px 10px;" onclick="openCashEntryModal()">+ Запись</button>'
+    + '<button class="btn-secondary" style="font-size:12px;padding:6px 10px;" onclick="openCashEntryModal(\'' + account + '\')">' + escapeHtml(buttonText) + '</button>'
     + '</div>'
     + '</div>'
 
@@ -702,7 +716,8 @@ function _buildCashArchive(log) {
 
 // ── МОДАЛ ДОБАВЛЕНИЯ ЗАПИСИ В КАССУ ─────────────────────────
 
-function openCashEntryModal() {
+function openCashEntryModal(account = 'cash') {
+  window._cashAccount = account === 'fop' ? 'fop' : 'cash';
   let modal = document.getElementById('cash-entry-modal');
   if (!modal) {
     modal = document.createElement('div');
@@ -754,6 +769,8 @@ function openCashEntryModal() {
 
   document.getElementById('cash-amount-input').value = '';
   document.getElementById('cash-comment-input').value = '';
+  const titleEl = modal.querySelector('.modal-title');
+  if (titleEl) titleEl.innerHTML = icon('banknote') + (window._cashAccount === 'fop' ? ' Запись в кассу ФОП' : ' Запись в кассу');
   window._cashSign = 1;
   _updateCashSignButtons();
 
@@ -809,6 +826,7 @@ async function saveCashEntry() {
       worker_name: currentWorkerName,
       amount,
       comment,
+      cash_account: window._cashAccount === 'fop' ? 'fop' : 'cash',
     });
     workerCashLog.unshift(entry);
     if (Array.isArray(window.allCashLog) && entry) window.allCashLog.unshift(entry);

@@ -896,6 +896,10 @@ function isCashPaymentMethod(method) {
   return normalizePaymentMethod(method) === '🪙 Наличка';
 }
 
+function isFopPaymentMethod(method) {
+  return normalizePaymentMethod(method) === '📂 БЕЗНАЛ БАБЕНКО';
+}
+
 let currentRole = null;
 let currentWorkerName = null;
 let workers     = [];
