@@ -850,8 +850,11 @@ function populateRefSelects() {
   if (managerSel) {
     const cur = managerSel.value;
     const managerWorkers = workers.filter(w => w.systemRole === 'manager');
+    const staticManagers = [{ name: 'Maksim', label: 'Макс' }]
+      .filter(manager => !managerWorkers.some(w => w.name === manager.name));
     managerSel.innerHTML = '<option value="">— выбрать —</option>' +
-      managerWorkers.map(w => `<option value="${escapeAttr(w.name)}">${escapeHtml(getWorkerDisplayName(w.name))}</option>`).join('');
+      managerWorkers.map(w => `<option value="${escapeAttr(w.name)}">${escapeHtml(getWorkerDisplayName(w.name))}</option>`).join('') +
+      staticManagers.map(w => `<option value="${escapeAttr(w.name)}">${escapeHtml(w.label)}</option>`).join('');
     if (cur) managerSel.value = cur;
   }
 
@@ -1994,6 +1997,7 @@ async function _upsertOrderSalaries(order) {
   }
 
   for (const workerName of affectedWorkers) {
+    if (!_canSyncDailyBaseSalaryForWorker(workerName)) continue;
     await _syncDailyBaseSalaryEntry(workerName, order.date);
   }
 
@@ -2003,6 +2007,14 @@ async function _upsertOrderSalaries(order) {
       workerSalaries = await sbFetchWorkerSalaries(currentWorkerName);
     } catch (e) { /* не критично */ }
   }
+}
+
+function _canSyncDailyBaseSalaryForWorker(workerName) {
+  if (!workerName) return false;
+  if (currentRole === 'owner') return true;
+  if (workerName === currentWorkerName) return true;
+  if (currentRole !== 'senior' && currentRole !== 'extra') return false;
+  return getSeniorWorkedAssistants().some(worker => worker.name === workerName);
 }
 
 async function _syncDailyBaseSalaryEntry(workerName, date) {

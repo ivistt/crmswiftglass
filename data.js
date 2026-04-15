@@ -22,7 +22,8 @@ function getWorkerDisplayName(name) {
   const raw = String(name || '').trim();
   if (!raw) return '';
   const workerAlias = (workers || []).find(w => w.name === raw)?.alias;
-  return workerAlias || raw;
+  const staticNames = { Maksim: 'Макс' };
+  return workerAlias || staticNames[raw] || raw;
 }
 
 function getWorkerDisplayPair(responsible, assistant) {
