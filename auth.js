@@ -98,11 +98,12 @@ function _showApp(role, workerName) {
     loader = document.createElement('div');
     loader.id = 'app-loading';
     loader.innerHTML = `
-      <img src="images/logo-loader.svg" class="loader-logo" alt="">
+      <img src="images/logo-loader.svg" data-theme-logo="loader" class="loader-logo" alt="">
       <div class="loader-greeting">Привет, <span id="loader-name">...</span>!</div>
       <div class="loader-sub">Загружаем данные</div>
     `;
     document.getElementById('app').prepend(loader);
+    if (typeof updateThemeAssets === 'function') updateThemeAssets();
   }
 
   // Вставляем имя в лоадер

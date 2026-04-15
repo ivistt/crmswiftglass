@@ -3,10 +3,11 @@
 // ============================================================
 
 let editingOrderId  = null;      // null = новый, иначе id редактируемого
-let currentOrderTab = 'selection';  // 'selection' | 'planner' | 'done' — для owner/manager
+let currentOrderTab = 'selection';  // 'selection' | 'call' | 'planner' | 'done' — для owner/manager
 let currentWorkerTab = 'actual'; // 'actual' | 'today' | 'done' | 'future' | 'past' | 'all' — для специалистов
 let ordersVisibleCount = 10;
 let lastOrdersListSignature = '';
+let ordersFiltersOpen = false;
 let currentOrderDetailId = null;
 const SERVICE_TYPE_OPTIONS = [
   { group: 'Монтаж', name: 'Монтаж лобового', rate: 400, salaryCategory: 'mount' },
@@ -25,6 +26,10 @@ const SERVICE_TYPE_OPTIONS = [
   { group: 'Вклейка', name: 'Вклейка лобового бус', rate: 250, salaryCategory: 'glue' },
   { group: 'Вклейка', name: 'Вклейка лобового грузовик', rate: 350, salaryCategory: 'glue' },
   { group: 'Нестандартные работы', name: 'Нестандартные работы', rate: 0, salaryCategory: 'custom' },
+];
+
+const STATIC_MANAGER_OPTIONS = [
+  { name: 'Maksim', label: '🦊 Макс' },
 ];
 const SERVICE_TYPE_BY_NAME = Object.fromEntries(SERVICE_TYPE_OPTIONS.map(item => [item.name, item]));
 
@@ -190,6 +195,7 @@ async function confirmSeniorOrderAmounts(orderId) {
 // ---------- КНОПКА ДОБАВИТЬ ----------
 function setupOrderActions() {
   updateOrdersBackTopbar();
+  updateOrdersFiltersDropdown();
   const el = document.getElementById('orders-actions');
   if (canCreateOrder()) {
     el.innerHTML = `<button class="btn-primary" onclick="openOrderModal(null)">+ Добавить запись</button>`;
@@ -205,8 +211,23 @@ function updateOrdersBackTopbar() {
 
   const isSpecialist = currentRole !== 'owner' && currentRole !== 'manager';
   const shouldShow = Boolean(currentMonthFilter) || isSpecialist;
-  topbar.style.display = shouldShow ? 'flex' : 'none';
+  topbar.style.display = 'flex';
+  topbar.classList.toggle('orders-topbar-without-back', !shouldShow);
   label.textContent = 'Назад';
+  const backBtn = topbar.querySelector('.back-btn:not(.orders-filter-toggle)');
+  if (backBtn) backBtn.style.display = shouldShow ? 'flex' : 'none';
+}
+
+function toggleOrdersFilters() {
+  ordersFiltersOpen = !ordersFiltersOpen;
+  updateOrdersFiltersDropdown();
+}
+
+function updateOrdersFiltersDropdown() {
+  const dropdown = document.getElementById('orders-filters-dropdown');
+  const btn = document.getElementById('orders-filter-toggle');
+  if (dropdown) dropdown.classList.toggle('open', ordersFiltersOpen);
+  if (btn) btn.classList.toggle('active', ordersFiltersOpen);
 }
 
 function goBackFromOrdersList() {
@@ -290,7 +311,8 @@ function renderOrderStatusBadges(o) {
   if (o.isCancelled) {
     badges.push('<span class="status-badge" style="background:var(--red,#DC2626);color:#fff;">Отменен</span>');
   } else {
-    if (!o.inWork && !o.workerDone) badges.push('<span class="status-badge status-selection">Подборка</span>');
+    if (o.callStatus && !o.workerDone) badges.push('<span class="status-badge status-call">Прозвон</span>');
+    if (!o.callStatus && !o.inWork && !o.workerDone) badges.push('<span class="status-badge status-selection">Подборка</span>');
     if (o.inWork && !o.workerDone) badges.push('<span class="status-badge" style="background:#F59E0B;color:#fff;">В работе</span>');
     if (o.workerDone && currentRole !== 'senior') badges.push('<span class="status-badge status-done">✓ Выполнен</span>');
   }
@@ -388,8 +410,10 @@ function renderOrders() {
   if (currentRole === 'owner' || currentRole === 'manager') {
     if (currentOrderTab === 'planner') {
       list = list.filter(o => o.inWork && !o.workerDone && !o.isCancelled);
+    } else if (currentOrderTab === 'call') {
+      list = list.filter(_isCallOrderVisibleInCurrentContext);
     } else if (currentOrderTab === 'selection') {
-      list = list.filter(o => !o.inWork && !o.workerDone && !o.isCancelled);
+      list = list.filter(o => !o.callStatus && !o.inWork && !o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'done') {
       list = list.filter(o => o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'debt') {
@@ -439,6 +463,14 @@ function renderOrders() {
   }
 
   _renderOrdersListWithLoadMore(container, list, signature);
+}
+
+function _isCallOrderVisibleInCurrentContext(o) {
+  if (!o?.callStatus || o.workerDone || o.isCancelled) return false;
+  if (currentRole !== 'manager') return true;
+  if (o.manager !== currentWorkerName) return false;
+  if (!o.date) return true;
+  return o.date <= tomorrowStr();
 }
 
 function renderOrderPaymentsForDetail(payments, emptyLabel) {
@@ -850,7 +882,7 @@ function populateRefSelects() {
   if (managerSel) {
     const cur = managerSel.value;
     const managerWorkers = workers.filter(w => w.systemRole === 'manager');
-    const staticManagers = [{ name: 'Maksim', label: 'Макс' }]
+    const staticManagers = STATIC_MANAGER_OPTIONS
       .filter(manager => !managerWorkers.some(w => w.name === manager.name));
     managerSel.innerHTML = '<option value="">— выбрать —</option>' +
       managerWorkers.map(w => `<option value="${escapeAttr(w.name)}">${escapeHtml(getWorkerDisplayName(w.name))}</option>`).join('') +
@@ -865,8 +897,11 @@ function populateOrderWorkerFilter() {
   const sel = document.getElementById('filter-worker');
   if (!sel) return;
   const cur = sel.value;
+  const staticManagers = STATIC_MANAGER_OPTIONS
+    .filter(manager => !(workers || []).some(w => w.name === manager.name));
   sel.innerHTML = '<option value="">Все сотрудники</option>' +
-    (workers || []).map(w => `<option value="${escapeAttr(w.name)}">${escapeHtml(getWorkerDisplayName(w.name))}</option>`).join('');
+    (workers || []).map(w => `<option value="${escapeAttr(w.name)}">${escapeHtml(getWorkerDisplayName(w.name))}</option>`).join('') +
+    staticManagers.map(w => `<option value="${escapeAttr(w.name)}">${escapeHtml(w.label)}</option>`).join('');
   if (cur) sel.value = cur;
 }
 
@@ -1161,12 +1196,15 @@ function updateOrderSaveButtonLabel() {
   const label = document.getElementById('order-save-label');
   const btn = document.getElementById('order-save-btn');
   if (btn) {
-    btn.classList.remove('order-save-selection', 'order-save-planner', 'order-save-cancelled');
+    btn.classList.remove('order-save-selection', 'order-save-call', 'order-save-planner', 'order-save-cancelled');
   }
   if (!label) return;
   if (status === 'inWork') {
     label.textContent = 'Сохранить в работу';
     if (btn) btn.classList.add('order-save-planner');
+  } else if (status === 'call') {
+    label.textContent = 'Сохранить в прозвон';
+    if (btn) btn.classList.add('order-save-call');
   } else if (status === 'cancelled') {
     label.textContent = 'Сохранить отменённым';
     if (btn) btn.classList.add('order-save-cancelled');
@@ -1257,7 +1295,12 @@ function fillOrderForm(o) {
   if (onlySaleEl) onlySaleEl.checked = !!o.onlySale;
 
   const statusEl = document.getElementById('f-order-status');
-  if (statusEl) { if (o.isCancelled) statusEl.value = 'cancelled'; else if (o.inWork) statusEl.value = 'inWork'; else statusEl.value = ''; }
+  if (statusEl) {
+    if (o.isCancelled) statusEl.value = 'cancelled';
+    else if (o.inWork) statusEl.value = 'inWork';
+    else if (o.callStatus) statusEl.value = 'call';
+    else statusEl.value = '';
+  }
   const asEl = document.getElementById('f-assistant');
   // перерисовать чекбоксы комплектации
   const confArr = (o.configuration || '').split(',');
@@ -1401,6 +1444,12 @@ function validateOrderRequiredFields(data) {
     if (!data.car) missing.push('автомобиль');
   }
 
+  if (status === 'call') {
+    if (!data.manager) missing.push('менеджер');
+    if (!data.phone) missing.push('номер телефона');
+    if (!data.car) missing.push('автомобиль');
+  }
+
   if (status === 'inWork') {
     if (!data.responsible) missing.push('ответственный');
     if (!data.assistant) missing.push('помощник');
@@ -1465,6 +1514,9 @@ async function saveOrder() {
     inWork:          (currentRole === 'owner' || currentRole === 'manager')
       ? (document.getElementById('f-order-status')?.value === 'inWork')
       : (existingOrder ? existingOrder.inWork : false),
+    callStatus:      (currentRole === 'owner' || currentRole === 'manager')
+      ? (document.getElementById('f-order-status')?.value === 'call')
+      : (existingOrder ? !!existingOrder.callStatus : false),
     isCancelled:     (currentRole === 'owner' || currentRole === 'manager')
       ? (document.getElementById('f-order-status')?.value === 'cancelled')
       : (existingOrder ? !!existingOrder.isCancelled : false),
@@ -1672,6 +1724,14 @@ function todayStr() {
     + String(d.getDate()).padStart(2, '0');
 }
 
+function tomorrowStr() {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return d.getFullYear() + '-'
+    + String(d.getMonth() + 1).padStart(2, '0') + '-'
+    + String(d.getDate()).padStart(2, '0');
+}
+
 function nowTimeStr() {
   const d = new Date();
   return String(d.getHours()).padStart(2, '0') + ':'
@@ -1854,8 +1914,10 @@ function renderOrdersForMonth(ym) {
   if (currentRole === 'owner' || currentRole === 'manager') {
     if (currentOrderTab === 'planner') {
       list = list.filter(o => o.inWork && !o.workerDone && !o.isCancelled);
+    } else if (currentOrderTab === 'call') {
+      list = list.filter(_isCallOrderVisibleInCurrentContext);
     } else if (currentOrderTab === 'selection') {
-      list = list.filter(o => !o.inWork && !o.workerDone && !o.isCancelled);
+      list = list.filter(o => !o.callStatus && !o.inWork && !o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'done') {
       list = list.filter(o => o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'debt') {
@@ -2058,6 +2120,7 @@ function initOrderTabs() {
       tabsEl.style.display = 'flex';
       tabsEl.innerHTML = `
         <button class="orders-tab" id="tab-selection" onclick="setOrderTab('selection')">Подборка</button>
+        <button class="orders-tab" id="tab-call"      onclick="setOrderTab('call')">Прозвон</button>
         <button class="orders-tab" id="tab-planner"   onclick="setOrderTab('planner')">Планёрка</button>
         <button class="orders-tab" id="tab-done"      onclick="setOrderTab('done')">Выполненные</button>
         <button class="orders-tab" id="tab-debt"      onclick="setOrderTab('debt')">Долг</button>

@@ -4,13 +4,57 @@
 
 let currentMonthFilter = null;
 let ownerPaymentFilters = { client: true, supplier: true, dropshipper: true };
+const THEME_STORAGE_KEY = 'crm_theme';
 
 // Fallback если data.js старой версии (без carDirectory)
 if (typeof carDirectory === 'undefined') {
   window.carDirectory = [];
 }
 
+function getCurrentTheme() {
+  return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+}
+
+function applyTheme(theme) {
+  const nextTheme = theme === 'dark' ? 'dark' : 'light';
+  document.documentElement.dataset.theme = nextTheme;
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+  } catch (e) {}
+  updateThemeAssets();
+  updateThemeToggleButton();
+}
+
+function toggleTheme() {
+  applyTheme(getCurrentTheme() === 'dark' ? 'light' : 'dark');
+}
+
+function updateThemeToggleButton() {
+  const btn = document.getElementById('theme-toggle-btn');
+  if (!btn) return;
+  const isDark = getCurrentTheme() === 'dark';
+  btn.title = isDark ? 'Включить светлую тему' : 'Включить темную тему';
+  btn.innerHTML = `<i data-lucide="${isDark ? 'sun' : 'moon'}" style="width:15px;height:15px;"></i>`;
+  initIcons();
+}
+
+function updateThemeAssets() {
+  const isDark = getCurrentTheme() === 'dark';
+  const sources = {
+    main: isDark ? 'images/logo.svg' : 'images/logo-d.svg',
+    loader: isDark ? 'images/logo-loader.svg' : 'images/logo-loader-d.svg',
+  };
+  document.querySelectorAll('[data-theme-logo]').forEach(img => {
+    const key = img.dataset.themeLogo;
+    if (sources[key] && img.getAttribute('src') !== sources[key]) {
+      img.setAttribute('src', sources[key]);
+    }
+  });
+}
+
 async function initApp() {
+  updateThemeAssets();
+  updateThemeToggleButton();
   const minDelay = new Promise(r => setTimeout(r, 2000));
   const tasks = [loadOrders(), loadWorkers(), loadRefData(), loadWorkerSalaries(), minDelay];
   if (typeof loadManualClients === 'function' && canViewClients()) {

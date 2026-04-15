@@ -5,6 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SwiftGlass CRM</title>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script>
+    try {
+      document.documentElement.dataset.theme = localStorage.getItem('crm_theme') === 'dark' ? 'dark' : 'light';
+    } catch (e) {
+      document.documentElement.dataset.theme = 'light';
+    }
+  </script>
   <link rel="stylesheet" href="styles.css">
   <link rel="apple-touch-icon" href="images/logo-a.png">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -73,13 +80,13 @@
     }
     .loader-greeting {
       font-family:'Manrope',sans-serif;font-size:20px;font-weight:700;
-      color:#fff;letter-spacing:0.01em;
+      color:var(--text);letter-spacing:0.01em;
       animation:loader-fade 0.5s ease forwards;
     }
-    .loader-greeting span { color:#00e5a0; }
+    .loader-greeting span { color:var(--accent); }
     .loader-sub {
       font-family:'Manrope',sans-serif;font-size:13px;
-      color:rgba(255,255,255,0.35);margin-top:-18px;
+      color:var(--text3);margin-top:-18px;
       animation:loader-fade 0.5s 0.1s ease both;
     }
     @keyframes loader-fade {
@@ -94,7 +101,7 @@
 <div id="auth-screen">
   <div class="auth-card">
     <div class="auth-logo">
-      <img src="images/logo.svg" alt="SwiftGlass" style="height:64px;width:auto;">
+      <img src="images/logo.svg" data-theme-logo="main" alt="SwiftGlass" style="height:64px;width:auto;">
     </div>
     <div class="auth-title">Вход в систему</div>
     <div class="auth-subtitle">Введите пароль для входа</div>
@@ -116,7 +123,7 @@
 <!-- ==================== APP ==================== -->
 <div id="app" style="display:none;">
   <div id="app-loading">
-    <img src="images/logo-loader.svg" class="loader-logo" alt="">
+    <img src="images/logo-loader.svg" data-theme-logo="loader" class="loader-logo" alt="">
     <div class="loader-greeting">Привет, <span id="loader-name">...</span>!</div>
     <div class="loader-sub">Загружаем данные</div>
   </div>
@@ -125,10 +132,13 @@
   <div class="topbar">
     <div style="display:flex;align-items:center;gap:16px;">
       <div class="topbar-logo" onclick="goHome()">
-        <img src="images/logo.svg" alt="SwiftGlass" style="height:28px;width:auto;">
+        <img src="images/logo.svg" data-theme-logo="main" alt="SwiftGlass" style="height:28px;width:auto;">
       </div>
     </div>
     <div class="topbar-right">
+      <button class="refresh-btn theme-toggle-btn" id="theme-toggle-btn" onclick="toggleTheme()" title="Переключить тему">
+        <i data-lucide="moon" style="width:15px;height:15px;"></i>
+      </button>
       <button class="refresh-btn" id="refresh-btn" onclick="refreshOrders()" title="Обновить данные из базы">
         <i data-lucide="refresh-cw" style="width:15px;height:15px;"></i>
       </button>
@@ -228,6 +238,11 @@
           <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
           <span id="orders-back-label">Назад</span>
         </button>
+        <button class="back-btn orders-filter-toggle" id="orders-filter-toggle"
+          onclick="toggleOrdersFilters()" title="Фильтры" aria-label="Фильтры"
+          style="display:flex;align-items:center;justify-content:center;gap:0;margin-left:auto;width:38px;height:38px;padding:0;">
+          <i data-lucide="list-filter" style="width:14px;height:14px;"></i>
+        </button>
       </div>
       <div class="page-header">
         <div class="page-title" style="display:flex;align-items:center;gap:10px;">
@@ -240,6 +255,10 @@
         <button class="orders-tab active" id="tab-selection" onclick="setOrderTab('selection')">
           <span class="ico" style="margin-right:5px;"><i data-lucide="archive" style="width:13px;height:13px;"></i></span>
           Подборка
+        </button>
+        <button class="orders-tab" id="tab-call" onclick="setOrderTab('call')">
+          <span class="ico" style="margin-right:5px;"><i data-lucide="phone-call" style="width:13px;height:13px;"></i></span>
+          Прозвон
         </button>
         <button class="orders-tab" id="tab-planner" onclick="setOrderTab('planner')">
           <span class="ico" style="margin-right:5px;"><i data-lucide="hammer" style="width:13px;height:13px;"></i></span>
@@ -258,7 +277,7 @@
           Отменены
         </button>
       </div>
-      <div class="filters-bar">
+      <div class="filters-bar orders-filters-dropdown" id="orders-filters-dropdown">
         <div style="display:flex;gap:8px;width:100%;">
           <div style="position:relative;flex:1;min-width:0;">
             <span class="ico" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);opacity:0.35;pointer-events:none;">
@@ -627,6 +646,7 @@
             <label class="form-label">📌 Статус записи</label>
             <select class="form-select" id="f-order-status" style="width:100%;" onchange="updateOrderSaveButtonLabel()">
               <option value="">📋 Подборка</option>
+              <option value="call">☎️ Прозвон</option>
               <option value="inWork">🔨 В работу (Планёрка)</option>
               <option value="cancelled">❌ Отменен</option>
             </select>
@@ -1146,7 +1166,12 @@
 <script src="app.js"></script>
 <script>
   function initIcons() { if (window.lucide) lucide.createIcons(); }
-  document.addEventListener('DOMContentLoaded', initIcons);
+  document.addEventListener('DOMContentLoaded', () => {
+    initIcons();
+    if (typeof updateThemeAssets === 'function') updateThemeAssets();
+    if (typeof updateThemeToggleButton === 'function') updateThemeToggleButton();
+  });
+  if (typeof updateThemeAssets === 'function') updateThemeAssets();
   autoLogin();
 </script>
 </body>
