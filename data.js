@@ -63,6 +63,25 @@ async function sbUpdateOrder(o) {
   return rows[0] ? rowToOrder(rows[0]) : o;
 }
 
+async function sbSaveOrderWithCash(o, { isNew = false, cashEntries = [], rollbackOrder = null } = {}) {
+  const res = await fetch(`${WORKER_URL}/api/orders/save-with-cash`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({
+      is_new: !!isNew,
+      order: orderToRow(o),
+      rollback_order: rollbackOrder ? orderToRow(rollbackOrder) : null,
+      cash_entries: cashEntries,
+    }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const body = await res.json();
+  return {
+    order: body?.order ? rowToOrder(body.order) : o,
+    cashEntries: Array.isArray(body?.cash_entries) ? body.cash_entries : [],
+  };
+}
+
 async function sbPatchOrderFields(id, fields) {
   const res = await fetch(`${WORKER_URL}/api/orders/${encodeURIComponent(id)}`, {
     method: 'PATCH',

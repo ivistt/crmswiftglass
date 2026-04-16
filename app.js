@@ -4,6 +4,7 @@
 
 let currentMonthFilter = null;
 let ownerPaymentFilters = { client: true, supplier: true, dropshipper: true, fop: true, manual: true };
+let ownerCashSelectedWorker = '';
 const THEME_STORAGE_KEY = 'crm_theme';
 
 // Fallback если data.js старой версии (без carDirectory)
@@ -327,7 +328,7 @@ function renderHome() {
       </div>
     `;
 
-    const totalCash = (window.allCashLog || []).reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+    const totalCash = getOwnerCurrentCashTotal();
     container.innerHTML += `
       <div class="home-card" onclick="openOwnerCashScreen()">
         <div class="home-card-icon-wrap home-card-icon-dim">
@@ -463,6 +464,172 @@ function renderHome() {
 function _ownerCashEntryDate(entry) {
   if (!entry?.created_at) return '';
   return new Date(entry.created_at).toISOString().slice(0, 10);
+}
+
+function getOwnerCashSeniorNames() {
+  return (workers || [])
+    .filter(w => w.systemRole === 'senior')
+    .map(w => w.name);
+}
+
+function getOwnerCashLogs() {
+  const seniorNames = getOwnerCashSeniorNames();
+  return [...(window.allCashLog || [])]
+    .filter(entry => String(entry?.cash_account || '').toLowerCase() !== 'fop')
+    .filter(entry => entry?.manual_payment !== true)
+    .filter(entry => seniorNames.includes(entry.worker_name));
+}
+
+function getOwnerCurrentCashTotal() {
+  return getOwnerCashLogs().reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+}
+
+function getOwnerCashSafeKey(value) {
+  return btoa(unescape(encodeURIComponent(String(value || '')))).replace(/[^a-zA-Z0-9]/g, '');
+}
+
+function getOwnerCashEntryTime(entry) {
+  if (!entry?.created_at) return '';
+  const date = new Date(entry.created_at);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+
+function setOwnerCashSelectedWorker(workerName) {
+  ownerCashSelectedWorker = ownerCashSelectedWorker === workerName ? '' : workerName;
+  renderOwnerCashScreen();
+}
+
+function renderOwnerEmployeeCashHistory(workerName, logs) {
+  const rows = (logs || [])
+    .filter(entry => entry.worker_name === workerName)
+    .slice()
+    .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+
+  const total = rows.reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
+  const workerKey = getOwnerCashSafeKey(workerName);
+
+  if (!rows.length) {
+    return `
+      <div class="fin-month-card owner-cash-history-card">
+        <div class="owner-cash-history-title">
+          <div>
+            <div class="fin-month-name">${escapeHtml(workerName)}</div>
+            <div class="fin-month-sub">История кассы сотрудника</div>
+          </div>
+        </div>
+        <div class="empty-state" style="padding:24px 12px;">
+          <div class="empty-state-icon">${icon('receipt')}</div>
+          <h3>Движений нет</h3>
+          <p>У этого сотрудника пока нет записей в кассе</p>
+        </div>
+      </div>
+    `;
+  }
+
+  const tree = {};
+  for (const entry of rows) {
+    const date = _ownerCashEntryDate(entry) || 'Без даты';
+    const year = date === 'Без даты' ? 'Без даты' : date.slice(0, 4);
+    const month = date === 'Без даты' ? 'Без даты' : date.slice(0, 7);
+    if (!tree[year]) tree[year] = { total: 0, months: {} };
+    tree[year].total += Number(entry.amount) || 0;
+    if (!tree[year].months[month]) tree[year].months[month] = { total: 0, days: {} };
+    tree[year].months[month].total += Number(entry.amount) || 0;
+    if (!tree[year].months[month].days[date]) tree[year].months[month].days[date] = { total: 0, entries: [] };
+    tree[year].months[month].days[date].total += Number(entry.amount) || 0;
+    tree[year].months[month].days[date].entries.push(entry);
+  }
+
+  const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+  const yearsHtml = Object.keys(tree).sort((a, b) => b.localeCompare(a)).map(year => {
+    const yearData = tree[year];
+    const yearKey = `owner-cash-worker-${workerKey}-year-${year}`;
+    const monthsHtml = Object.keys(yearData.months).sort((a, b) => b.localeCompare(a)).map(monthKey => {
+      const monthData = yearData.months[monthKey];
+      const monthToggleKey = `${yearKey}-month-${monthKey}`;
+      const monthName = monthKey === 'Без даты' ? 'Без даты' : `${monthNames[Number(monthKey.slice(5, 7)) - 1] || monthKey} ${monthKey.slice(0, 4)}`;
+      const daysHtml = Object.keys(monthData.days).sort((a, b) => b.localeCompare(a)).map(day => {
+        const dayData = monthData.days[day];
+        const dayKey = `${monthToggleKey}-day-${day}`;
+        const entriesHtml = dayData.entries.map(entry => {
+          const amount = Number(entry.amount) || 0;
+          const comment = entry.comment || 'Без комментария';
+          const time = getOwnerCashEntryTime(entry);
+          return `
+            <div class="owner-cash-entry-row">
+              <div class="owner-cash-entry-main">
+                <div class="owner-cash-entry-comment">${escapeHtml(comment)}</div>
+                <div class="owner-cash-entry-meta">${time ? escapeHtml(time) : '—'}</div>
+              </div>
+              <div class="owner-cash-entry-amount" style="color:${amount >= 0 ? 'var(--accent)' : '#ef4444'};">${amount.toLocaleString('ru')} ₴</div>
+            </div>
+          `;
+        }).join('');
+
+        return `
+          <div style="border-bottom:1px solid var(--border);">
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;cursor:pointer;" onclick="toggleProfileMonth('${dayKey}')">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <i data-lucide="chevron-right" style="width:13px;height:13px;color:var(--text3);transition:transform 0.2s;" id="pchevron-${dayKey}"></i>
+                <div style="font-size:13px;color:var(--text2);font-weight:600;">${day === 'Без даты' ? day : formatDate(day)}</div>
+                <div style="font-size:11px;color:var(--text3);">${dayData.entries.length} зап.</div>
+              </div>
+              <div style="font-size:13px;font-weight:800;color:${dayData.total >= 0 ? 'var(--accent)' : '#ef4444'};">${dayData.total.toLocaleString('ru')} ₴</div>
+            </div>
+            <div id="profile-month-body-${dayKey}" style="display:none;padding:0 12px 10px 28px;">
+              ${entriesHtml}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      return `
+        <div style="border-bottom:1px solid var(--border);">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;cursor:pointer;" onclick="toggleProfileMonth('${monthToggleKey}')">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <i data-lucide="chevron-right" style="width:14px;height:14px;color:var(--text3);transition:transform 0.2s;" id="pchevron-${monthToggleKey}"></i>
+              <div style="font-size:14px;font-weight:700;color:var(--text2);">${monthName}</div>
+              <div style="font-size:11px;color:var(--text3);">${Object.keys(monthData.days).length} дн.</div>
+            </div>
+            <div style="font-size:14px;font-weight:800;color:${monthData.total >= 0 ? 'var(--accent)' : '#ef4444'};">${monthData.total.toLocaleString('ru')} ₴</div>
+          </div>
+          <div id="profile-month-body-${monthToggleKey}" style="display:none;background:var(--surface2);border-radius:0 0 8px 8px;">
+            ${daysHtml}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    return `
+      <div style="border-bottom:1px solid var(--border);">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px;cursor:pointer;" onclick="toggleProfileMonth('${yearKey}')">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <i data-lucide="chevron-right" style="width:14px;height:14px;color:var(--text3);transition:transform 0.2s;" id="pchevron-${yearKey}"></i>
+            <div style="font-size:14px;font-weight:800;color:var(--text);">${year}</div>
+            <div style="font-size:11px;color:var(--text3);">${Object.keys(yearData.months).length} мес.</div>
+          </div>
+          <div style="font-size:14px;font-weight:900;color:${yearData.total >= 0 ? 'var(--accent)' : '#ef4444'};">${yearData.total.toLocaleString('ru')} ₴</div>
+        </div>
+        <div id="profile-month-body-${yearKey}" style="display:none;">
+          ${monthsHtml}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  return `
+    <div class="fin-month-card owner-cash-history-card">
+      <div class="owner-cash-history-title">
+        <div>
+          <div class="fin-month-name">${escapeHtml(workerName)}</div>
+          <div class="fin-month-sub">История кассы сотрудника</div>
+        </div>
+        <div style="font-size:18px;font-weight:900;color:${total >= 0 ? 'var(--accent)' : '#ef4444'};white-space:nowrap;">${total.toLocaleString('ru')} ₴</div>
+      </div>
+      <div>${yearsHtml}</div>
+    </div>
+  `;
 }
 
 function isOwnerFopPaymentEntryVisible(entry) {
@@ -1005,13 +1172,8 @@ function renderOwnerCashScreen() {
   const container = document.getElementById('owner-cash-content');
   if (!container) return;
 
-  const seniorNames = (workers || [])
-    .filter(w => w.systemRole === 'senior')
-    .map(w => w.name);
-
-  const logs = [...(window.allCashLog || [])]
-    .filter(entry => String(entry?.cash_account || '').toLowerCase() !== 'fop')
-    .filter(entry => seniorNames.includes(entry.worker_name))
+  const seniorNames = getOwnerCashSeniorNames();
+  const logs = getOwnerCashLogs()
     .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
 
   const balances = {};
@@ -1030,22 +1192,25 @@ function renderOwnerCashScreen() {
     balance: Number(balances[name] || 0),
   }));
   const currentCashTotal = currentCashRows.reduce((sum, row) => sum + row.balance, 0);
+  const selectedWorkerHistoryHtml = ownerCashSelectedWorker
+    ? renderOwnerEmployeeCashHistory(ownerCashSelectedWorker, logs)
+    : '';
   const currentCashHtml = `
     <div class="fin-month-card" style="margin-bottom:12px;">
       <div style="padding:14px 16px;border-bottom:1px solid var(--border);">
         <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">
           <div>
             <div class="fin-month-name">Текущая касса</div>
-            <div class="fin-month-sub">Общий остаток по всем старшим специалистам</div>
+            <div class="fin-month-sub">Нажмите на сотрудника, чтобы открыть историю кассы</div>
           </div>
           <div style="font-size:22px;font-weight:900;color:${currentCashTotal >= 0 ? 'var(--accent)' : '#ef4444'};white-space:nowrap;">${currentCashTotal.toLocaleString('ru')} ₴</div>
         </div>
       </div>
       <div style="padding:12px 16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;">
         ${currentCashRows.length ? currentCashRows.map(row => `
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:12px;">
-            <div style="font-size:13px;font-weight:700;color:var(--text2);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(row.workerName)}</div>
-            <div style="font-size:15px;font-weight:900;color:${row.balance >= 0 ? 'var(--accent)' : '#ef4444'};white-space:nowrap;">${row.balance.toLocaleString('ru')} ₴</div>
+          <div class="owner-cash-worker-row ${ownerCashSelectedWorker === row.workerName ? 'active' : ''}" onclick="setOwnerCashSelectedWorker('${escapeAttr(row.workerName)}')">
+            <div class="owner-cash-worker-name">${escapeHtml(row.workerName)}</div>
+            <div class="owner-cash-worker-balance" style="color:${row.balance >= 0 ? 'var(--accent)' : '#ef4444'};">${row.balance.toLocaleString('ru')} ₴</div>
           </div>
         `).join('') : `
           <div style="font-size:13px;color:var(--text3);">Старшие специалисты не найдены</div>
@@ -1055,7 +1220,7 @@ function renderOwnerCashScreen() {
   `;
 
   if (!logs.length) {
-    container.innerHTML = currentCashHtml + `
+    container.innerHTML = currentCashHtml + selectedWorkerHistoryHtml + `
       <div class="empty-state">
         <div class="empty-state-icon">${icon('banknote')}</div>
         <h3>Записей кассы нет</h3>
@@ -1078,7 +1243,7 @@ function renderOwnerCashScreen() {
   const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
   const years = Object.keys(tree).sort((a, b) => b.localeCompare(a));
 
-  container.innerHTML = currentCashHtml + years.map(year => {
+  container.innerHTML = currentCashHtml + selectedWorkerHistoryHtml + years.map(year => {
     const yearKey = `owner-cash-year-${year}`;
     const monthsHtml = Object.keys(tree[year]).sort((a, b) => b.localeCompare(a)).map(monthKey => {
       const monthToggleKey = `owner-cash-month-${monthKey}`;
@@ -1106,8 +1271,8 @@ function renderOwnerCashScreen() {
             <div id="profile-month-body-${dayToggleKey}" style="display:none;padding:0 12px 8px 28px;">
               <div style="display:flex;flex-direction:column;gap:8px;">
                 ${rows.map(row => `
-                  <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;">
-                    <div style="font-size:13px;font-weight:600;color:var(--text2);">${row.workerName}</div>
+                  <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;cursor:pointer;" onclick="setOwnerCashSelectedWorker('${escapeAttr(row.workerName)}')">
+                    <div style="font-size:13px;font-weight:600;color:var(--text2);">${escapeHtml(row.workerName)}</div>
                     <div style="font-size:14px;font-weight:800;color:${row.balance >= 0 ? 'var(--accent)' : '#ef4444'};">${row.balance.toLocaleString('ru')} ₴</div>
                   </div>
                 `).join('')}

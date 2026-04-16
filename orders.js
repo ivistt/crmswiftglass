@@ -748,6 +748,12 @@ function sumCashClientPayments(payments) {
   }, 0);
 }
 
+function getCashClientPaidForOrderSnapshot(order) {
+  const payments = order?.clientPayments || [];
+  if (payments.length) return sumCashClientPayments(payments);
+  return isCashPaymentMethod(order?.paymentMethod) ? (Number(order?.debt) || 0) : 0;
+}
+
 async function addCashEntriesForDuplicatedOrder(order) {
   if (!isOrderFinanciallyActive(order)) return;
 
@@ -755,7 +761,7 @@ async function addCashEntriesForDuplicatedOrder(order) {
   const supplierCashPaid = supplierPayments.length
     ? sumCashSupplierPayments(supplierPayments)
     : (Number(order.check) || 0);
-  const clientCashPaid = sumCashClientPayments(order.clientPayments || []);
+  const clientCashPaid = getCashClientPaidForOrderSnapshot(order);
   const targetWorker = order.responsible || currentWorkerName;
   const fDate = order.date ? formatDate(order.date) : '—';
   const fTime = order.time || '—';
@@ -1665,15 +1671,48 @@ async function saveOrder() {
   // Дельта наличных платежей от клиента (для зачисления в кассу мастера)
   const oldClientPayments = existingOrder?.clientPayments || [];
   const newClientPayments = data.clientPayments || [];
-  const sumCashClientPayments = (payments) =>
-    (payments || []).reduce((sum, p) => sum + (isCashPaymentMethod(p.method) ? (Number(p.amount) || 0) : 0), 0);
-  const oldCashClientPaid = oldFinanciallyActive ? sumCashClientPayments(oldClientPayments) : 0;
-  const newCashClientPaid = newFinanciallyActive ? sumCashClientPayments(newClientPayments) : 0;
+  const oldCashClientPaid = oldFinanciallyActive ? getCashClientPaidForOrderSnapshot({ ...existingOrder, clientPayments: oldClientPayments }) : 0;
+  const newCashClientPaid = newFinanciallyActive ? getCashClientPaidForOrderSnapshot({ ...data, clientPayments: newClientPayments }) : 0;
   const cashClientDiff = newCashClientPaid - oldCashClientPaid;
+  const cashEntries = [];
+
+  if ((currentRole === 'senior' || currentRole === 'owner') && cashSupplierDiff !== 0) {
+    const amount = -cashSupplierDiff; // наличная оплата поставщику уменьшает кассу
+    const typeStr = cashSupplierDiff > 0 ? 'Списание' : 'Возврат';
+    const fDate = data.date ? formatDate(data.date) : '—';
+    const fTime = data.time || '—';
+    const fCar = data.car || '—';
+    const targetWorker = data.responsible || currentWorkerName;
+    cashEntries.push({
+      worker_name: targetWorker,
+      amount,
+      comment: `${typeStr} за стекло ${data.id}, ${fDate} ${fTime}, авто: ${fCar}, склад: ${data.warehouse || '—'}`,
+      cashType: 'supplier',
+    });
+  }
+
+  if ((currentRole === 'senior' || currentRole === 'owner') && cashClientDiff !== 0) {
+    const typeStr = cashClientDiff > 0 ? 'Оплата клиента' : 'Возврат клиенту';
+    const fDate = data.date ? formatDate(data.date) : '—';
+    const fCar = data.car || '—';
+    const targetWorker = data.responsible || currentWorkerName;
+    cashEntries.push({
+      worker_name: targetWorker,
+      amount: cashClientDiff,
+      comment: `${typeStr} наличкой ${data.id}, ${fDate}, авто: ${fCar}`,
+      cashType: 'client',
+    });
+  }
 
   try {
+    const result = await sbSaveOrderWithCash(data, {
+      isNew,
+      cashEntries: cashEntries.map(({ cashType, ...entry }) => entry),
+      rollbackOrder: existingOrder,
+    });
+    const saved = result.order;
+
     if (isNew) {
-      const saved = await sbInsertOrder(data);
       orders.unshift(saved);
       try {
         await rememberAssistantForResponsible(data.responsible, data.assistant);
@@ -1687,7 +1726,6 @@ async function saveOrder() {
       }
       showToast('Запись создана ✓');
     } else {
-      const saved = await sbUpdateOrder(data);
       const idx = orders.findIndex(o => o.id === editingOrderId);
       if (idx !== -1) orders[idx] = saved;
       try {
@@ -1703,59 +1741,19 @@ async function saveOrder() {
       showToast('Запись обновлена ✓');
     }
 
-    // Автоматическое списание/возврат средств за оплату стекла из кассы ответственного
-    if ((currentRole === 'senior' || currentRole === 'owner') && cashSupplierDiff !== 0) {
-      const amount = -cashSupplierDiff; // наличная оплата поставщику уменьшает кассу
-      const typeStr = cashSupplierDiff > 0 ? 'Списание' : 'Возврат';
-      const fDate = data.date ? formatDate(data.date) : '—';
-      const fTime = data.time || '—';
-      const fCar = data.car || '—';
-      const targetWorker = data.responsible || currentWorkerName;
-      
-      const cashComment = `${typeStr} за стекло ${data.id}, ${fDate} ${fTime}, авто: ${fCar}, склад: ${data.warehouse || '—'}`;
-
-      await sbInsertCashEntry({
-        worker_name: targetWorker,
-        amount: amount,
-        comment: cashComment,
-      });
-      if (typeof workerCashLog !== 'undefined' && targetWorker === currentWorkerName) {
-        workerCashLog.unshift({
-          worker_name: targetWorker,
-          amount: amount,
-          comment: cashComment,
-          created_at: new Date().toISOString()
-        });
-      }
-      if (currentRole === 'owner' && Array.isArray(window.allCashLog)) {
-        window.allCashLog.unshift({
-          worker_name: targetWorker,
-          amount: amount,
-          comment: cashComment,
-          created_at: new Date().toISOString()
-        });
-      }
-      showToast(`${cashSupplierDiff > 0 ? 'Списано' : 'Возвращено'} ${Math.abs(cashSupplierDiff)} ₴ в кассу мастера ${targetWorker}`);
-    }
-
-    // Зачисление/возврат наличных от клиента в кассу мастера
-    if ((currentRole === 'senior' || currentRole === 'owner') && cashClientDiff !== 0) {
-      const typeStr = cashClientDiff > 0 ? 'Оплата клиента' : 'Возврат клиенту';
-      const fDate = data.date ? formatDate(data.date) : '—';
-      const fCar = data.car || '—';
-      const targetWorker2 = data.responsible || currentWorkerName;
-      const cashComment2 = `${typeStr} наличкой ${data.id}, ${fDate}, авто: ${fCar}`;
-      const cashEntry = await sbInsertCashEntry({
-        worker_name: targetWorker2,
-        amount: cashClientDiff,
-        comment: cashComment2,
-      });
-      if (typeof workerCashLog !== 'undefined' && targetWorker2 === currentWorkerName) {
+    const savedCashEntries = result.cashEntries || [];
+    for (const cashEntry of savedCashEntries) {
+      if (typeof workerCashLog !== 'undefined' && cashEntry?.worker_name === currentWorkerName) {
         workerCashLog.unshift(cashEntry);
       }
-      if (currentRole === 'owner' && Array.isArray(window.allCashLog)) {
+      if (currentRole === 'owner' && Array.isArray(window.allCashLog) && cashEntry) {
         window.allCashLog.unshift(cashEntry);
       }
+    }
+
+    if (cashSupplierDiff !== 0) {
+      const targetWorker = data.responsible || currentWorkerName;
+      showToast(`${cashSupplierDiff > 0 ? 'Списано' : 'Возвращено'} ${Math.abs(cashSupplierDiff)} ₴ в кассу мастера ${targetWorker}`);
     }
 
     closeOrderModal();
@@ -2143,6 +2141,17 @@ async function _upsertOrderSalaries(order) {
   try {
     existingInDb = await sbFetchSalariesByOrder(order.id) || [];
   } catch (e) { /* если упало — продолжаем с пустым массивом */ }
+
+  // После первого выполнения заказа ЗП по этому order_id считается зафиксированной:
+  // последующие правки сумм/полей заказа не должны менять уже начисленные записи.
+  if (order.workerDone && existingInDb.length) {
+    if (typeof workerSalaries !== 'undefined') {
+      try {
+        workerSalaries = await sbFetchWorkerSalaries(currentWorkerName);
+      } catch (e) { /* не критично */ }
+    }
+    return;
+  }
 
   const workerNamesToProcess = new Set([...Object.keys(amounts), ...existingInDb.map(s => s.worker_name)]);
   existingInDb.forEach(s => affectedWorkers.add(s.worker_name));
