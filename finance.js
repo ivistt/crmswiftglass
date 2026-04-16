@@ -258,7 +258,7 @@ async function renderFinance() {
   // Группируем заказы по месяцам
   const map = {};
   for (const o of orders) {
-    if (!o.date || o.isCancelled) continue;
+    if (!o.date || !isOrderFinanciallyActive(o)) continue;
     const ym = o.date.slice(0, 7);
     if (!map[ym]) map[ym] = [];
     map[ym].push(o);

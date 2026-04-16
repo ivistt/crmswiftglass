@@ -20,7 +20,7 @@ function renderWarehousesScreen() {
   const container = document.getElementById('warehouses-list');
   if (!container) return;
 
-  const warehouseOrders = orders.filter(o => !o.isCancelled);
+  const warehouseOrders = orders.filter(isOrderFinanciallyActive);
   if (!warehouseOrders.length) {
     container.innerHTML = `<div class="empty-state"><div class="empty-state-icon">${icon('package')}</div><h3>Записей нет</h3></div>`;
     return;
@@ -67,7 +67,7 @@ function renderWarehouseDetail() {
   if (!container) return;
   const w = currentWarehouseFilter;
   const list = orders
-    .filter(o => !o.isCancelled && (o.warehouse || 'Без склада') === w)
+    .filter(o => isOrderFinanciallyActive(o) && (o.warehouse || 'Без склада') === w)
     .sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.time || '').localeCompare(a.time || ''));
 
   if (!list.length) {
@@ -200,7 +200,7 @@ function renderWarehouseOrderTree(list) {
 function renderWarehouseOrderCard(o) {
   const debt = getSupplierDebt(o);
   return `
-    <div class="order-card" onclick="openOrderDetail('${o.id}')">
+    <div class="order-card ${getOrderCardStateClass(o)}" onclick="openOrderDetail('${o.id}')">
       <div class="order-card-top">
         <div class="order-card-left">
           <span class="order-id">${o.id}</span>
@@ -229,7 +229,7 @@ function openDropshippersScreen() {
 function renderDropshippersScreen() {
   const container = document.getElementById('dropshippers-list');
   if (!container) return;
-  const list = orders.filter(o => !o.isCancelled && o.dropshipper && Number(o.dropshipperPayout) > 0);
+  const list = orders.filter(o => isOrderFinanciallyActive(o) && o.dropshipper && Number(o.dropshipperPayout) > 0);
   if (!list.length) {
     container.innerHTML = `<div class="empty-state"><div class="empty-state-icon">${icon('handshake')}</div><h3>Выплат нет</h3></div>`;
     return;
@@ -271,6 +271,65 @@ function getDropshipperPaymentMethods() {
   return ['Оплата наличка Олег', 'Оплата наличка Лёша', ...base];
 }
 
+function normalizeDropshipperWorkerText(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/ё/g, 'е')
+    .replace(/[^a-z0-9а-яіїєґ\s]/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function leadingSymbol(value) {
+  const first = Array.from(String(value || '').trim())[0] || '';
+  return /[a-z0-9а-яіїєґ]/i.test(first) ? '' : first;
+}
+
+function findWorkerForDropshipper(dropshipperName) {
+  const target = normalizeDropshipperWorkerText(dropshipperName);
+  const targetSymbol = leadingSymbol(dropshipperName);
+  const targetTokens = target.split(' ').filter(token => token.length > 1);
+  if (!target) return null;
+
+  return (workers || []).find(worker => {
+    const labels = [worker.name, worker.alias, getWorkerDisplayName(worker.name)].filter(Boolean);
+    if (labels.some(label => normalizeDropshipperWorkerText(label) === target)) return true;
+
+    if (!targetSymbol || !labels.some(label => leadingSymbol(label) === targetSymbol)) return false;
+    return labels.some(label => {
+      const tokens = normalizeDropshipperWorkerText(label).split(' ').filter(token => token.length > 1);
+      return tokens.some(token => targetTokens.includes(token));
+    });
+  }) || null;
+}
+
+function renderDropshipperAdjustmentForm() {
+  if (currentRole !== 'owner') return '';
+  const linkedWorker = findWorkerForDropshipper(currentDropshipperFilter);
+  const hint = linkedWorker
+    ? `Связано с кассой: ${escapeHtml(getWorkerDisplayName(linkedWorker.name))}`
+    : 'Сотрудник не найден, корректировка изменит только выплаты дропшиппера.';
+
+  return `
+    <div style="padding:14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;margin-bottom:14px;">
+      <div style="font-size:12px;font-weight:800;color:var(--text3);letter-spacing:0.04em;margin-bottom:10px;">КОРРЕКТИРОВКА</div>
+      <div style="display:grid;grid-template-columns:minmax(120px,160px) minmax(0,1fr) auto;gap:10px;align-items:end;">
+        <label style="display:flex;flex-direction:column;gap:6px;min-width:0;">
+          <span class="form-label" style="margin:0;">Сумма</span>
+          <input class="form-input" type="number" id="dropshipper-adjustment-amount" placeholder="+500 или -500">
+        </label>
+        <label style="display:flex;flex-direction:column;gap:6px;min-width:0;">
+          <span class="form-label" style="margin:0;">Комментарий</span>
+          <input class="form-input" type="text" id="dropshipper-adjustment-comment" placeholder="Напр. ошибся с суммой">
+        </label>
+        <button class="btn-primary" id="dropshipper-adjustment-save-btn" style="min-height:44px;font-weight:800;" onclick="saveDropshipperAdjustment()">Записать</button>
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-top:8px;">${hint}</div>
+    </div>
+  `;
+}
+
 function dropshipperTreeKey(prefix, value) {
   return prefix + '-' + String(value || 'none').replace(/[^a-zA-Z0-9а-яА-Я_-]/g, '-');
 }
@@ -280,7 +339,7 @@ function renderDropshipperOrderCard(o) {
   const paid = getDropshipperPaid(o);
   const left = Math.max(0, due - paid);
   return `
-    <div class="order-card" onclick="openOrderDetail('${o.id}')">
+    <div class="order-card ${getOrderCardStateClass(o)}" onclick="openOrderDetail('${o.id}')">
       <div class="order-card-top">
         <div class="order-card-left"><span class="order-id">${o.id}</span><span class="order-name">${o.car || '—'}</span></div>
         <div style="font-size:15px;font-weight:900;color:${left > 0 ? 'var(--yellow)' : 'var(--accent)'};">${due.toLocaleString('ru')} ₴</div>
@@ -389,13 +448,14 @@ function renderDropshipperPaymentsTree(list) {
         const rows = tree[year][month][day];
         const dayKey = dropshipperTreeKey('drop-pay-day', day);
         const rowsHtml = rows.map(payment => `
-          <div class="order-card" onclick="openOrderDetail('${payment.order.id}')">
+          <div class="order-card ${getOrderCardStateClass(payment.order)}" onclick="openOrderDetail('${payment.order.id}')">
             <div class="order-card-top">
               <div class="order-card-left"><span class="order-id">${payment.order.id}</span><span class="order-name">${payment.order.car || payment.order.client || '—'}</span></div>
-              <div style="font-size:15px;font-weight:900;color:var(--accent);">${Number(payment.amount).toLocaleString('ru')} ₴</div>
+              <div style="font-size:15px;font-weight:900;color:${Number(payment.amount) < 0 ? 'var(--red)' : 'var(--accent)'};">${Number(payment.amount).toLocaleString('ru')} ₴</div>
             </div>
             <div class="order-card-meta">
-              <span class="order-meta-item">${normalizePaymentMethod(payment.method)}</span>
+              <span class="order-meta-item">${payment.adjustment ? 'Корректировка' : normalizePaymentMethod(payment.method)}</span>
+              ${payment.comment ? `<span class="order-meta-item">${escapeHtml(payment.comment)}</span>` : ''}
               <span class="order-meta-item">${payment.order.client || '—'}</span>
               <span class="order-meta-item">${payment.order.phone || '—'}</span>
             </div>
@@ -405,7 +465,7 @@ function renderDropshipperPaymentsTree(list) {
           <div style="border-bottom:1px solid var(--border);">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 12px;cursor:pointer;" onclick="toggleProfileMonth('${dayKey}')">
               <div style="display:flex;align-items:center;gap:8px;"><i data-lucide="chevron-right" style="width:13px;height:13px;color:var(--text3);transition:transform 0.2s;" id="pchevron-${dayKey}"></i><div><div style="font-size:13px;color:var(--text2);font-weight:700;">${day === 'Без даты' ? 'Без даты' : formatDate(day)}</div><div style="font-size:11px;color:var(--text3);">Выплат: ${rows.length}</div></div></div>
-              <div style="font-size:13px;font-weight:800;color:var(--accent);white-space:nowrap;">${sumPayments(rows).toLocaleString('ru')} ₴</div>
+              <div style="font-size:13px;font-weight:800;color:${sumPayments(rows) < 0 ? 'var(--red)' : 'var(--accent)'};white-space:nowrap;">${sumPayments(rows).toLocaleString('ru')} ₴</div>
             </div>
             <div id="profile-month-body-${dayKey}" style="display:none;padding:0 12px 12px 34px;"><div style="display:flex;flex-direction:column;gap:8px;">${rowsHtml}</div></div>
           </div>
@@ -415,7 +475,7 @@ function renderDropshipperPaymentsTree(list) {
         <div style="border-bottom:1px solid var(--border);">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 12px;cursor:pointer;" onclick="toggleProfileMonth('${monthKey}')">
             <div style="display:flex;align-items:center;gap:8px;"><i data-lucide="chevron-right" style="width:14px;height:14px;color:var(--text3);transition:transform 0.2s;" id="pchevron-${monthKey}"></i><div><div style="font-size:14px;font-weight:800;color:var(--text2);">${monthTitle}</div><div style="font-size:11px;color:var(--text3);">${days.length} дней · ${monthPayments.length} выплат</div></div></div>
-            <div style="font-size:14px;font-weight:800;color:var(--accent);white-space:nowrap;">${sumPayments(monthPayments).toLocaleString('ru')} ₴</div>
+            <div style="font-size:14px;font-weight:800;color:${sumPayments(monthPayments) < 0 ? 'var(--red)' : 'var(--accent)'};white-space:nowrap;">${sumPayments(monthPayments).toLocaleString('ru')} ₴</div>
           </div>
           <div id="profile-month-body-${monthKey}" style="display:none;padding-left:12px;background:var(--surface2);border-radius:0 0 8px 8px;">${daysHtml}</div>
         </div>
@@ -425,7 +485,7 @@ function renderDropshipperPaymentsTree(list) {
       <div class="fin-month-card" style="margin-bottom:8px;">
         <div class="fin-month-header" onclick="toggleProfileMonth('${yearKey}')">
           <div style="display:flex;align-items:center;gap:10px;"><i data-lucide="chevron-right" style="width:16px;height:16px;color:var(--text3);transition:transform 0.2s;" id="pchevron-${yearKey}"></i><div><div class="fin-month-name">${year === 'Без даты' ? 'Без даты' : year + ' год'}</div><div class="fin-month-sub">${months.length} мес. · ${yearPayments.length} выплат</div></div></div>
-          <div style="font-size:18px;font-weight:800;color:var(--accent);">${sumPayments(yearPayments).toLocaleString('ru')} ₴</div>
+          <div style="font-size:18px;font-weight:800;color:${sumPayments(yearPayments) < 0 ? 'var(--red)' : 'var(--accent)'};">${sumPayments(yearPayments).toLocaleString('ru')} ₴</div>
         </div>
         <div id="profile-month-body-${yearKey}" style="display:none;padding:0 0 8px;">${monthsHtml}</div>
       </div>
@@ -444,7 +504,7 @@ function openDropshipperDetail(name) {
 function renderDropshipperDetail() {
   const container = document.getElementById('dropshipper-detail-body');
   if (!container) return;
-  const list = orders.filter(o => !o.isCancelled && o.dropshipper === currentDropshipperFilter && Number(o.dropshipperPayout) > 0);
+  const list = orders.filter(o => isOrderFinanciallyActive(o) && o.dropshipper === currentDropshipperFilter && Number(o.dropshipperPayout) > 0);
   const totalDue = list.reduce((sum, o) => sum + (Number(o.dropshipperPayout) || 0), 0);
   const totalPaid = list.reduce((sum, o) => sum + getDropshipperPaid(o), 0);
   const totalLeft = Math.max(0, totalDue - totalPaid);
@@ -464,6 +524,7 @@ function renderDropshipperDetail() {
       </div>
     </div>
     <button class="btn-primary" style="width:100%;min-height:44px;margin-bottom:14px;font-weight:800;" onclick="openDropshipperPaymentModal()" ${totalLeft <= 0 ? 'disabled' : ''}>Выплатить</button>
+    ${renderDropshipperAdjustmentForm()}
     <div style="font-size:12px;font-weight:800;color:var(--text3);letter-spacing:0.04em;margin:16px 0 10px;">ЗАКАЗЫ</div>
     ${renderDropshipperOrdersTree(list)}
     <div style="font-size:12px;font-weight:800;color:var(--text3);letter-spacing:0.04em;margin:18px 0 10px;">ВЫПЛАТЫ</div>
@@ -474,7 +535,7 @@ function renderDropshipperDetail() {
 }
 
 function openDropshipperPaymentModal() {
-  const list = orders.filter(o => !o.isCancelled && o.dropshipper === currentDropshipperFilter && Number(o.dropshipperPayout) > 0);
+  const list = orders.filter(o => isOrderFinanciallyActive(o) && o.dropshipper === currentDropshipperFilter && Number(o.dropshipperPayout) > 0);
   const totalLeft = list.reduce((sum, o) => sum + Math.max(0, (Number(o.dropshipperPayout) || 0) - getDropshipperPaid(o)), 0);
   let modal = document.getElementById('dropshipper-payment-modal');
   if (!modal) {
@@ -544,7 +605,7 @@ async function saveDropshipperPayment() {
   if (!method) return showToast('Выберите способ оплаты', 'error');
 
   const eligible = orders
-    .filter(o => !o.isCancelled && o.dropshipper === currentDropshipperFilter && Number(o.dropshipperPayout) > 0)
+    .filter(o => isOrderFinanciallyActive(o) && o.dropshipper === currentDropshipperFilter && Number(o.dropshipperPayout) > 0)
     .map(o => ({ order: o, left: Math.max(0, (Number(o.dropshipperPayout) || 0) - getDropshipperPaid(o)) }))
     .filter(item => item.left > 0)
     .sort((a, b) => String(a.order.date || '').localeCompare(String(b.order.date || '')) || String(a.order.time || '').localeCompare(String(b.order.time || '')));
@@ -593,5 +654,69 @@ async function saveDropshipperPayment() {
     showToast('Ошибка выплаты: ' + e.message, 'error');
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Сохранить'; }
+  }
+}
+
+async function saveDropshipperAdjustment() {
+  if (currentRole !== 'owner') return;
+  const amount = Number(document.getElementById('dropshipper-adjustment-amount')?.value) || 0;
+  const comment = document.getElementById('dropshipper-adjustment-comment')?.value.trim() || '';
+  if (!currentDropshipperFilter) return;
+  if (!amount) return showToast('Введите сумму корректировки', 'error');
+  if (!comment) return showToast('Введите комментарий', 'error');
+
+  const targetOrder = orders
+    .filter(o => isOrderFinanciallyActive(o) && o.dropshipper === currentDropshipperFilter && Number(o.dropshipperPayout) > 0)
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || String(b.time || '').localeCompare(String(a.time || '')))[0];
+  if (!targetOrder) return showToast('Нет заказа для корректировки', 'error');
+
+  const btn = document.getElementById('dropshipper-adjustment-save-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Запись...'; }
+
+  const date = todayStr();
+  const timestamp = new Date().toISOString();
+  const adjustment = {
+    amount,
+    date,
+    method: 'Корректировка',
+    dropshipper: currentDropshipperFilter,
+    timestamp,
+    adjustment: true,
+    comment,
+  };
+
+  try {
+    const nextOrder = {
+      ...targetOrder,
+      dropshipperPayments: [
+        ...(targetOrder.dropshipperPayments || []),
+        adjustment,
+      ],
+    };
+    const saved = await sbUpdateOrder(nextOrder);
+    const idx = orders.findIndex(o => o.id === targetOrder.id);
+    if (idx !== -1) orders[idx] = saved || nextOrder;
+
+    const linkedWorker = findWorkerForDropshipper(currentDropshipperFilter);
+    if (linkedWorker) {
+      const cashEntry = await sbInsertCashEntry({
+        worker_name: linkedWorker.name,
+        amount,
+        comment: `Корректировка дропшиппера ${currentDropshipperFilter}: ${comment}`,
+      });
+      if (Array.isArray(window.allCashLog) && cashEntry) window.allCashLog.unshift(cashEntry);
+      if (typeof workerCashLog !== 'undefined' && linkedWorker.name === currentWorkerName && cashEntry) {
+        workerCashLog.unshift(cashEntry);
+      }
+    }
+
+    renderDropshipperDetail();
+    if (document.getElementById('screen-owner-payments')?.classList.contains('active')) renderOwnerPaymentsScreen();
+    if (document.getElementById('screen-owner-cash')?.classList.contains('active')) renderOwnerCashScreen();
+    showToast('Корректировка записана ✓');
+  } catch (e) {
+    showToast('Ошибка корректировки: ' + e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Записать'; }
   }
 }

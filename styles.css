@@ -778,6 +778,37 @@ body {
 }
 .order-card:active { transform: scale(0.99); }
 
+.order-card-state-selection {
+  background: var(--surface2);
+}
+.order-card-state-selection:hover {
+  background: var(--surface3);
+}
+.order-card-state-planner {
+  background: linear-gradient(0deg, rgba(0, 229, 160, 0.08), rgba(0, 229, 160, 0.08)), var(--surface);
+  border-color: rgba(0, 229, 160, 0.22);
+}
+.order-card-state-planner:hover {
+  background: linear-gradient(0deg, rgba(0, 229, 160, 0.12), rgba(0, 229, 160, 0.12)), var(--surface);
+  border-color: rgba(0, 229, 160, 0.32);
+}
+.order-card-state-call {
+  background: linear-gradient(0deg, rgba(2, 132, 199, 0.09), rgba(2, 132, 199, 0.09)), var(--surface);
+  border-color: rgba(2, 132, 199, 0.24);
+}
+.order-card-state-call:hover {
+  background: linear-gradient(0deg, rgba(2, 132, 199, 0.13), rgba(2, 132, 199, 0.13)), var(--surface);
+  border-color: rgba(2, 132, 199, 0.34);
+}
+.order-card-state-cancelled {
+  background: linear-gradient(0deg, rgba(255, 92, 106, 0.1), rgba(255, 92, 106, 0.1)), var(--surface);
+  border-color: rgba(255, 92, 106, 0.24);
+}
+.order-card-state-cancelled:hover {
+  background: linear-gradient(0deg, rgba(255, 92, 106, 0.14), rgba(255, 92, 106, 0.14)), var(--surface);
+  border-color: rgba(255, 92, 106, 0.36);
+}
+
 .order-card-top {
   display: flex;
   align-items: center;
@@ -812,6 +843,77 @@ body {
   justify-content: flex-end;
   flex-shrink: 0;
   margin-left: auto;
+}
+
+.order-card-action-dropdown {
+  position: relative;
+}
+
+.order-card-action-trigger {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  color: var(--accent);
+  border-color: rgba(0, 229, 160, 0.35);
+  background: rgba(0, 229, 160, 0.12);
+}
+
+.order-card-action-trigger:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(0, 229, 160, 0.18);
+}
+
+.order-card-action-trigger:focus,
+.order-card-action-trigger:active {
+  color: var(--accent);
+}
+
+.order-card-action-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  display: none;
+  grid-template-columns: repeat(2, 34px);
+  grid-auto-rows: 34px;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.order-card-action-menu.active {
+  display: grid;
+}
+
+.order-card-action-menu .icon-action-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  color: var(--accent);
+  border-color: rgba(0, 229, 160, 0.35);
+  background: rgba(0, 229, 160, 0.12);
+}
+
+.order-card-action-menu .icon-action-btn:hover {
+  color: #050505;
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.order-card-action-menu .icon-action-btn.icon-action-danger {
+  color: var(--red);
+  border-color: rgba(255, 92, 106, 0.35);
+  background: rgba(255, 92, 106, 0.12);
+}
+
+.order-card-action-menu .icon-action-btn.icon-action-danger:hover {
+  color: #fff;
+  border-color: var(--red);
+  background: var(--red);
 }
 
 .order-id {
@@ -1513,6 +1615,9 @@ input[type="datetime-local"] {
   .form-group.span-3 { grid-column: span 1; }
   .form-input, .form-select, .form-textarea { font-size: 16px; }
   .form-section { margin-bottom: 22px; }
+  .owner-manual-payment-grid {
+    grid-template-columns: 1fr;
+  }
   .owner-today-summary {
     grid-template-columns: 1fr 1fr;
   }
@@ -2056,6 +2161,45 @@ input[type="datetime-local"] {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 14px;
+}
+
+.owner-manual-payment-card {
+  padding: 14px;
+  margin-bottom: 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface2);
+}
+.owner-manual-payment-title {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--text3);
+  letter-spacing: 0.04em;
+  margin-bottom: 10px;
+}
+.owner-manual-payment-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.1fr) minmax(120px, 0.7fr) minmax(0, 1.5fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+.owner-manual-payment-field {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.owner-manual-payment-field .form-label {
+  margin: 0;
+}
+.owner-manual-payment-button {
+  min-height: 44px;
+  font-weight: 800;
+}
+.owner-manual-payment-hint {
+  font-size: 11px;
+  color: var(--text3);
+  margin-top: 8px;
 }
 
 .owner-today-summary {

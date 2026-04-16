@@ -53,7 +53,7 @@ function renderClients() {
 }
 
 function getOrderDebtLeft(order) {
-  if (order?.isCancelled) return 0;
+  if (!isOrderFinanciallyActive(order)) return 0;
   return Math.max(0, getOrderClientTotalAmount(order) - (Number(order?.debt) || 0));
 }
 
@@ -68,7 +68,7 @@ function openClientDetail(key) {
   const c = clients.find(x => (x.phone || x.name) === decoded);
   if (!c) return;
 
-  const totalSpent = c.orders.reduce((s, o) => s + getOrderClientTotalAmount(o), 0);
+  const totalSpent = c.orders.filter(isOrderFinanciallyActive).reduce((s, o) => s + getOrderClientTotalAmount(o), 0);
   const totalDebt = getClientDebtTotal(c);
   const debtOrders = c.orders.filter(o => getOrderDebtLeft(o) > 0);
   const clientTotalsHtml = `
@@ -120,7 +120,7 @@ function renderClientOrderHistoryCard(o, compact = false) {
   const paid = Number(o.debt) || 0;
   const left = getOrderDebtLeft(o);
   return `
-    <div class="order-card" onclick="openOrderDetail('${o.id}')">
+    <div class="order-card ${getOrderCardStateClass(o)}" onclick="openOrderDetail('${o.id}')">
       <div class="order-card-top">
         <div class="order-card-left">
           <div class="order-card-status-row">

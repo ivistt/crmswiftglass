@@ -3,7 +3,7 @@
 // ============================================================
 
 let currentMonthFilter = null;
-let ownerPaymentFilters = { client: true, supplier: true, dropshipper: true, fop: true };
+let ownerPaymentFilters = { client: true, supplier: true, dropshipper: true, fop: true, manual: true };
 const THEME_STORAGE_KEY = 'crm_theme';
 
 // Fallback если data.js старой версии (без carDirectory)
@@ -314,7 +314,7 @@ function renderHome() {
 
   if (currentRole === 'owner') {
     const today = getLocalDateString();
-    const todayOrders = orders.filter(o => !o.isCancelled && o.date === today);
+    const todayOrders = orders.filter(o => isOrderFinanciallyActive(o) && o.date === today);
     const todayTotal = todayOrders.reduce((sum, o) => sum + getOrderClientTotalAmount(o), 0);
     container.innerHTML += `
       <div class="home-card" onclick="openOwnerTodayScreen()">
@@ -341,7 +341,7 @@ function renderHome() {
   }
 
   if (canViewFinance()) {
-    const debtOrders = orders.filter(o => !o.isCancelled && (o.supplierStatus === 'Не оплачено' || o.supplierStatus === 'Частично'));
+    const debtOrders = orders.filter(o => isOrderFinanciallyActive(o) && (o.supplierStatus === 'Не оплачено' || o.supplierStatus === 'Частично'));
     const debtSum = debtOrders.reduce((sum, o) => {
       const debt = (Number(o.purchase) || 0) - (Number(o.check) || 0);
       return sum + (debt > 0 ? debt : 0);
@@ -358,7 +358,7 @@ function renderHome() {
       </div>
     `;
 
-    const dropshipperOrders = orders.filter(o => !o.isCancelled && o.dropshipper && Number(o.dropshipperPayout) > 0);
+    const dropshipperOrders = orders.filter(o => isOrderFinanciallyActive(o) && o.dropshipper && Number(o.dropshipperPayout) > 0);
     const dropshipperTotal = dropshipperOrders.reduce((sum, o) => sum + (Number(o.dropshipperPayout) || 0), 0);
     container.innerHTML += `
       <div class="home-card" onclick="openDropshippersScreen()">
@@ -400,7 +400,7 @@ function renderHome() {
   }
 
   if (canViewFinance()) {
-    const totalSum = orders.reduce((s, o) => s + (Number(o.total) || 0), 0);
+    const totalSum = orders.filter(isOrderFinanciallyActive).reduce((s, o) => s + (Number(o.total) || 0), 0);
     container.innerHTML += `
       <div class="home-card" onclick="openFinanceScreen()">
         <div class="home-card-icon-wrap home-card-icon-dim">
@@ -465,11 +465,21 @@ function _ownerCashEntryDate(entry) {
   return new Date(entry.created_at).toISOString().slice(0, 10);
 }
 
+function isOwnerFopPaymentEntryVisible(entry) {
+  if (entry?.manual_payment === true) return false;
+  if (String(entry?.cash_account || '').toLowerCase() !== 'fop' || entry.fop_confirmed !== true) return false;
+  const source = String(entry.fop_source_key || '');
+  if (!source.startsWith('order:')) return true;
+  const orderId = source.split(':')[1];
+  const sourceOrder = (orders || []).find(order => String(order.id) === orderId);
+  return isOrderFinanciallyActive(sourceOrder);
+}
+
 function getOwnerPaymentEntries() {
   const entries = [];
 
   for (const order of (orders || [])) {
-    if (!order || order.isCancelled) continue;
+    if (!isOrderFinanciallyActive(order)) continue;
 
     const clientTotal = getOrderClientTotalAmount(order);
     const clientPayments = (order.clientPayments || [])
@@ -555,7 +565,7 @@ function getOwnerPaymentEntries() {
   }
 
   (window.allCashLog || [])
-    .filter(entry => String(entry?.cash_account || '').toLowerCase() === 'fop' && entry.fop_confirmed === true)
+    .filter(isOwnerFopPaymentEntryVisible)
     .forEach(entry => {
       entries.push({
         type: 'fop',
@@ -567,7 +577,25 @@ function getOwnerPaymentEntries() {
       });
     });
 
+  (window.allCashLog || [])
+    .filter(entry => entry?.manual_payment === true && normalizePaymentMethod(entry.manual_payment_method))
+    .forEach(entry => {
+      entries.push({
+        type: 'manual',
+        title: 'Ручная запись',
+        amount: Number(entry.amount) || 0,
+        method: normalizeManualOwnerPaymentMethod(entry.manual_payment_method),
+        date: _ownerCashEntryDate(entry),
+        cashEntry: entry,
+      });
+    });
+
   return entries.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+}
+
+function normalizeManualOwnerPaymentMethod(method) {
+  const normalized = normalizePaymentMethod(method);
+  return isFopPaymentMethod(normalized) ? 'БАБЕНКО' : normalized;
 }
 
 function renderOwnerPaymentProgress(entry) {
@@ -609,8 +637,71 @@ function renderOwnerPaymentFilters() {
         <input type="checkbox" ${ownerPaymentFilters.fop ? 'checked' : ''} onchange="setOwnerPaymentFilter('fop', this.checked)">
         <span>БАБЕНКО</span>
       </label>
+      <label class="checkbox order-flag-checkbox">
+        <input type="checkbox" ${ownerPaymentFilters.manual ? 'checked' : ''} onchange="setOwnerPaymentFilter('manual', this.checked)">
+        <span>Ручные записи</span>
+      </label>
     </div>
   `;
+}
+
+function renderOwnerManualPaymentForm() {
+  const methods = (PAYMENT_METHOD_OPTIONS || []).map(normalizePaymentMethod);
+  return `
+    <div class="owner-manual-payment-card">
+      <div class="owner-manual-payment-title">Ручная запись</div>
+      <div class="owner-manual-payment-grid">
+        <label class="owner-manual-payment-field">
+          <span class="form-label">Способ оплаты</span>
+          <select class="form-select" id="owner-manual-payment-method">
+            <option value="">— выбрать —</option>
+            ${methods.map(method => `<option value="${escapeAttr(method)}">${escapeHtml(method)}</option>`).join('')}
+          </select>
+        </label>
+        <label class="owner-manual-payment-field">
+          <span class="form-label">Сумма</span>
+          <input class="form-input" type="number" id="owner-manual-payment-amount" placeholder="-500 или 500">
+        </label>
+        <label class="owner-manual-payment-field owner-manual-payment-comment">
+          <span class="form-label">Комментарий</span>
+          <input class="form-input" type="text" id="owner-manual-payment-comment" placeholder="Напр. комиссия банка">
+        </label>
+        <button class="btn-primary owner-manual-payment-button" id="owner-manual-payment-save-btn" onclick="saveOwnerManualPayment()">Записать</button>
+      </div>
+      <div class="owner-manual-payment-hint">Минус — расход, плюс — приход. Запись появится в выбранной группе оплат.</div>
+    </div>
+  `;
+}
+
+async function saveOwnerManualPayment() {
+  if (currentRole !== 'owner') return;
+  const method = normalizePaymentMethod(document.getElementById('owner-manual-payment-method')?.value || '');
+  const amount = Number(document.getElementById('owner-manual-payment-amount')?.value) || 0;
+  const comment = document.getElementById('owner-manual-payment-comment')?.value.trim() || '';
+  if (!method) return showToast('Выберите способ оплаты', 'error');
+  if (!amount) return showToast('Введите сумму', 'error');
+  if (!comment) return showToast('Введите комментарий', 'error');
+
+  const btn = document.getElementById('owner-manual-payment-save-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Запись...'; }
+
+  try {
+    const entry = await sbInsertCashEntry({
+      worker_name: 'OWNER_PAYMENTS',
+      amount,
+      comment,
+      cash_account: 'cash',
+      manual_payment: true,
+      manual_payment_method: method,
+    });
+    if (Array.isArray(window.allCashLog) && entry) window.allCashLog.unshift(entry);
+    renderOwnerPaymentsScreen();
+    showToast('Запись добавлена ✓');
+  } catch (e) {
+    showToast('Ошибка записи: ' + e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Записать'; }
+  }
 }
 
 function _ownerTodayGroupKey(order) {
@@ -631,7 +722,7 @@ function renderOwnerTodayScreen() {
 
   const today = getLocalDateString();
   const dayOrders = (orders || [])
-    .filter(o => !o.isCancelled && o.date === today)
+    .filter(o => isOrderFinanciallyActive(o) && o.date === today)
     .sort((a, b) => String(a.time || '').localeCompare(String(b.time || '')));
 
   if (!dayOrders.length) {
@@ -717,10 +808,11 @@ function renderOwnerPaymentsScreen() {
 
   if (!allPaymentEntries.length) {
     container.innerHTML = `
+      ${renderOwnerManualPaymentForm()}
       <div class="empty-state">
         <div class="empty-state-icon">${icon('credit-card')}</div>
         <h3>Оплат нет</h3>
-        <p>Когда в заказах появятся оплаты клиента или безналичные оплаты поставщику, они будут собраны здесь</p>
+        <p>Когда появятся оплаты или ручные записи, они будут собраны здесь</p>
       </div>
     `;
     initIcons();
@@ -729,6 +821,7 @@ function renderOwnerPaymentsScreen() {
 
   if (!paymentEntries.length) {
     container.innerHTML = `
+      ${renderOwnerManualPaymentForm()}
       ${renderOwnerPaymentFilters()}
       <div class="empty-state">
         <div class="empty-state-icon">${icon('credit-card')}</div>
@@ -763,7 +856,7 @@ function renderOwnerPaymentsScreen() {
 
   const methodNames = Object.keys(byMethod).sort((a, b) => byMethod[b].total - byMethod[a].total);
 
-  container.innerHTML = renderOwnerPaymentFilters() + methodNames.map(method => {
+  container.innerHTML = renderOwnerManualPaymentForm() + renderOwnerPaymentFilters() + methodNames.map(method => {
     const methodData = byMethod[method];
     const methodKey = 'owner-pay-method-' + btoa(unescape(encodeURIComponent(method))).replace(/[^a-zA-Z0-9]/g, '');
     const yearsHtml = Object.keys(methodData.years).sort((a, b) => b.localeCompare(a)).map(year => {
@@ -799,8 +892,26 @@ function renderOwnerPaymentsScreen() {
                 </div>
               `;
             }
+            if (entry.type === 'manual' && entry.cashEntry) {
+              const cashEntry = entry.cashEntry || {};
+              return `
+                <div class="order-card" style="margin:8px 0 0;cursor:default;">
+                  <div class="order-card-top">
+                    <div class="order-card-left">
+                      <span class="order-id">РУЧНАЯ</span>
+                      <span class="order-name">${escapeHtml(cashEntry.comment || '—')}</span>
+                    </div>
+                    <div style="font-size:16px;font-weight:800;color:${isExpense ? 'var(--red)' : 'var(--accent)'};">${amount.toLocaleString('ru')} ₴</div>
+                  </div>
+                  <div class="order-card-meta">
+                    <span class="order-meta-item">${entry.title}</span>
+                    <span class="order-meta-item">${escapeHtml(cashEntry.manual_payment_method || entry.method || '—')}</span>
+                  </div>
+                </div>
+              `;
+            }
             return `
-              <div class="order-card" style="margin:8px 0 0;cursor:pointer;" onclick="openOrderDetail('${order.id}')">
+              <div class="order-card ${getOrderCardStateClass(order)}" style="margin:8px 0 0;cursor:pointer;" onclick="openOrderDetail('${order.id}')">
                 <div class="order-card-top">
                   <div class="order-card-left">
                     <span class="order-id">${order.id}</span>

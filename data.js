@@ -695,7 +695,7 @@ function _workerIsResponsibleInOrder(order, workerName) {
 function _getCompletedOrdersForWorkerDate(workerName, date) {
   return orders.filter(o =>
     o.workerDone &&
-    !o.isCancelled &&
+    isOrderFinanciallyActive(o) &&
     o.date === date &&
     calcWorkerOrderSalary(workerName, o) > 0
   );
@@ -741,7 +741,7 @@ function calcOrderSalary(workerName, order) {
 }
 
 function calcWorkerOrderSalary(workerName, order) {
-  if (!workerName || !order || !order.workerDone || order.isCancelled) return 0;
+  if (!workerName || !order || !order.workerDone || !isOrderFinanciallyActive(order)) return 0;
   let total = 0;
   if (order.responsible === workerName || order.assistant === workerName) {
     total += calcOrderSalary(workerName, order);
@@ -811,6 +811,7 @@ function calcDaySalary(workerName, date) {
     + calcDailyBaseSalary(workerName, date)
     + orders
       .filter(o => o.workerDone && !o.isCancelled && o.date === date &&
+              isOrderFinanciallyActive(o) &&
               (o.responsible === workerName || o.assistant === workerName || o.manager === workerName || o.reworkData?.responsible === workerName || o.reworkData?.assistant === workerName ||
                _calcTatuBonus(workerName, o) > 0 || _calcToningBonus(workerName, o) > 0))
       .reduce((sum, o) => {
@@ -838,6 +839,19 @@ function getOrderClientTotalAmount(order) {
   return (Number(order?.total) || 0)
        + (Number(order?.income) || 0)
        + (Number(order?.delivery) || 0);
+}
+
+function isOrderFinanciallyActive(order) {
+  return !!order && order.inWork === true && !order.isCancelled;
+}
+
+function getOrderCardStateClass(order) {
+  if (!order) return '';
+  if (order.isCancelled) return 'order-card-state-cancelled';
+  if (order.callStatus && !order.workerDone) return 'order-card-state-call';
+  if (order.inWork && !order.workerDone) return 'order-card-state-planner';
+  if (!order.callStatus && !order.inWork && !order.workerDone) return 'order-card-state-selection';
+  return '';
 }
 
 function isManualSalaryReportEntry(entry) {
@@ -949,7 +963,7 @@ function canEditPrice(order) {
 }
 function canViewClients()  { return currentRole === 'owner' || currentRole === 'manager'; }
 function canViewWorkers()  { return currentRole === 'owner'; }
-function canDeleteOrder()  { return currentRole === 'owner'; }
+function canDeleteOrder()  { return currentRole === 'owner' || currentRole === 'manager'; }
 function canViewFinance()  { return currentRole === 'owner'; }
 function canMarkWorkerDone() { return currentRole === 'senior' || currentRole === 'extra'; }
 

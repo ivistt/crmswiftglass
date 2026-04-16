@@ -152,7 +152,7 @@ async function confirmSeniorOrderAmounts(orderId) {
     if (checkEl) checkEl.value = '';
     if (debtEl) debtEl.value = '';
 
-    if (checkDiff !== 0) {
+    if (isOrderFinanciallyActive(mergedOrder) && checkDiff !== 0) {
       const amount = -checkDiff;
       const typeStr = checkDiff > 0 ? 'Списание' : 'Возврат';
       const fDate = saved.date ? formatDate(saved.date) : '—';
@@ -244,13 +244,15 @@ function goBackFromOrdersList() {
 function renderOrderCard(o) {
   const canMark = canMarkWorkerDone() &&
     o.responsible === currentWorkerName;
+  const canEditListActions = currentRole === 'owner' || currentRole === 'manager';
+  const canDeleteListAction = canDeleteOrder();
   const canQuickConfirm = canQuickConfirmOrderAmounts(o);
   const clientTotal = getOrderClientTotal(o);
   const clientPaidHtml = clientTotal > 0
     ? `<span class="order-card-client-total" title="Клиент оплатил / общая сумма заказа"><span>${(Number(o.debt) || 0).toLocaleString('ru')}</span><span class="order-card-client-total-separator">/</span><span>${clientTotal.toLocaleString('ru')} ₴</span></span>`
     : '';
   return `
-    <div class="order-card" onclick="openOrderDetail('${o.id}')">
+    <div class="order-card ${getOrderCardStateClass(o)}" onclick="openOrderDetail('${o.id}')">
       <div class="order-card-top">
         <div class="order-card-left">
           <div class="order-card-status-row">
@@ -263,6 +265,17 @@ function renderOrderCard(o) {
           </div>
         </div>
         <div class="order-card-actions">
+          ${canEditListActions ? `
+            <div class="order-card-action-dropdown" onclick="event.stopPropagation()">
+              <button class="icon-action-btn order-card-action-trigger" title="Действия заказа" onclick="toggleOrderActionMenu('${o.id}', event)">${icon('list')}</button>
+              <div class="order-card-action-menu" data-order-action-menu="${escapeAttr(o.id)}">
+                <button class="icon-action-btn" title="Скопировать данные" onclick="event.stopPropagation(); closeOrderActionMenus(); copyOrderSummary('${o.id}')">${icon('clipboard-list')}</button>
+                <button class="icon-action-btn" title="Создать дубликат" onclick="event.stopPropagation(); closeOrderActionMenus(); duplicateOrder('${o.id}')">${icon('plus')}</button>
+                <button class="icon-action-btn" title="Редактировать" onclick="event.stopPropagation(); closeOrderActionMenus(); openOrderModal('${o.id}')">${icon('pencil')}</button>
+                ${canDeleteListAction ? `<button class="icon-action-btn icon-action-danger" title="Удалить" onclick="event.stopPropagation(); closeOrderActionMenus(); deleteOrder('${o.id}')">${icon('trash-2')}</button>` : ''}
+              </div>
+            </div>
+          ` : ''}
           ${canMark ? `
             <button
               class="btn-check-done ${o.workerDone ? 'done' : ''}"
@@ -305,6 +318,22 @@ function renderOrderCard(o) {
     </div>
   `;
 }
+
+function closeOrderActionMenus() {
+  document.querySelectorAll('.order-card-action-menu.active').forEach(menu => menu.classList.remove('active'));
+}
+
+function toggleOrderActionMenu(orderId, event) {
+  event?.stopPropagation();
+  const menu = Array.from(document.querySelectorAll('.order-card-action-menu'))
+    .find(item => item.dataset.orderActionMenu === String(orderId));
+  if (!menu) return;
+  const isOpen = menu.classList.contains('active');
+  closeOrderActionMenus();
+  if (!isOpen) menu.classList.add('active');
+}
+
+document.addEventListener('click', closeOrderActionMenus);
 
 function renderOrderStatusBadges(o) {
   const badges = [];
@@ -417,7 +446,7 @@ function renderOrders() {
     } else if (currentOrderTab === 'done') {
       list = list.filter(o => o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'debt') {
-      list = list.filter(o => !o.isCancelled && ['Не оплачено', 'Частично'].includes(getEffectivePaymentStatus(o)));
+      list = list.filter(o => isOrderFinanciallyActive(o) && ['Не оплачено', 'Частично'].includes(getEffectivePaymentStatus(o)));
     } else if (currentOrderTab === 'cancelled') {
       list = list.filter(o => o.isCancelled);
     }
@@ -517,6 +546,7 @@ function openOrderDetail(id) {
   if (actionsEl) {
     actionsEl.innerHTML = `
       <button class="icon-action-btn" title="Скопировать данные" onclick="copyOrderSummary('${o.id}')">${icon('clipboard-list')}</button>
+      ${canEdit ? `<button class="icon-action-btn" title="Создать дубликат" onclick="duplicateOrder('${o.id}')">${icon('plus')}</button>` : ''}
       ${canEdit   ? `<button class="icon-action-btn" title="Редактировать" onclick="openOrderModal('${o.id}')">${icon('pencil')}</button>` : ''}
       ${canDelete ? `<button class="icon-action-btn icon-action-danger" title="Удалить" onclick="deleteOrder('${o.id}')">${icon('trash-2')}</button>` : ''}
     `;
@@ -688,6 +718,7 @@ function copyOrderSummary(id) {
   ].filter(([, amount]) => Number(amount) > 0);
   const listedServicesTotal = services.reduce((sum, [, amount]) => sum + (Number(amount) || 0), 0);
 
+  if (o.car) lines.push(`Авто: ${o.car}`);
   if (o.phone) lines.push(`Телефон: ${o.phone}`);
   services.forEach(([label, amount]) => lines.push(`${label}: ${fmt(amount)}`));
   if (services.length === 0 && Number(o.total) > 0) lines.push(`Услуги: ${fmt(o.total)}`);
@@ -708,6 +739,80 @@ function copyOrderSummary(id) {
     });
   } else {
     _fallbackCopy(text);
+  }
+}
+
+function sumCashClientPayments(payments) {
+  return (payments || []).reduce((sum, payment) => {
+    return sum + (isCashPaymentMethod(payment.method) ? (Number(payment.amount) || 0) : 0);
+  }, 0);
+}
+
+async function addCashEntriesForDuplicatedOrder(order) {
+  if (!isOrderFinanciallyActive(order)) return;
+
+  const supplierPayments = order.supplierPayments || [];
+  const supplierCashPaid = supplierPayments.length
+    ? sumCashSupplierPayments(supplierPayments)
+    : (Number(order.check) || 0);
+  const clientCashPaid = sumCashClientPayments(order.clientPayments || []);
+  const targetWorker = order.responsible || currentWorkerName;
+  const fDate = order.date ? formatDate(order.date) : '—';
+  const fTime = order.time || '—';
+  const fCar = order.car || '—';
+
+  if (supplierCashPaid !== 0) {
+    const cashComment = `Списание за стекло ${order.id}, ${fDate} ${fTime}, авто: ${fCar}, склад: ${order.warehouse || '—'}`;
+    const cashEntry = await sbInsertCashEntry({
+      worker_name: targetWorker,
+      amount: -supplierCashPaid,
+      comment: cashComment,
+    });
+    if (typeof workerCashLog !== 'undefined' && targetWorker === currentWorkerName && cashEntry) {
+      workerCashLog.unshift(cashEntry);
+    }
+    if (currentRole === 'owner' && Array.isArray(window.allCashLog) && cashEntry) {
+      window.allCashLog.unshift(cashEntry);
+    }
+  }
+
+  if (clientCashPaid !== 0) {
+    const cashComment = `Оплата клиента наличкой ${order.id}, ${fDate}, авто: ${fCar}`;
+    const cashEntry = await sbInsertCashEntry({
+      worker_name: targetWorker,
+      amount: clientCashPaid,
+      comment: cashComment,
+    });
+    if (typeof workerCashLog !== 'undefined' && targetWorker === currentWorkerName && cashEntry) {
+      workerCashLog.unshift(cashEntry);
+    }
+    if (currentRole === 'owner' && Array.isArray(window.allCashLog) && cashEntry) {
+      window.allCashLog.unshift(cashEntry);
+    }
+  }
+}
+
+async function duplicateOrder(id) {
+  if (currentRole !== 'owner' && currentRole !== 'manager') return;
+  const source = orders.find(x => x.id === id);
+  if (!source) return;
+  if (!confirm(`Создать дубликат записи ${source.id}?`)) return;
+
+  const duplicate = JSON.parse(JSON.stringify(source));
+  duplicate.id = generateOrderId();
+  duplicate.statusDone = false;
+  duplicate.workerDone = false;
+  duplicate.priceLocked = false;
+
+  try {
+    const saved = await sbInsertOrder(duplicate);
+    const nextOrder = saved || duplicate;
+    orders.unshift(nextOrder);
+    await addCashEntriesForDuplicatedOrder(nextOrder);
+    showToast(`Дубликат создан: ${nextOrder.id} ✓`);
+    openOrderDetail(nextOrder.id);
+  } catch (e) {
+    showToast('Ошибка дублирования: ' + e.message, 'error');
   }
 }
 
@@ -1551,8 +1656,10 @@ async function saveOrder() {
   const oldSupplierPayments = existingOrder?.supplierPayments || [];
   const newSupplierPayments = data.supplierPayments || [];
   const hasSupplierPaymentHistory = oldSupplierPayments.length > 0 || newSupplierPayments.length > 0;
-  const oldCashSupplierPaid = hasSupplierPaymentHistory ? sumCashSupplierPayments(oldSupplierPayments) : oldCheck;
-  const newCashSupplierPaid = hasSupplierPaymentHistory ? sumCashSupplierPayments(newSupplierPayments) : newCheck;
+  const oldFinanciallyActive = existingOrder ? isOrderFinanciallyActive(existingOrder) : false;
+  const newFinanciallyActive = isOrderFinanciallyActive(data);
+  const oldCashSupplierPaid = oldFinanciallyActive ? (hasSupplierPaymentHistory ? sumCashSupplierPayments(oldSupplierPayments) : oldCheck) : 0;
+  const newCashSupplierPaid = newFinanciallyActive ? (hasSupplierPaymentHistory ? sumCashSupplierPayments(newSupplierPayments) : newCheck) : 0;
   const cashSupplierDiff = newCashSupplierPaid - oldCashSupplierPaid;
 
   // Дельта наличных платежей от клиента (для зачисления в кассу мастера)
@@ -1560,8 +1667,8 @@ async function saveOrder() {
   const newClientPayments = data.clientPayments || [];
   const sumCashClientPayments = (payments) =>
     (payments || []).reduce((sum, p) => sum + (isCashPaymentMethod(p.method) ? (Number(p.amount) || 0) : 0), 0);
-  const oldCashClientPaid = sumCashClientPayments(oldClientPayments);
-  const newCashClientPaid = sumCashClientPayments(newClientPayments);
+  const oldCashClientPaid = oldFinanciallyActive ? sumCashClientPayments(oldClientPayments) : 0;
+  const newCashClientPaid = newFinanciallyActive ? sumCashClientPayments(newClientPayments) : 0;
   const cashClientDiff = newCashClientPaid - oldCashClientPaid;
 
   try {
@@ -1771,7 +1878,7 @@ function renderYears() {
   container.innerHTML = specialistTodayCard + keys.map(year => {
     const list = map[year];
     const displayList = (currentRole === 'owner' || currentRole === 'manager') ? list : list.filter(o => o.inWork);
-    const totalSum = list.reduce((s, o) => s + ((Number(o.total) || 0) + (Number(o.income) || 0) + (Number(o.delivery) || 0)), 0);
+    const totalSum = list.filter(isOrderFinanciallyActive).reduce((s, o) => s + getOrderClientTotalAmount(o), 0);
     return `
       <div class="month-card" onclick="openYear('${year}')">
         <div>
@@ -1874,7 +1981,7 @@ function renderMonths() {
     const monthName = MONTH_NAMES_RU[parseInt(month) - 1];
     const list = map[ym];
     const displayList = (currentRole === 'owner' || currentRole === 'manager') ? list : list.filter(o => o.inWork);
-    const totalSum = list.reduce((s, o) => s + ((Number(o.total) || 0) + (Number(o.income) || 0) + (Number(o.delivery) || 0)), 0);
+    const totalSum = list.filter(isOrderFinanciallyActive).reduce((s, o) => s + getOrderClientTotalAmount(o), 0);
     return `
       <div class="month-card" onclick="openMonthOrders('${ym}')">
         <div>
@@ -1921,7 +2028,7 @@ function renderOrdersForMonth(ym) {
     } else if (currentOrderTab === 'done') {
       list = list.filter(o => o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'debt') {
-      list = list.filter(o => !o.isCancelled && ['Не оплачено', 'Частично'].includes(getEffectivePaymentStatus(o)));
+      list = list.filter(o => isOrderFinanciallyActive(o) && ['Не оплачено', 'Частично'].includes(getEffectivePaymentStatus(o)));
     } else if (currentOrderTab === 'cancelled') {
       list = list.filter(o => o.isCancelled);
     }
