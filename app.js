@@ -5,6 +5,8 @@
 let currentMonthFilter = null;
 let ownerPaymentFilters = { client: true, supplier: true, dropshipper: true, fop: true, manual: true };
 let ownerCashSelectedWorker = '';
+let calendarCursorDate = new Date();
+let calendarWorkerFilters = [];
 const THEME_STORAGE_KEY = 'crm_theme';
 
 // Fallback если data.js старой версии (без carDirectory)
@@ -130,7 +132,7 @@ function updateNavbarVisibility() {
 
 function setActiveNav(name) {
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-  const map = { home: 'nav-home', months: 'nav-orders', orders: 'nav-orders', clients: 'nav-clients', workers: 'nav-workers', cash: 'nav-cash', profile: 'nav-profile', 'owner-today': 'nav-home' };
+  const map = { home: 'nav-home', months: 'nav-orders', orders: 'nav-orders', clients: 'nav-clients', workers: 'nav-workers', cash: 'nav-cash', profile: 'nav-profile', 'owner-today': 'nav-home', calendar: 'nav-home' };
   const id = map[name];
   if (id) { const el = document.getElementById(id); if (el) el.classList.add('active'); }
 }
@@ -168,6 +170,225 @@ function openOwnerTodayScreen() {
   if (currentRole !== 'owner') return;
   renderOwnerTodayScreen();
   showScreen('owner-today');
+}
+
+function openCalendarScreen() {
+  if (currentRole !== 'owner') return;
+  renderCalendarScreen();
+  showScreen('calendar');
+  setActiveNav('calendar');
+}
+
+function getCalendarPlannerOrders() {
+  return (orders || []).filter(order => order.inWork && !order.workerDone && !order.isCancelled && order.date);
+}
+
+function getCalendarWorkerNames() {
+  const names = new Set();
+  getCalendarPlannerOrders().forEach(order => {
+    [order.responsible, order.assistant, order.manager].filter(Boolean).forEach(name => names.add(name));
+  });
+  return Array.from(names).sort((a, b) => getWorkerDisplayName(a).localeCompare(getWorkerDisplayName(b), 'ru'));
+}
+
+function orderMatchesCalendarWorkers(order) {
+  if (!calendarWorkerFilters.length) return true;
+  return calendarWorkerFilters.some(workerName =>
+    order.responsible === workerName || order.assistant === workerName || order.manager === workerName
+  );
+}
+
+function setCalendarMonth(offset) {
+  const current = calendarCursorDate instanceof Date && !Number.isNaN(calendarCursorDate.getTime())
+    ? calendarCursorDate
+    : new Date();
+  calendarCursorDate = new Date(current.getFullYear(), current.getMonth() + offset, 1);
+  renderCalendarScreen();
+}
+
+function setCalendarWorkerFilter(workerName, checked) {
+  const name = String(workerName || '');
+  if (!name) return;
+  if (checked) {
+    if (!calendarWorkerFilters.includes(name)) calendarWorkerFilters.push(name);
+  } else {
+    calendarWorkerFilters = calendarWorkerFilters.filter(item => item !== name);
+  }
+  renderCalendarScreen();
+}
+
+function clearCalendarWorkerFilters() {
+  calendarWorkerFilters = [];
+  renderCalendarScreen();
+}
+
+function formatCalendarMonthTitle(date) {
+  const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+  return `${monthNames[date.getMonth()]} ${date.getFullYear()}`;
+}
+
+function calendarDateKey(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function renderCalendarScreen() {
+  const container = document.getElementById('calendar-content');
+  if (!container) return;
+
+  const cursor = calendarCursorDate instanceof Date && !Number.isNaN(calendarCursorDate.getTime())
+    ? calendarCursorDate
+    : new Date();
+  const year = cursor.getFullYear();
+  const month = cursor.getMonth();
+  const firstDay = new Date(year, month, 1);
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const startOffset = (firstDay.getDay() + 6) % 7;
+  const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
+  const todayKey = getLocalDateString();
+
+  const plannerOrders = getCalendarPlannerOrders()
+    .filter(order => String(order.date || '').startsWith(monthKey))
+    .filter(orderMatchesCalendarWorkers);
+
+  const byDate = {};
+  plannerOrders.forEach(order => {
+    const key = String(order.date || '').slice(0, 10);
+    if (!byDate[key]) byDate[key] = [];
+    byDate[key].push(order);
+  });
+
+  const workerNames = getCalendarWorkerNames();
+  const workerFiltersHtml = workerNames.length ? workerNames.map(workerName => {
+    const checked = calendarWorkerFilters.includes(workerName);
+    return `
+      <label class="calendar-worker-pill ${checked ? 'active' : ''}">
+        <input type="checkbox" ${checked ? 'checked' : ''} onchange="setCalendarWorkerFilter('${escapeAttr(workerName)}', this.checked)">
+        <span>${escapeHtml(getWorkerDisplayName(workerName) || workerName)}</span>
+      </label>
+    `;
+  }).join('') : '<div style="font-size:13px;color:var(--text3);">В планерке пока нет заказов с сотрудниками</div>';
+
+  const weekdayHtml = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс']
+    .map(day => `<div class="calendar-weekday">${day}</div>`)
+    .join('');
+
+  let daysHtml = '';
+  for (let i = 0; i < startOffset; i++) {
+    daysHtml += '<div class="calendar-day calendar-day-empty"></div>';
+  }
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const date = new Date(year, month, day);
+    const key = calendarDateKey(date);
+    const dayOrders = byDate[key] || [];
+    const preview = dayOrders.slice(0, 3).map(order => `
+      <div class="calendar-order-preview">${escapeHtml(order.time || '—')} · ${escapeHtml(getWorkerDisplayPair(order.responsible, order.assistant) || '—')}</div>
+    `).join('');
+    daysHtml += `
+      <div class="calendar-day ${key === todayKey ? 'today' : ''} ${dayOrders.length ? 'has-orders' : ''}" onclick="openCalendarDayModal('${key}')">
+        <div class="calendar-day-top">
+          <span class="calendar-day-number">${day}</span>
+          ${dayOrders.length ? `<span class="calendar-day-count">${dayOrders.length}</span>` : ''}
+        </div>
+        ${preview}
+      </div>
+    `;
+  }
+
+  container.innerHTML = `
+    <div class="calendar-toolbar">
+      <button class="btn-secondary calendar-nav-btn" onclick="setCalendarMonth(-1)">${icon('chevron-right')}</button>
+      <div>
+        <div class="calendar-title">${formatCalendarMonthTitle(firstDay)}</div>
+        <div class="calendar-subtitle">${plannerOrders.length} заказов в планерке</div>
+      </div>
+      <button class="btn-secondary calendar-nav-btn" onclick="setCalendarMonth(1)">${icon('chevron-right')}</button>
+    </div>
+
+    <div class="calendar-filters-card">
+      <div class="calendar-filters-head">
+        <div class="calendar-filters-title">Сотрудники</div>
+        ${calendarWorkerFilters.length ? '<button class="btn-secondary" style="font-size:12px;padding:6px 10px;" onclick="clearCalendarWorkerFilters()">Все</button>' : ''}
+      </div>
+      <div class="calendar-worker-pills">${workerFiltersHtml}</div>
+    </div>
+
+    <div class="calendar-grid-card">
+      <div class="calendar-grid calendar-weekdays">${weekdayHtml}</div>
+      <div class="calendar-grid">${daysHtml}</div>
+    </div>
+  `;
+  initIcons();
+}
+
+function getCalendarOrdersForDate(dateKey) {
+  const key = String(dateKey || '').slice(0, 10);
+  return getCalendarPlannerOrders()
+    .filter(order => String(order.date || '').slice(0, 10) === key)
+    .filter(orderMatchesCalendarWorkers)
+    .sort((a, b) => String(a.time || '').localeCompare(String(b.time || '')));
+}
+
+function openCalendarDayModal(dateKey) {
+  const dayOrders = getCalendarOrdersForDate(dateKey);
+  let modal = document.getElementById('calendar-day-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'calendar-day-modal';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+
+  const filtersLabel = calendarWorkerFilters.length
+    ? calendarWorkerFilters.map(name => getWorkerDisplayName(name) || name).join(', ')
+    : 'Все сотрудники';
+
+  const ordersHtml = dayOrders.length ? dayOrders.map(order => `
+    <div class="calendar-modal-order" onclick="closeCalendarDayModal(); openOrderDetail('${escapeAttr(order.id)}')">
+      <div class="calendar-modal-order-top">
+        <div>
+          <div class="calendar-modal-order-title">${escapeHtml(order.car || order.client || order.id)}</div>
+          <div class="calendar-modal-order-sub">${escapeHtml(order.client || '—')} · ${escapeHtml(order.phone || '—')}</div>
+        </div>
+        <div class="calendar-modal-order-time">${escapeHtml(order.time || '—')}</div>
+      </div>
+      <div class="calendar-modal-order-meta">
+        <span>${icon('user')} ${escapeHtml(getWorkerDisplayPair(order.responsible, order.assistant) || '—')}</span>
+        ${order.manager ? `<span>${icon('users')} ${escapeHtml(getWorkerDisplayName(order.manager) || order.manager)}</span>` : ''}
+        ${order.address ? `<span>${escapeHtml(order.address)}</span>` : ''}
+      </div>
+    </div>
+  `).join('') : `
+    <div class="empty-state" style="padding:24px 12px;">
+      <div class="empty-state-icon">${icon('calendar')}</div>
+      <h3>Заказов нет</h3>
+      <p>На этот день в планерке нет заказов по выбранному фильтру</p>
+    </div>
+  `;
+
+  modal.innerHTML = `
+    <div class="modal" style="max-width:560px;">
+      <div class="modal-header">
+        <div>
+          <div class="modal-title">${formatDate(dateKey)}</div>
+          <div style="font-size:12px;color:var(--text3);margin-top:2px;">${escapeHtml(filtersLabel)} · ${dayOrders.length} заказов</div>
+        </div>
+        <button class="modal-close" onclick="closeCalendarDayModal()">${icon('x')}</button>
+      </div>
+      <div class="modal-body">
+        <div class="calendar-modal-orders">${ordersHtml}</div>
+      </div>
+    </div>
+  `;
+  modal.classList.add('active');
+  initIcons();
+}
+
+function closeCalendarDayModal() {
+  document.getElementById('calendar-day-modal')?.classList.remove('active');
 }
 
 // --- ЗАГРУЗКА ЗАКАЗОВ ---
@@ -211,6 +432,7 @@ function refreshActiveOrdersViews() {
   if (document.getElementById('screen-workers')?.classList.contains('active')) renderWorkers();
   if (document.getElementById('screen-owner-payments')?.classList.contains('active')) renderOwnerPaymentsScreen();
   if (document.getElementById('screen-owner-cash')?.classList.contains('active')) renderOwnerCashScreen();
+  if (document.getElementById('screen-calendar')?.classList.contains('active')) renderCalendarScreen();
 }
 
 async function refreshOrders() {
@@ -325,6 +547,19 @@ function renderHome() {
         <h3>Сегодня</h3>
         <p>${todayOrders.length} заказов</p>
         <div class="home-card-count" style="font-size:22px; color: var(--accent);">${todayTotal.toLocaleString('ru')} ₴</div>
+      </div>
+    `;
+
+    const monthKey = getLocalDateString().slice(0, 7);
+    const monthPlannerOrders = getCalendarPlannerOrders().filter(o => String(o.date || '').startsWith(monthKey));
+    container.innerHTML += `
+      <div class="home-card" onclick="openCalendarScreen()">
+        <div class="home-card-icon-wrap home-card-icon-dim">
+          <i data-lucide="calendar" style="width:22px;height:22px;"></i>
+        </div>
+        <h3>Календарь</h3>
+        <p>Планерка по дням</p>
+        <div class="home-card-count" style="font-size:22px; color: var(--accent);">${monthPlannerOrders.length}</div>
       </div>
     `;
 
@@ -508,6 +743,121 @@ function setOwnerCashSelectedWorker(workerName) {
   renderOwnerCashScreen();
 }
 
+function getOwnerCashEditableWorkers() {
+  return getOwnerCashSeniorNames().filter(Boolean);
+}
+
+function renderOwnerCashWorkerOptions(selectedWorker = '') {
+  return getOwnerCashEditableWorkers().map(workerName =>
+    `<option value="${escapeAttr(workerName)}" ${workerName === selectedWorker ? 'selected' : ''}>${escapeHtml(getWorkerDisplayName(workerName) || workerName)}</option>`
+  ).join('');
+}
+
+function openOwnerCashEntryModal(entryId = '') {
+  if (currentRole !== 'owner') return;
+  const entry = entryId
+    ? (window.allCashLog || []).find(item => String(item.id) === String(entryId))
+    : null;
+  const selectedWorker = entry?.worker_name || ownerCashSelectedWorker || getOwnerCashEditableWorkers()[0] || '';
+
+  let modal = document.getElementById('owner-cash-entry-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'owner-cash-entry-modal';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+
+  modal.innerHTML = `
+    <div class="modal" style="max-width:420px;">
+      <div class="modal-header">
+        <div class="modal-title">${entry ? 'Редактировать кассу' : 'Добавить в кассу'}</div>
+        <button class="modal-close" onclick="closeOwnerCashEntryModal()">${icon('x')}</button>
+      </div>
+      <div class="modal-body" style="display:grid;gap:12px;">
+        <input type="hidden" id="owner-cash-entry-id" value="${escapeAttr(entry?.id || '')}">
+        <div class="form-group">
+          <label class="form-label">Сотрудник</label>
+          <select class="form-select" id="owner-cash-worker">
+            ${renderOwnerCashWorkerOptions(selectedWorker)}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Сумма</label>
+          <input class="form-input" type="number" id="owner-cash-amount" placeholder="Например 500 или -500" value="${escapeAttr(entry ? String(Number(entry.amount) || 0) : '')}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Комментарий</label>
+          <textarea class="form-input" id="owner-cash-comment" rows="3" placeholder="Причина записи">${escapeHtml(entry?.comment || '')}</textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeOwnerCashEntryModal()">Отмена</button>
+        <button class="btn-primary" id="owner-cash-save-btn" onclick="saveOwnerCashEntry()">${entry ? 'Сохранить' : 'Добавить'}</button>
+      </div>
+    </div>
+  `;
+  modal.classList.add('active');
+  initIcons();
+}
+
+function closeOwnerCashEntryModal() {
+  document.getElementById('owner-cash-entry-modal')?.classList.remove('active');
+}
+
+async function saveOwnerCashEntry() {
+  if (currentRole !== 'owner') return;
+  const id = document.getElementById('owner-cash-entry-id')?.value || '';
+  const workerName = document.getElementById('owner-cash-worker')?.value || '';
+  const amount = Number(document.getElementById('owner-cash-amount')?.value);
+  const comment = String(document.getElementById('owner-cash-comment')?.value || '').trim();
+  const btn = document.getElementById('owner-cash-save-btn');
+
+  if (!workerName) return showToast('Выберите сотрудника', 'error');
+  if (!amount) return showToast('Введите сумму', 'error');
+  if (!comment) return showToast('Введите комментарий', 'error');
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Сохранение...';
+  }
+
+  try {
+    let saved;
+    if (id) {
+      saved = await sbUpdateCashEntry(id, {
+        worker_name: workerName,
+        amount,
+        comment,
+      });
+      const idx = (window.allCashLog || []).findIndex(entry => String(entry.id) === String(id));
+      if (idx !== -1) window.allCashLog[idx] = { ...window.allCashLog[idx], ...saved };
+    } else {
+      saved = await sbInsertCashEntry({
+        worker_name: workerName,
+        amount,
+        comment,
+        cash_account: 'cash',
+      });
+      if (!Array.isArray(window.allCashLog)) window.allCashLog = [];
+      if (saved) window.allCashLog.unshift(saved);
+    }
+
+    closeOwnerCashEntryModal();
+    ownerCashSelectedWorker = workerName;
+    renderOwnerCashScreen();
+    renderHome();
+    showToast(id ? 'Запись кассы обновлена ✓' : 'Запись кассы добавлена ✓');
+  } catch (e) {
+    showToast('Ошибка кассы: ' + e.message, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = id ? 'Сохранить' : 'Добавить';
+    }
+  }
+}
+
 function renderOwnerEmployeeCashHistory(workerName, logs) {
   const rows = (logs || [])
     .filter(entry => entry.worker_name === workerName)
@@ -570,7 +920,10 @@ function renderOwnerEmployeeCashHistory(workerName, logs) {
                 <div class="owner-cash-entry-comment">${escapeHtml(comment)}</div>
                 <div class="owner-cash-entry-meta">${time ? escapeHtml(time) : '—'}</div>
               </div>
-              <div class="owner-cash-entry-amount" style="color:${amount >= 0 ? 'var(--accent)' : '#ef4444'};">${amount.toLocaleString('ru')} ₴</div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <div class="owner-cash-entry-amount" style="color:${amount >= 0 ? 'var(--accent)' : '#ef4444'};">${amount.toLocaleString('ru')} ₴</div>
+                <button class="icon-btn" title="Редактировать" onclick="event.stopPropagation(); openOwnerCashEntryModal('${escapeAttr(entry.id)}')">${icon('pencil')}</button>
+              </div>
             </div>
           `;
         }).join('');
@@ -1245,7 +1598,10 @@ function renderOwnerCashScreen() {
             <div class="fin-month-name">Текущая касса</div>
             <div class="fin-month-sub">Нажмите на сотрудника, чтобы открыть историю кассы</div>
           </div>
-          <div style="font-size:22px;font-weight:900;color:${currentCashTotal >= 0 ? 'var(--accent)' : '#ef4444'};white-space:nowrap;">${currentCashTotal.toLocaleString('ru')} ₴</div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
+            <div style="font-size:22px;font-weight:900;color:${currentCashTotal >= 0 ? 'var(--accent)' : '#ef4444'};white-space:nowrap;">${currentCashTotal.toLocaleString('ru')} ₴</div>
+            <button class="btn-secondary" style="font-size:12px;padding:6px 10px;" onclick="openOwnerCashEntryModal()">+ Запись</button>
+          </div>
         </div>
       </div>
       <div style="padding:12px 16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;">

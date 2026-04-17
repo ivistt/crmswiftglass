@@ -1182,23 +1182,6 @@ function addSupplierPayment() {
   recalcTotal();
 }
 
-function flushPendingSupplierPaymentInput() {
-  const amtEl = document.getElementById('f-new-supplier-payment-amount');
-  if (!amtEl) return;
-  const amount = Number(amtEl.value);
-  if (!amount || amount <= 0) return;
-
-  const dateEl = document.getElementById('f-new-supplier-payment-date');
-  const methodEl = document.getElementById('f-new-supplier-payment-method');
-  const date = dateEl?.value || todayStr();
-  const method = normalizePaymentMethod(methodEl?.value || '');
-
-  currentSupplierPayments.push({ amount, date, method, timestamp: new Date().toISOString() });
-  amtEl.value = '';
-  renderSupplierPayments();
-  syncSupplierPaidFromPayments();
-}
-
 function sumCashSupplierPayments(payments) {
   return (payments || []).reduce((sum, payment) => {
     return sum + (isCashPaymentMethod(payment.method) ? (Number(payment.amount) || 0) : 0);
