@@ -9,6 +9,7 @@ let ordersVisibleCount = 10;
 let lastOrdersListSignature = '';
 let ordersFiltersOpen = false;
 let currentOrderDetailId = null;
+const deletingOrderIds = new Set();
 const SERVICE_TYPE_OPTIONS = [
   { group: 'Монтаж', name: 'Монтаж лобового', rate: 400, salaryCategory: 'mount' },
   { group: 'Монтаж', name: 'Монтаж бокового', rate: 300, salaryCategory: 'mount' },
@@ -272,7 +273,7 @@ function renderOrderCard(o) {
                 <button class="icon-action-btn" title="Скопировать данные" onclick="event.stopPropagation(); closeOrderActionMenus(); copyOrderSummary('${o.id}')">${icon('clipboard-list')}</button>
                 <button class="icon-action-btn" title="Создать дубликат" onclick="event.stopPropagation(); closeOrderActionMenus(); duplicateOrder('${o.id}')">${icon('plus')}</button>
                 <button class="icon-action-btn" title="Редактировать" onclick="event.stopPropagation(); closeOrderActionMenus(); openOrderModal('${o.id}')">${icon('pencil')}</button>
-                ${canDeleteListAction ? `<button class="icon-action-btn icon-action-danger" title="Удалить" onclick="event.stopPropagation(); closeOrderActionMenus(); deleteOrder('${o.id}')">${icon('trash-2')}</button>` : ''}
+                ${canDeleteListAction ? `<button type="button" class="icon-action-btn icon-action-danger" title="Удалить" onpointerdown="event.stopPropagation()" onclick="deleteOrder('${escapeAttr(o.id)}', event)">${icon('trash-2')}</button>` : ''}
               </div>
             </div>
           ` : ''}
@@ -548,7 +549,7 @@ function openOrderDetail(id) {
       <button class="icon-action-btn" title="Скопировать данные" onclick="copyOrderSummary('${o.id}')">${icon('clipboard-list')}</button>
       ${canEdit ? `<button class="icon-action-btn" title="Создать дубликат" onclick="duplicateOrder('${o.id}')">${icon('plus')}</button>` : ''}
       ${canEdit   ? `<button class="icon-action-btn" title="Редактировать" onclick="openOrderModal('${o.id}')">${icon('pencil')}</button>` : ''}
-      ${canDelete ? `<button class="icon-action-btn icon-action-danger" title="Удалить" onclick="deleteOrder('${o.id}')">${icon('trash-2')}</button>` : ''}
+      ${canDelete ? `<button class="icon-action-btn icon-action-danger" title="Удалить" onclick="deleteOrder('${escapeAttr(o.id)}', event)">${icon('trash-2')}</button>` : ''}
     `;
   }
 
@@ -688,15 +689,32 @@ function openOrderDetail(id) {
 }
 
 // ---------- УДАЛЕНИЕ ----------
-async function deleteOrder(id) {
+async function deleteOrder(id, event) {
+  event?.preventDefault?.();
+  event?.stopPropagation?.();
+  closeOrderActionMenus();
+  if (deletingOrderIds.has(id)) return;
   if (!confirm('Удалить этот заказ? Это действие нельзя отменить.')) return;
+  deletingOrderIds.add(id);
   try {
     await sbDeleteOrder(id);
     orders = orders.filter(o => o.id !== id);
     showToast('Запись удалена');
-    goHome();
+    if (document.getElementById('screen-order-detail')?.classList.contains('active') && currentOrderDetailId === id) {
+      currentOrderDetailId = null;
+      openOrdersScreen();
+    } else if (typeof refreshActiveOrdersViews === 'function') {
+      refreshActiveOrdersViews();
+    } else if (currentMonthFilter) {
+      renderOrdersForMonth(currentMonthFilter);
+    } else {
+      renderOrders();
+    }
+    renderHome();
   } catch (e) {
     showToast('Ошибка удаления: ' + e.message, 'error');
+  } finally {
+    deletingOrderIds.delete(id);
   }
 }
 

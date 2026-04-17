@@ -342,8 +342,11 @@ function renderHome() {
   }
 
   if (canViewFinance()) {
-    const debtOrders = orders.filter(o => isOrderFinanciallyActive(o) && (o.supplierStatus === 'Не оплачено' || o.supplierStatus === 'Частично'));
+    const debtOrders = orders.filter(o => typeof isWarehouseRelevantOrder === 'function'
+      ? isWarehouseRelevantOrder(o)
+      : (isOrderFinanciallyActive(o) && (o.supplierStatus === 'Не оплачено' || o.supplierStatus === 'Частично')));
     const debtSum = debtOrders.reduce((sum, o) => {
+      if (typeof getWarehouseBalanceAmount === 'function') return sum + getWarehouseBalanceAmount(o);
       const debt = (Number(o.purchase) || 0) - (Number(o.check) || 0);
       return sum + (debt > 0 ? debt : 0);
     }, 0);
@@ -354,7 +357,7 @@ function renderHome() {
           <i data-lucide="package" style="width:22px;height:22px;"></i>
         </div>
         <h3>Склады</h3>
-        <p>Долги поставщикам</p>
+        <p>Долги и возвраты</p>
         <div class="home-card-count" style="font-size:20px; color: var(--red);">${debtSum.toLocaleString('ru')} ₴</div>
       </div>
     `;
@@ -658,7 +661,8 @@ function getOwnerPaymentEntries() {
         const amount = Number(payment.amount) || 0;
         const method = normalizePaymentMethod(payment.method);
         const isFop = isFopPaymentMethod(method);
-        if (isFop) return;
+        const isSashaCard = typeof isSashaManagerCardPaymentMethod === 'function' && isSashaManagerCardPaymentMethod(method);
+        if (isFop || isSashaCard) return;
         clientPaidSoFar += amount;
         entries.push({
           type: 'client',
@@ -675,7 +679,8 @@ function getOwnerPaymentEntries() {
     } else if (order.paymentMethod && Number(order.debt) > 0) {
       const method = normalizePaymentMethod(order.paymentMethod);
       const isFop = isFopPaymentMethod(method);
-      if (!isFop) {
+      const isSashaCard = typeof isSashaManagerCardPaymentMethod === 'function' && isSashaManagerCardPaymentMethod(method);
+      if (!isFop && !isSashaCard) {
         entries.push({
           type: 'client',
           title: 'Оплата клиента',
@@ -739,6 +744,19 @@ function getOwnerPaymentEntries() {
         title: 'Касса БАБЕНКО',
         amount: Number(entry.amount) || 0,
         method: 'БАБЕНКО',
+        date: entry.fop_date || _ownerCashEntryDate(entry),
+        cashEntry: entry,
+      });
+    });
+
+  (window.allCashLog || [])
+    .filter(entry => String(entry?.cash_account || '').toLowerCase() === 'card' && entry.fop_confirmed === true)
+    .forEach(entry => {
+      entries.push({
+        type: 'client',
+        title: 'Карта Саши',
+        amount: Number(entry.amount) || 0,
+        method: 'Карта Саши',
         date: entry.fop_date || _ownerCashEntryDate(entry),
         cashEntry: entry,
       });
@@ -1073,6 +1091,24 @@ function renderOwnerPaymentsScreen() {
                   <div class="order-card-meta">
                     <span class="order-meta-item">${entry.title}</span>
                     <span class="order-meta-item">${escapeHtml(cashEntry.manual_payment_method || entry.method || '—')}</span>
+                  </div>
+                </div>
+              `;
+            }
+            if (entry.cashEntry && entry.method === 'Карта Саши') {
+              const cashEntry = entry.cashEntry || {};
+              return `
+                <div class="order-card" style="margin:8px 0 0;cursor:default;">
+                  <div class="order-card-top">
+                    <div class="order-card-left">
+                      <span class="order-id">КАРТА</span>
+                      <span class="order-name">${escapeHtml(cashEntry.comment || '—')}</span>
+                    </div>
+                    <div style="font-size:16px;font-weight:800;color:${isExpense ? 'var(--red)' : 'var(--accent)'};">${amount.toLocaleString('ru')} ₴</div>
+                  </div>
+                  <div class="order-card-meta">
+                    <span class="order-meta-item">${escapeHtml(cashEntry.worker_name || '—')}</span>
+                    <span class="order-meta-item">${entry.title}</span>
                   </div>
                 </div>
               `;

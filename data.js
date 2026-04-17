@@ -928,6 +928,7 @@ const PAYMENT_METHOD_OPTIONS = [
   '👤 Бабенко Олег 💳 5457 0825 0103 4743 (PRIVAT)',
   '📂 БЕЗНАЛ БАБЕНКО',
 ];
+const SASHA_MANAGER_CARD_METHOD = '👤 Шепель Александр 💳 4149 4975 1422 9980 (PRIVAT)';
 
 function normalizePaymentMethod(method) {
   if (!method) return '';
@@ -942,6 +943,10 @@ function isCashPaymentMethod(method) {
 
 function isFopPaymentMethod(method) {
   return normalizePaymentMethod(method) === '📂 БЕЗНАЛ БАБЕНКО';
+}
+
+function isSashaManagerCardPaymentMethod(method) {
+  return normalizePaymentMethod(method) === SASHA_MANAGER_CARD_METHOD;
 }
 
 let currentRole = null;
