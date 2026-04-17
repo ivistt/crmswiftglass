@@ -77,7 +77,9 @@ function renderProfile() {
 
   if (currentRole === 'manager') {
     const relevantSalaryEntries = workerSalaries.filter(isRelevantSalaryEntry);
-    const accTotal = relevantSalaryEntries.reduce((sum, s) => sum + Number(s.amount), 0);
+    const today = getLocalDateString();
+    const accTotal = getSalaryAccumulatedForWithdraw(currentWorkerName, workerSalaries);
+    const todayAmount = getSalaryAccrualForDate(relevantSalaryEntries, today);
     const salaryHistoryHtml = buildWorkerSalaryHistory(currentWorkerName, relevantSalaryEntries);
     el.innerHTML = ''
       + '<div class="profile-header">'
@@ -90,7 +92,7 @@ function renderProfile() {
       + '<div class="profile-summary-card"><div class="profile-summary-label">Накоплено</div><div class="profile-summary-value">' + accTotal.toLocaleString('ru') + ' ₴</div>'
       + (currentWorkerName === MANAGER_CARD_CASH_WORKER_NAME ? '<button class="btn-primary" style="margin-top:10px;min-height:36px;padding:0 14px;border-radius:8px;font-weight:800;" onclick="withdrawSalary()" ' + (accTotal <= 0 ? 'disabled' : '') + '>Снять ЗП</button>' : '')
       + '</div>'
-      + '<div class="profile-summary-card"><div class="profile-summary-label">Сегодня</div><div class="profile-summary-value">' + getTodayAttendanceAmount().toLocaleString('ru') + ' ₴</div></div>'
+      + '<div class="profile-summary-card"><div class="profile-summary-label">Сегодня</div><div class="profile-summary-value">' + todayAmount.toLocaleString('ru') + ' ₴</div></div>'
       + '</div>'
       + '<div class="profile-today-card" style="margin-top:12px;">'
       + '<div style="font-size:12px;font-weight:800;color:var(--text3);margin-bottom:12px;letter-spacing:0.04em;">ИСТОРИЯ ЗАРПЛАТ</div>'

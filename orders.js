@@ -828,6 +828,9 @@ async function duplicateOrder(id) {
   duplicate.statusDone = false;
   duplicate.workerDone = false;
   duplicate.priceLocked = false;
+  duplicate.inWork = false;
+  duplicate.callStatus = false;
+  duplicate.isCancelled = false;
 
   try {
     const saved = await sbInsertOrder(duplicate);
