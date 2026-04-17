@@ -662,7 +662,7 @@ const SALARY_CONFIG = {
   'Sasha Doga': { selectedServices: true },
   'Sasha Smokov': { selectedServices: true, serviceAdjustments: { mount: 100, cut: 50, glue: 50 }, glassMarginPct: 0.10, moldingPct: 0.10, dailyBaseIfCompleted: 800 },
   'Seryozha':   { selectedServices: true, serviceAdjustments: { mount: -100, cut: -50, glue: -50 } },
-  'Kostya':     { glassMarginPct: 0.10, moldingPct: 0.10, dailyBaseIfCompleted: 800 },
+  'Kostya':     { selectedServices: true, glassMarginPct: 0.10, moldingPct: 0.10, dailyBaseIfCompleted: 800 },
   'Sasha Manager': { glassMarginPct: 0.10, attendanceBase: 800, managerOnly: true },
   'Nastya':      { attendanceBase: 2000 },
   'Lyosha':     { selectedServices: true, toningBonusPct: 0.20, globalToningBonus: true },
