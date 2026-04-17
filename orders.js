@@ -767,12 +767,6 @@ function sumCashClientPayments(payments) {
   }, 0);
 }
 
-function sumSashaManagerCardPayments(payments) {
-  return (payments || []).reduce((sum, payment) => {
-    return sum + (isSashaManagerCardPaymentMethod(payment.method) ? (Number(payment.amount) || 0) : 0);
-  }, 0);
-}
-
 function getCashClientPaidForOrderSnapshot(order) {
   const payments = order?.clientPayments || [];
   if (payments.length) return sumCashClientPayments(payments);
@@ -1699,16 +1693,6 @@ async function saveOrder() {
   const oldCashClientPaid = oldFinanciallyActive ? getCashClientPaidForOrderSnapshot({ ...existingOrder, clientPayments: oldClientPayments }) : 0;
   const newCashClientPaid = newFinanciallyActive ? getCashClientPaidForOrderSnapshot({ ...data, clientPayments: newClientPayments }) : 0;
   const cashClientDiff = newCashClientPaid - oldCashClientPaid;
-  const oldSashaClientPaid = oldFinanciallyActive
-    ? (oldClientPayments.length ? sumSashaManagerCardPayments(oldClientPayments) : (isSashaManagerCardPaymentMethod(existingOrder?.paymentMethod) ? (Number(existingOrder?.debt) || 0) : 0))
-    : 0;
-  const newSashaClientPaid = newFinanciallyActive
-    ? (newClientPayments.length ? sumSashaManagerCardPayments(newClientPayments) : (isSashaManagerCardPaymentMethod(data.paymentMethod) ? (Number(data.debt) || 0) : 0))
-    : 0;
-  const sashaClientDiff = newSashaClientPaid - oldSashaClientPaid;
-  const oldSashaSupplierPaid = oldFinanciallyActive ? sumSashaManagerCardPayments(oldSupplierPayments) : 0;
-  const newSashaSupplierPaid = newFinanciallyActive ? sumSashaManagerCardPayments(newSupplierPayments) : 0;
-  const sashaSupplierDiff = newSashaSupplierPaid - oldSashaSupplierPaid;
   const cashEntries = [];
 
   if ((currentRole === 'senior' || currentRole === 'owner') && cashSupplierDiff !== 0) {
@@ -1736,28 +1720,6 @@ async function saveOrder() {
       amount: cashClientDiff,
       comment: `${typeStr} наличкой ${data.id}, ${fDate}, авто: ${fCar}`,
       cashType: 'client',
-    });
-  }
-
-  if ((currentRole === 'owner' || currentRole === 'manager') && sashaClientDiff !== 0) {
-    const typeStr = sashaClientDiff > 0 ? 'Оплата клиента' : 'Возврат клиенту';
-    const fDate = data.date ? formatDate(data.date) : '—';
-    cashEntries.push({
-      worker_name: 'Sasha Manager',
-      amount: sashaClientDiff,
-      comment: `${typeStr} на карту Шепель ${data.id}, ${fDate}, авто: ${data.car || '—'}`,
-      cashType: 'sasha-card-client',
-    });
-  }
-
-  if ((currentRole === 'owner' || currentRole === 'manager') && sashaSupplierDiff !== 0) {
-    const typeStr = sashaSupplierDiff > 0 ? 'Оплата поставщику' : 'Возврат поставщика';
-    const fDate = data.date ? formatDate(data.date) : '—';
-    cashEntries.push({
-      worker_name: 'Sasha Manager',
-      amount: -sashaSupplierDiff,
-      comment: `${typeStr} с карты Шепель ${data.id}, ${fDate}, авто: ${data.car || '—'}, склад: ${data.warehouse || '—'}`,
-      cashType: 'sasha-card-supplier',
     });
   }
 
