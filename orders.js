@@ -128,6 +128,8 @@ async function confirmSeniorOrderAmounts(orderId) {
   const totalSupplierPaid = nextSupplierPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
   const totalClientPaid = nextClientPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
   const checkDiff = totalSupplierPaid - oldCheck;
+  const oldClientPaid = Number(order.debt) || 0;
+  const clientDiff = totalClientPaid - oldClientPaid;
   const cashEntries = [];
   const totalClientAmount = (Number(order.total) || 0) + (Number(order.income) || 0) + (Number(order.delivery) || 0);
   const updatedOrder = {
@@ -152,6 +154,19 @@ async function confirmSeniorOrderAmounts(orderId) {
       amount,
       comment: `${typeStr} за стекло ${updatedOrder.id}, ${fDate} ${fTime}, авто: ${fCar}, склад: ${updatedOrder.warehouse || '—'}`,
       cashType: 'supplier',
+    });
+  }
+
+  if (isOrderFinanciallyActive(updatedOrder) && clientDiff !== 0) {
+    const typeStr = clientDiff > 0 ? 'Оплата клиента' : 'Возврат клиенту';
+    const fDate = updatedOrder.date ? formatDate(updatedOrder.date) : '—';
+    const fCar = updatedOrder.car || '—';
+    const targetWorker = updatedOrder.responsible || currentWorkerName;
+    cashEntries.push({
+      worker_name: targetWorker,
+      amount: clientDiff,
+      comment: `${typeStr} наличкой ${updatedOrder.id}, ${fDate}, авто: ${fCar}`,
+      cashType: 'client',
     });
   }
 
