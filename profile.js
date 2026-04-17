@@ -87,7 +87,9 @@ function renderProfile() {
       + '</div>'
       + renderWorkAttendanceCard()
       + '<div class="profile-summary" style="margin-top:12px;">'
-      + '<div class="profile-summary-card"><div class="profile-summary-label">Накоплено</div><div class="profile-summary-value">' + accTotal.toLocaleString('ru') + ' ₴</div></div>'
+      + '<div class="profile-summary-card"><div class="profile-summary-label">Накоплено</div><div class="profile-summary-value">' + accTotal.toLocaleString('ru') + ' ₴</div>'
+      + (currentWorkerName === MANAGER_CARD_CASH_WORKER_NAME ? '<button class="btn-primary" style="margin-top:10px;min-height:36px;padding:0 14px;border-radius:8px;font-weight:800;" onclick="withdrawSalary()" ' + (accTotal <= 0 ? 'disabled' : '') + '>Снять ЗП</button>' : '')
+      + '</div>'
       + '<div class="profile-summary-card"><div class="profile-summary-label">Сегодня</div><div class="profile-summary-value">' + getTodayAttendanceAmount().toLocaleString('ru') + ' ₴</div></div>'
       + '</div>'
       + '<div class="profile-today-card" style="margin-top:12px;">'
@@ -552,25 +554,18 @@ function isConfirmedFopCashEntry(entry) {
 
 function renderManagerCashSections() {
   const today = getLocalDateString();
-  const personalCashLog = (workerCashLog || []).filter(entry => !isManagerCardCashEntry(entry) && !isFopCashEntry(entry));
+  const combinedCashLog = (workerCashLog || []).filter(entry => !isFopCashEntry(entry) && (!isManagerCardCashEntry(entry) || entry.fop_confirmed === true));
   const cardCashLog = (workerCashLog || []).filter(isManagerCardCashEntry);
-  const confirmedCardCashLog = cardCashLog.filter(entry => entry.fop_confirmed === true);
   const pendingCardCashLog = cardCashLog.filter(entry => entry.fop_confirmed !== true);
-  return ''
-    + renderCashSection(personalCashLog, calcCashBalance(personalCashLog), today, {
-      title: 'Личная касса',
+  return renderCashSection(combinedCashLog, calcCashBalance(combinedCashLog), today, {
+      title: 'Касса',
       account: 'cash',
-      buttonText: '+ Личная',
-    })
-    + renderCashSection(confirmedCardCashLog, calcCashBalance(confirmedCardCashLog), today, {
-      title: 'Касса карты Саши',
-      account: 'card',
-      buttonText: '+ Карта',
+      buttonText: '+ Запись',
       pendingEntries: pendingCardCashLog,
       pendingLabel: 'ОЖИДАЮТ ПОДТВЕРЖДЕНИЯ ПО КАРТЕ',
       confirmToast: 'Карта Саши подтверждена ✓',
       defaultPendingComment: 'КАРТА САША',
-    });
+  });
 }
 
 function renderCashSection(log, balance, today, options = {}) {
@@ -983,7 +978,7 @@ async function withdrawSalary() {
     return;
   }
 
-  if (currentRole === 'senior') {
+  if (currentRole === 'senior' || currentWorkerName === MANAGER_CARD_CASH_WORKER_NAME) {
     if (!confirm(`Снять ЗП на сумму ${accTotal.toLocaleString('ru')} ₴ из вашей кассы?`)) return;
     await performSalaryWithdrawal(currentWorkerName, currentWorkerName, accTotal);
   } else {

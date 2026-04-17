@@ -483,6 +483,7 @@ function getOwnerCashLogs() {
   const seniorNames = getOwnerCashSeniorNames();
   return [...(window.allCashLog || [])]
     .filter(entry => String(entry?.cash_account || '').toLowerCase() !== 'fop')
+    .filter(entry => String(entry?.cash_account || '').toLowerCase() !== 'card' || entry.fop_confirmed === true)
     .filter(entry => entry?.manual_payment !== true)
     .filter(entry => seniorNames.includes(entry.worker_name));
 }
