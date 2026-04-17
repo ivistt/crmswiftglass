@@ -128,6 +128,7 @@ async function confirmSeniorOrderAmounts(orderId) {
   const totalSupplierPaid = nextSupplierPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
   const totalClientPaid = nextClientPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
   const checkDiff = totalSupplierPaid - oldCheck;
+  const cashEntries = [];
   const totalClientAmount = (Number(order.total) || 0) + (Number(order.income) || 0) + (Number(order.delivery) || 0);
   const updatedOrder = {
     ...order,
@@ -139,37 +140,47 @@ async function confirmSeniorOrderAmounts(orderId) {
     supplierPayments: nextSupplierPayments,
   };
 
+  if (isOrderFinanciallyActive(updatedOrder) && checkDiff !== 0) {
+    const amount = -checkDiff;
+    const typeStr = checkDiff > 0 ? 'Списание' : 'Возврат';
+    const fDate = updatedOrder.date ? formatDate(updatedOrder.date) : '—';
+    const fTime = updatedOrder.time || '—';
+    const fCar = updatedOrder.car || '—';
+    const targetWorker = updatedOrder.responsible || currentWorkerName;
+    cashEntries.push({
+      worker_name: targetWorker,
+      amount,
+      comment: `${typeStr} за стекло ${updatedOrder.id}, ${fDate} ${fTime}, авто: ${fCar}, склад: ${updatedOrder.warehouse || '—'}`,
+      cashType: 'supplier',
+    });
+  }
+
   if (btnEl) {
     btnEl.disabled = true;
     btnEl.textContent = 'Сохранение...';
   }
 
   try {
-    const saved = await sbUpdateOrder(updatedOrder);
-    const mergedOrder = { ...saved, ...updatedOrder };
+    const result = await sbSaveOrderWithCash(updatedOrder, {
+      isNew: false,
+      cashEntries,
+      rollbackOrder: order,
+    });
+    const saved = result.order;
+    const mergedOrder = { ...updatedOrder, ...saved, clientPayments: nextClientPayments, supplierPayments: nextSupplierPayments };
     const idx = orders.findIndex(x => x.id === orderId);
     if (idx !== -1) orders[idx] = mergedOrder;
 
     if (checkEl) checkEl.value = '';
     if (debtEl) debtEl.value = '';
 
-    if (isOrderFinanciallyActive(mergedOrder) && checkDiff !== 0) {
-      const amount = -checkDiff;
-      const typeStr = checkDiff > 0 ? 'Списание' : 'Возврат';
-      const fDate = saved.date ? formatDate(saved.date) : '—';
-      const fTime = saved.time || '—';
-      const fCar = saved.car || '—';
-      const targetWorker = saved.responsible || currentWorkerName;
-      const cashComment = `${typeStr} за стекло ${saved.id}, ${fDate} ${fTime}, авто: ${fCar}, склад: ${saved.warehouse || '—'}`;
-
-      const cashEntry = await sbInsertCashEntry({
-        worker_name: targetWorker,
-        amount,
-        comment: cashComment,
-      });
-
+    for (const cashEntry of (result.cashEntries || [])) {
+      const targetWorker = cashEntry?.worker_name;
       if (typeof workerCashLog !== 'undefined' && targetWorker === currentWorkerName) {
         workerCashLog.unshift(cashEntry);
+      }
+      if (currentRole === 'owner' && Array.isArray(window.allCashLog) && cashEntry) {
+        window.allCashLog.unshift(cashEntry);
       }
     }
 
@@ -1154,6 +1165,23 @@ function addSupplierPayment() {
   renderSupplierPayments();
   syncSupplierPaidFromPayments();
   recalcTotal();
+}
+
+function flushPendingSupplierPaymentInput() {
+  const amtEl = document.getElementById('f-new-supplier-payment-amount');
+  if (!amtEl) return;
+  const amount = Number(amtEl.value);
+  if (!amount || amount <= 0) return;
+
+  const dateEl = document.getElementById('f-new-supplier-payment-date');
+  const methodEl = document.getElementById('f-new-supplier-payment-method');
+  const date = dateEl?.value || todayStr();
+  const method = normalizePaymentMethod(methodEl?.value || '');
+
+  currentSupplierPayments.push({ amount, date, method, timestamp: new Date().toISOString() });
+  amtEl.value = '';
+  renderSupplierPayments();
+  syncSupplierPaidFromPayments();
 }
 
 function sumCashSupplierPayments(payments) {
