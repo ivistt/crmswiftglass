@@ -2453,6 +2453,15 @@ input[type="datetime-local"] {
   background: var(--surface);
   z-index: 2;
 }
+.order-modal-footer-status {
+  flex: 1;
+  min-width: 180px;
+  max-width: 280px;
+}
+.order-modal-footer-status .form-select {
+  width: 100%;
+  font-size: 14px;
+}
 
 @media (max-width: 600px) {
   .order-totals-bar { flex-direction: column; }
@@ -2463,6 +2472,8 @@ input[type="datetime-local"] {
   /* Держим 2 колонки в модале заказа на мобилке */
   .modal-order .form-grid:not(.col-1) { grid-template-columns: 1fr 1fr; gap: 8px; }
   .modal-order .form-grid.col-1 { grid-template-columns: 1fr; gap: 8px; }
+  .modal-order .modal-footer--sticky { align-items: stretch; }
+  .modal-order .order-modal-footer-status { max-width: none; min-width: 0; }
   .modal-order .form-input,
   .modal-order .form-select { font-size: 13px; padding: 9px 10px; }
   .modal-order .form-label { font-size: 10px; }

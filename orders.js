@@ -248,12 +248,13 @@ function renderOrderCard(o) {
   const canEditListActions = currentRole === 'owner' || currentRole === 'manager';
   const canDeleteListAction = canDeleteOrder();
   const canQuickConfirm = canQuickConfirmOrderAmounts(o);
+  const cardClickAction = canEditListActions ? `openOrderModal('${escapeAttr(o.id)}')` : `openOrderDetail('${escapeAttr(o.id)}')`;
   const clientTotal = getOrderClientTotal(o);
   const clientPaidHtml = clientTotal > 0
     ? `<span class="order-card-client-total" title="Клиент оплатил / общая сумма заказа"><span>${(Number(o.debt) || 0).toLocaleString('ru')}</span><span class="order-card-client-total-separator">/</span><span>${clientTotal.toLocaleString('ru')} ₴</span></span>`
     : '';
   return `
-    <div class="order-card ${getOrderCardStateClass(o)}" onclick="openOrderDetail('${o.id}')">
+    <div class="order-card ${getOrderCardStateClass(o)}" onclick="${cardClickAction}">
       <div class="order-card-top">
         <div class="order-card-left">
           <div class="order-card-status-row">

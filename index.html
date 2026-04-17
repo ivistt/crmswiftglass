@@ -642,15 +642,6 @@
           Основная информация
         </div>
         <div class="form-grid col-1">
-          <div class="form-group" id="cancel-toggle-wrap">
-            <label class="form-label">📌 Статус записи</label>
-            <select class="form-select" id="f-order-status" style="width:100%;" onchange="updateOrderSaveButtonLabel()">
-              <option value="">📋 Подборка</option>
-              <option value="call">☎️ Прозвон</option>
-              <option value="inWork">🔨 В работу (Планёрка)</option>
-              <option value="cancelled">❌ Отменен</option>
-            </select>
-          </div>
           <div class="form-row form-row-flags">
             <div class="form-group">
               <label class="checkbox order-flag-checkbox">
@@ -982,7 +973,14 @@
 
     <!-- STICKY FOOTER -->
     <div class="modal-footer modal-footer--sticky">
-      <button class="btn-secondary" onclick="closeOrderModal()">Отмена</button>
+      <div class="order-modal-footer-status" id="cancel-toggle-wrap">
+        <select class="form-select" id="f-order-status" onchange="updateOrderSaveButtonLabel()">
+          <option value="">📋 Подборка</option>
+          <option value="call">☎️ Прозвон</option>
+          <option value="inWork">🔨 В работу (Планёрка)</option>
+          <option value="cancelled">❌ Отменен</option>
+        </select>
+      </div>
       <button class="btn-primary" id="order-save-btn" style="display:flex;align-items:center;gap:6px;" onclick="saveOrder()">
         <i data-lucide="save" style="width:14px;height:14px;"></i>
         <span id="order-save-label">Сохранить</span>

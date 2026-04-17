@@ -111,7 +111,7 @@ function updateNavbarVisibility() {
     // Менеджер: Записи
     if (bottomNav)  bottomNav.style.display  = '';
     if (navHome)    navHome.style.display    = 'none';
-    if (navCash)    navCash.style.display    = 'none';
+    if (navCash)    navCash.style.display    = currentWorkerName === 'Sasha Manager' ? '' : 'none';
     if (navProfile) navProfile.style.display = '';
     if (navClients) navClients.style.display = canViewClients() ? '' : 'none';
     if (navWorkers) navWorkers.style.display = 'none';
@@ -470,9 +470,13 @@ function _ownerCashEntryDate(entry) {
 }
 
 function getOwnerCashSeniorNames() {
-  return (workers || [])
+  const names = (workers || [])
     .filter(w => w.systemRole === 'senior')
     .map(w => w.name);
+  if ((workers || []).some(w => w.name === 'Sasha Manager') && !names.includes('Sasha Manager')) {
+    names.push('Sasha Manager');
+  }
+  return names;
 }
 
 function getOwnerCashLogs() {
@@ -661,8 +665,7 @@ function getOwnerPaymentEntries() {
         const amount = Number(payment.amount) || 0;
         const method = normalizePaymentMethod(payment.method);
         const isFop = isFopPaymentMethod(method);
-        const isSashaCard = typeof isSashaManagerCardPaymentMethod === 'function' && isSashaManagerCardPaymentMethod(method);
-        if (isFop || isSashaCard) return;
+        if (isFop) return;
         clientPaidSoFar += amount;
         entries.push({
           type: 'client',
@@ -679,8 +682,7 @@ function getOwnerPaymentEntries() {
     } else if (order.paymentMethod && Number(order.debt) > 0) {
       const method = normalizePaymentMethod(order.paymentMethod);
       const isFop = isFopPaymentMethod(method);
-      const isSashaCard = typeof isSashaManagerCardPaymentMethod === 'function' && isSashaManagerCardPaymentMethod(method);
-      if (!isFop && !isSashaCard) {
+      if (!isFop) {
         entries.push({
           type: 'client',
           title: 'Оплата клиента',
@@ -750,7 +752,10 @@ function getOwnerPaymentEntries() {
     });
 
   (window.allCashLog || [])
-    .filter(entry => String(entry?.cash_account || '').toLowerCase() === 'card' && entry.fop_confirmed === true)
+    .filter(entry => {
+      if (String(entry?.cash_account || '').toLowerCase() !== 'card' || entry.fop_confirmed !== true) return false;
+      return !String(entry.fop_source_key || '').startsWith('order:');
+    })
     .forEach(entry => {
       entries.push({
         type: 'client',
@@ -1249,7 +1254,7 @@ function renderOwnerCashScreen() {
             <div class="owner-cash-worker-balance" style="color:${row.balance >= 0 ? 'var(--accent)' : '#ef4444'};">${row.balance.toLocaleString('ru')} ₴</div>
           </div>
         `).join('') : `
-          <div style="font-size:13px;color:var(--text3);">Старшие специалисты не найдены</div>
+          <div style="font-size:13px;color:var(--text3);">Сотрудники с кассой не найдены</div>
         `}
       </div>
     </div>

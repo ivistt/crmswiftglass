@@ -79,9 +79,6 @@ function renderProfile() {
     const relevantSalaryEntries = workerSalaries.filter(isRelevantSalaryEntry);
     const accTotal = relevantSalaryEntries.reduce((sum, s) => sum + Number(s.amount), 0);
     const salaryHistoryHtml = buildWorkerSalaryHistory(currentWorkerName, relevantSalaryEntries);
-    const managerCardHtml = currentWorkerName === MANAGER_CARD_CASH_WORKER_NAME
-      ? renderManagerCardCashSection()
-      : '';
     el.innerHTML = ''
       + '<div class="profile-header">'
       + '<div class="worker-avatar" style="width:56px;height:56px;font-size:20px;border-radius:16px;flex-shrink:0;">' + getInitials(currentWorkerName) + '</div>'
@@ -96,8 +93,7 @@ function renderProfile() {
       + '<div class="profile-today-card" style="margin-top:12px;">'
       + '<div style="font-size:12px;font-weight:800;color:var(--text3);margin-bottom:12px;letter-spacing:0.04em;">ИСТОРИЯ ЗАРПЛАТ</div>'
       + '<div style="display:flex;flex-direction:column;gap:12px;">' + salaryHistoryHtml + '</div>'
-      + '</div>'
-      + managerCardHtml;
+      + '</div>';
     initIcons();
     return;
   }
@@ -150,7 +146,7 @@ function renderCashScreen() {
   const el = document.getElementById('cash-content');
   if (!el) return;
 
-  if (currentRole !== 'senior') {
+  if (currentRole !== 'senior' && currentWorkerName !== MANAGER_CARD_CASH_WORKER_NAME) {
     el.innerHTML = ''
       + '<div class="profile-header">'
       + '<div class="worker-avatar" style="width:56px;height:56px;font-size:20px;border-radius:16px;flex-shrink:0;">' + getInitials(currentWorkerName) + '</div>'
@@ -160,6 +156,18 @@ function renderCashScreen() {
       + '<div class="profile-today-card" style="margin-top:12px;">'
       + '<div style="font-size:14px;color:var(--text3);text-align:center;">Касса доступна только старшему специалисту</div>'
       + '</div>';
+    initIcons();
+    return;
+  }
+
+  if (currentWorkerName === MANAGER_CARD_CASH_WORKER_NAME) {
+    el.innerHTML = ''
+      + '<div class="profile-header">'
+      + '<div class="worker-avatar" style="width:56px;height:56px;font-size:20px;border-radius:16px;flex-shrink:0;">' + getInitials(currentWorkerName) + '</div>'
+      + '<div><div style="font-size:20px;font-weight:800;">' + getWorkerDisplayName(currentWorkerName) + '</div>'
+      + '<div style="font-size:13px;color:var(--text3);margin-top:2px;">Касса</div></div>'
+      + '</div>'
+      + renderManagerCashSections();
     initIcons();
     return;
   }
@@ -542,21 +550,27 @@ function isConfirmedFopCashEntry(entry) {
   return isFopCashEntry(entry) && entry?.fop_confirmed === true;
 }
 
-function renderManagerCardCashSection() {
+function renderManagerCashSections() {
   const today = getLocalDateString();
+  const personalCashLog = (workerCashLog || []).filter(entry => !isManagerCardCashEntry(entry) && !isFopCashEntry(entry));
   const cardCashLog = (workerCashLog || []).filter(isManagerCardCashEntry);
   const confirmedCardCashLog = cardCashLog.filter(entry => entry.fop_confirmed === true);
   const pendingCardCashLog = cardCashLog.filter(entry => entry.fop_confirmed !== true);
-  return renderCashSection(confirmedCardCashLog, calcCashBalance(confirmedCardCashLog), today, {
-    title: 'Касса карты Саши',
-    account: 'card',
-    buttonText: '+ Карта',
-    pendingEntries: pendingCardCashLog,
-    pendingLabel: 'ОЖИДАЮТ ПОДТВЕРЖДЕНИЯ ПО КАРТЕ',
-    confirmToast: 'Карта Саши подтверждена ✓',
-    defaultPendingComment: 'КАРТА САША',
-    hideAddButton: true,
-  });
+  return ''
+    + renderCashSection(personalCashLog, calcCashBalance(personalCashLog), today, {
+      title: 'Личная касса',
+      account: 'cash',
+      buttonText: '+ Личная',
+    })
+    + renderCashSection(confirmedCardCashLog, calcCashBalance(confirmedCardCashLog), today, {
+      title: 'Касса карты Саши',
+      account: 'card',
+      buttonText: '+ Карта',
+      pendingEntries: pendingCardCashLog,
+      pendingLabel: 'ОЖИДАЮТ ПОДТВЕРЖДЕНИЯ ПО КАРТЕ',
+      confirmToast: 'Карта Саши подтверждена ✓',
+      defaultPendingComment: 'КАРТА САША',
+    });
 }
 
 function renderCashSection(log, balance, today, options = {}) {

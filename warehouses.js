@@ -242,8 +242,11 @@ function renderWarehouseOrderCard(o) {
   const debt = getSupplierDebt(o);
   const returnAmount = getWarehouseReturnAmount(o);
   const isReturn = returnAmount > 0;
+  const cardClickAction = (currentRole === 'owner' || currentRole === 'manager')
+    ? `openOrderModal('${escapeAttr(o.id)}')`
+    : `openOrderDetail('${escapeAttr(o.id)}')`;
   return `
-    <div class="order-card ${getOrderCardStateClass(o)}" onclick="openOrderDetail('${o.id}')">
+    <div class="order-card ${getOrderCardStateClass(o)}" onclick="${cardClickAction}">
       <div class="order-card-top">
         <div class="order-card-left">
           <span class="order-id">${o.id}</span>
