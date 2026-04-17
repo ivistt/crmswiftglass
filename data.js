@@ -519,6 +519,7 @@ function rowToOrder(r) {
     statusDone:      r.status_done || false,
     inWork:          r.in_work || false,
     callStatus:      r.call_status || false,
+    ownWarehouse:    r.own_warehouse || false,
     workerDone:      r.worker_done || false,
     assistant:       r.assistant || '',
     isCancelled:     r.is_cancelled || false,
@@ -584,6 +585,7 @@ function orderToRow(o) {
     status_done:      o.statusDone || false,
     in_work:          o.inWork     || false,
     call_status:      o.callStatus || false,
+    own_warehouse:    o.ownWarehouse || false,
     worker_done:      o.workerDone || false,
     assistant:        o.assistant  || null,
     is_cancelled:     o.isCancelled || false,
@@ -730,6 +732,10 @@ function _salarySelectedServiceItems(order) {
     .map(name => byName[name] || { name, rate: 0, salaryCategory: 'custom' });
 }
 
+function hasCustomSalaryService(order) {
+  return _salarySelectedServiceItems(order).some(item => item.salaryCategory === 'custom');
+}
+
 function _selectedServicesSalary(workerName, order) {
   const rule = getSalaryRule(workerName);
   if (!rule.selectedServices) return 0;
@@ -774,6 +780,47 @@ function calcWorkerOrderSalary(workerName, order) {
   total += _calcTatuBonus(workerName, order);
   total += _calcToningBonus(workerName, order);
   return total;
+}
+
+function getWorkerOrderSalaryBreakdown(workerName, order) {
+  if (!workerName || !order || !order.workerDone || !isOrderFinanciallyActive(order)) return [];
+  const parts = [];
+  const rule = getSalaryRule(workerName);
+
+  if (order.responsible === workerName || order.assistant === workerName) {
+    if (rule.selectedServices) {
+      if (hasCustomSalaryService(order)) {
+        parts.push({ label: 'Нестандартная работа, внесите запись в кассу', amount: 0 });
+      }
+      const adjustments = rule.serviceAdjustments || {};
+      _salarySelectedServiceItems(order).forEach(item => {
+        if (item.salaryCategory === 'custom') return;
+        const adjustment = Number(adjustments[item.salaryCategory]) || 0;
+        const amount = Math.max(0, (Number(item.rate) || 0) + adjustment);
+        if (amount > 0) parts.push({ label: item.name, amount });
+      });
+    }
+
+    const glassMargin = order.dropshipper ? 0 : _orderGlassMargin(order);
+    const fromGlass = Math.round(glassMargin * (rule.glassMarginPct || 0));
+    if (fromGlass > 0) parts.push({ label: 'Маржа стекла ' + Math.round((rule.glassMarginPct || 0) * 100) + '%', amount: fromGlass });
+
+    const fromMolding = Math.round((Number(order.molding) || 0) * (rule.moldingPct || 0));
+    if (fromMolding > 0) parts.push({ label: 'Молдинг ' + Math.round((rule.moldingPct || 0) * 100) + '%', amount: fromMolding });
+  }
+
+  if (order.manager === workerName) {
+    const managerAmount = _calcManagerSalary(order);
+    if (managerAmount > 0) parts.push({ label: 'Менеджер ' + Math.round((getSalaryRule(order.manager).glassMarginPct || 0) * 100) + '% маржи стекла', amount: managerAmount });
+  }
+
+  const tatuBonus = _calcTatuBonus(workerName, order);
+  if (tatuBonus > 0) parts.push({ label: 'Тату ' + Math.round((rule.tatuBonusPct || 0) * 100) + '%', amount: tatuBonus });
+
+  const toningBonus = _calcToningBonus(workerName, order);
+  if (toningBonus > 0) parts.push({ label: 'Тонировка ' + Math.round((rule.toningBonusPct || 0) * 100) + '%', amount: toningBonus });
+
+  return parts;
 }
 
 // ЗП за доработку
@@ -867,9 +914,10 @@ function isOrderFinanciallyActive(order) {
 function getOrderCardStateClass(order) {
   if (!order) return '';
   if (order.isCancelled) return 'order-card-state-cancelled';
+  if (order.ownWarehouse && !order.workerDone) return 'order-card-state-own-warehouse';
   if (order.callStatus && !order.workerDone) return 'order-card-state-call';
   if (order.inWork && !order.workerDone) return 'order-card-state-planner';
-  if (!order.callStatus && !order.inWork && !order.workerDone) return 'order-card-state-selection';
+  if (!order.callStatus && !order.inWork && !order.ownWarehouse && !order.workerDone) return 'order-card-state-selection';
   return '';
 }
 
@@ -906,6 +954,7 @@ function getWorkerCompletedOrdersSummary(workerName, date) {
       id: order.id,
       car: order.car || order.client || '—',
       amount: calcWorkerOrderSalary(workerName, order),
+      breakdown: getWorkerOrderSalaryBreakdown(workerName, order),
     })),
   };
 }

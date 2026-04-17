@@ -28,6 +28,7 @@ const SERVICE_TYPE_OPTIONS = [
   { group: 'Вклейка', name: 'Вклейка лобового грузовик', rate: 350, salaryCategory: 'glue' },
   { group: 'Нестандартные работы', name: 'Нестандартные работы', rate: 0, salaryCategory: 'custom' },
 ];
+const CUSTOM_SERVICE_TYPE_NAME = 'Нестандартные работы';
 
 const STATIC_MANAGER_OPTIONS = [
   { name: 'Maksim', label: '🦊 Макс' },
@@ -368,8 +369,9 @@ function renderOrderStatusBadges(o) {
   if (o.isCancelled) {
     badges.push('<span class="status-badge" style="background:var(--red,#DC2626);color:#fff;">Отменен</span>');
   } else {
+    if (o.ownWarehouse && !o.workerDone) badges.push('<span class="status-badge status-own-warehouse">Наш склад</span>');
     if (o.callStatus && !o.workerDone) badges.push('<span class="status-badge status-call">Прозвон</span>');
-    if (!o.callStatus && !o.inWork && !o.workerDone) badges.push('<span class="status-badge status-selection">Подборка</span>');
+    if (!o.callStatus && !o.inWork && !o.ownWarehouse && !o.workerDone) badges.push('<span class="status-badge status-selection">Подборка</span>');
     if (o.inWork && !o.workerDone) badges.push('<span class="status-badge" style="background:#F59E0B;color:#fff;">В работе</span>');
     if (o.workerDone && currentRole !== 'senior') badges.push('<span class="status-badge status-done">✓ Выполнен</span>');
   }
@@ -383,7 +385,12 @@ function _isCurrentWorkerOrder(order) {
 
 function _filterSpecialistOrdersByTab(list) {
   const today = todayStr();
-  const ownOrders = list.filter(o => _isCurrentWorkerOrder(o) && o.inWork && !o.isCancelled);
+  if (currentWorkerName === 'Nastya' && currentWorkerTab === 'ownWarehouse') {
+    return list.filter(o => o.ownWarehouse && !o.workerDone && !o.isCancelled);
+  }
+  const ownOrders = currentWorkerName === 'Nastya'
+    ? list.filter(o => o.inWork && !o.isCancelled)
+    : list.filter(o => _isCurrentWorkerOrder(o) && o.inWork && !o.isCancelled);
 
   if (currentWorkerTab === 'actual') {
     return ownOrders.filter(o => !o.workerDone);
@@ -466,11 +473,13 @@ function renderOrders() {
 
   if (currentRole === 'owner' || currentRole === 'manager') {
     if (currentOrderTab === 'planner') {
-      list = list.filter(o => o.inWork && !o.workerDone && !o.isCancelled);
+      list = list.filter(o => o.inWork && !o.ownWarehouse && !o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'call') {
       list = list.filter(_isCallOrderVisibleInCurrentContext);
+    } else if (currentOrderTab === 'ownWarehouse') {
+      list = list.filter(o => o.ownWarehouse && !o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'selection') {
-      list = list.filter(o => !o.callStatus && !o.inWork && !o.workerDone && !o.isCancelled);
+      list = list.filter(o => !o.callStatus && !o.inWork && !o.ownWarehouse && !o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'done') {
       list = list.filter(o => o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'debt') {
@@ -523,7 +532,7 @@ function renderOrders() {
 }
 
 function _isCallOrderVisibleInCurrentContext(o) {
-  if (!o?.callStatus || o.workerDone || o.isCancelled) return false;
+  if (!o?.callStatus || o.ownWarehouse || o.workerDone || o.isCancelled) return false;
   if (currentRole !== 'manager') return true;
   if (o.manager !== currentWorkerName) return false;
   if (!o.date) return true;
@@ -856,6 +865,7 @@ async function duplicateOrder(id) {
   duplicate.priceLocked = false;
   duplicate.inWork = false;
   duplicate.callStatus = false;
+  duplicate.ownWarehouse = false;
   duplicate.isCancelled = false;
 
   try {
@@ -962,7 +972,7 @@ function populateRefSelects() {
         <div class="service-group-options">
           ${SERVICE_TYPE_OPTIONS.filter(item => item.group === group).map(item => `
             <label class="checkbox">
-              <input type="checkbox" value="${item.name}" ${cur.includes(item.name) ? 'checked' : ''} onchange="syncServiceTypes()">
+              <input type="checkbox" value="${item.name}" ${cur.includes(item.name) ? 'checked' : ''} onchange="syncServiceTypes(this)">
               <span>${item.name}</span>
             </label>
           `).join('')}
@@ -1355,7 +1365,7 @@ function updateOrderSaveButtonLabel() {
   const label = document.getElementById('order-save-label');
   const btn = document.getElementById('order-save-btn');
   if (btn) {
-    btn.classList.remove('order-save-selection', 'order-save-call', 'order-save-planner', 'order-save-cancelled');
+    btn.classList.remove('order-save-selection', 'order-save-call', 'order-save-planner', 'order-save-cancelled', 'order-save-own-warehouse');
   }
   if (!label) return;
   if (status === 'inWork') {
@@ -1367,6 +1377,9 @@ function updateOrderSaveButtonLabel() {
   } else if (status === 'cancelled') {
     label.textContent = 'Сохранить отменённым';
     if (btn) btn.classList.add('order-save-cancelled');
+  } else if (status === 'ownWarehouse') {
+    label.textContent = 'Сохранить на наш склад';
+    if (btn) btn.classList.add('order-save-own-warehouse');
   } else {
     label.textContent = 'Сохранить в подборку';
     if (btn) btn.classList.add('order-save-selection');
@@ -1437,7 +1450,7 @@ function fillOrderForm(o) {
   const svcHidden = document.getElementById('f-service-type');
   if (svcHidden) {
     svcHidden.value = o.serviceType || '';
-    syncServiceTypes(false);
+    syncServiceTypes(null, false);
   }
   set('f-margin-total', o.marginTotal);
   set('f-payout-dropshipper', o.dropshipperPayout);
@@ -1456,6 +1469,7 @@ function fillOrderForm(o) {
   const statusEl = document.getElementById('f-order-status');
   if (statusEl) {
     if (o.isCancelled) statusEl.value = 'cancelled';
+    else if (o.ownWarehouse) statusEl.value = 'ownWarehouse';
     else if (o.inWork) statusEl.value = 'inWork';
     else if (o.callStatus) statusEl.value = 'call';
     else statusEl.value = '';
@@ -1617,6 +1631,11 @@ function validateOrderRequiredFields(data) {
     if (!data.manager) missing.push('менеджер');
   }
 
+  if (status === 'ownWarehouse') {
+    if (!data.phone) missing.push('номер телефона');
+    if (!data.car) missing.push('автомобиль');
+  }
+
   if (!missing.length) return true;
   alert('Заполните обязательные поля: ' + missing.join(', '));
   return false;
@@ -1676,6 +1695,9 @@ async function saveOrder() {
     callStatus:      (currentRole === 'owner' || currentRole === 'manager')
       ? (document.getElementById('f-order-status')?.value === 'call')
       : (existingOrder ? !!existingOrder.callStatus : false),
+    ownWarehouse:    (currentRole === 'owner' || currentRole === 'manager')
+      ? (document.getElementById('f-order-status')?.value === 'ownWarehouse')
+      : (existingOrder ? !!existingOrder.ownWarehouse : false),
     isCancelled:     (currentRole === 'owner' || currentRole === 'manager')
       ? (document.getElementById('f-order-status')?.value === 'cancelled')
       : (existingOrder ? !!existingOrder.isCancelled : false),
@@ -2066,11 +2088,13 @@ function renderOrdersForMonth(ym) {
 
   if (currentRole === 'owner' || currentRole === 'manager') {
     if (currentOrderTab === 'planner') {
-      list = list.filter(o => o.inWork && !o.workerDone && !o.isCancelled);
+      list = list.filter(o => o.inWork && !o.ownWarehouse && !o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'call') {
       list = list.filter(_isCallOrderVisibleInCurrentContext);
+    } else if (currentOrderTab === 'ownWarehouse') {
+      list = list.filter(o => o.ownWarehouse && !o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'selection') {
-      list = list.filter(o => !o.callStatus && !o.inWork && !o.workerDone && !o.isCancelled);
+      list = list.filter(o => !o.callStatus && !o.inWork && !o.ownWarehouse && !o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'done') {
       list = list.filter(o => o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'debt') {
@@ -2287,6 +2311,7 @@ function initOrderTabs() {
         <button class="orders-tab" id="tab-selection" onclick="setOrderTab('selection')">Подборка</button>
         <button class="orders-tab" id="tab-call"      onclick="setOrderTab('call')">Прозвон</button>
         <button class="orders-tab" id="tab-planner"   onclick="setOrderTab('planner')">Планёрка</button>
+        <button class="orders-tab" id="tab-ownWarehouse" onclick="setOrderTab('ownWarehouse')">Наш склад</button>
         <button class="orders-tab" id="tab-done"      onclick="setOrderTab('done')">Выполненные</button>
         <button class="orders-tab" id="tab-debt"      onclick="setOrderTab('debt')">Долг</button>
         <button class="orders-tab" id="tab-cancelled" onclick="setOrderTab('cancelled')">Отмененные</button>
@@ -2303,6 +2328,7 @@ function initOrderTabs() {
         <button class="orders-tab" id="tab-done-worker" onclick="setWorkerTab('done')">Выполненные</button>
         <button class="orders-tab" id="tab-future" onclick="setWorkerTab('future')">Будущие</button>
         <button class="orders-tab" id="tab-past" onclick="setWorkerTab('past')">Прошедшие</button>
+        ${currentWorkerName === 'Nastya' ? '<button class="orders-tab" id="tab-own-warehouse-worker" onclick="setWorkerTab(\'ownWarehouse\')">Наш склад</button>' : ''}
         <button class="orders-tab" id="tab-my-all" onclick="setWorkerTab('all')">Все мои</button>
       `;
     }
@@ -2324,6 +2350,7 @@ function setWorkerTab(tab) {
     done: 'tab-done-worker',
     future: 'tab-future',
     past: 'tab-past',
+    ownWarehouse: 'tab-own-warehouse-worker',
     all: 'tab-my-all',
   };
   const el = document.getElementById(tabMap[tab] || 'tab-my-all');
@@ -2403,8 +2430,17 @@ function recalcFullMargins() {
 }
 
 // синхронизация чекбоксов услуг с hidden-полем
-function syncServiceTypes(recalc = true) {
+function syncServiceTypes(changedEl = null, recalc = true) {
   const box = document.querySelectorAll('#service-type-checkboxes input[type="checkbox"]');
+  if (changedEl?.value === CUSTOM_SERVICE_TYPE_NAME && changedEl.checked) {
+    box.forEach(el => {
+      if (el !== changedEl) el.checked = false;
+    });
+  } else if (changedEl?.checked) {
+    box.forEach(el => {
+      if (el.value === CUSTOM_SERVICE_TYPE_NAME) el.checked = false;
+    });
+  }
   const vals = [...box].filter(el => el.checked).map(el => el.value);
   const hidden = document.getElementById('f-service-type');
   if (hidden) hidden.value = vals.join(', ');

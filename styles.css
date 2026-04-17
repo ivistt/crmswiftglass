@@ -856,6 +856,14 @@ body {
   background: #1af5b0;
   box-shadow: var(--shadow-accent);
 }
+.btn-primary.order-save-own-warehouse {
+  background: #22c55e;
+  color: #03140f;
+}
+.btn-primary.order-save-own-warehouse:hover {
+  background: #4ade80;
+  box-shadow: 0 10px 28px rgba(34,197,94,0.24);
+}
 .btn-primary.order-save-cancelled {
   background: var(--red);
   color: #190407;
@@ -1045,6 +1053,14 @@ body {
   background: linear-gradient(0deg, rgba(2, 132, 199, 0.13), rgba(2, 132, 199, 0.13)), var(--surface);
   border-color: rgba(2, 132, 199, 0.34);
 }
+.order-card-state-own-warehouse {
+  background: linear-gradient(0deg, rgba(34, 197, 94, 0.11), rgba(34, 197, 94, 0.11)), var(--surface);
+  border-color: rgba(34, 197, 94, 0.26);
+}
+.order-card-state-own-warehouse:hover {
+  background: linear-gradient(0deg, rgba(34, 197, 94, 0.15), rgba(34, 197, 94, 0.15)), var(--surface);
+  border-color: rgba(34, 197, 94, 0.36);
+}
 .order-card-state-cancelled {
   background: linear-gradient(0deg, rgba(255, 92, 106, 0.1), rgba(255, 92, 106, 0.1)), var(--surface);
   border-color: rgba(255, 92, 106, 0.24);
@@ -1223,6 +1239,7 @@ body {
 .status-done     { background: rgba(0,229,160,0.12); color: var(--accent); border: 1px solid rgba(0,229,160,0.35); font-weight: 800; }
 .status-debt     { background: rgba(255,92,106,0.2); color: var(--red); }
 .status-call     { background: rgba(2,132,199,0.12); color: #0369a1; }
+.status-own-warehouse { background: rgba(34,197,94,0.14); color: #16a34a; }
 .status-selection { background: var(--surface3); color: var(--text2); }
 .status-default  { background: var(--surface3); color: var(--text2); }
 

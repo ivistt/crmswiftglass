@@ -264,6 +264,10 @@
           <span class="ico" style="margin-right:5px;"><i data-lucide="hammer" style="width:13px;height:13px;"></i></span>
           Планёрка
         </button>
+        <button class="orders-tab" id="tab-ownWarehouse" onclick="setOrderTab('ownWarehouse')">
+          <span class="ico" style="margin-right:5px;"><i data-lucide="package" style="width:13px;height:13px;"></i></span>
+          Наш склад
+        </button>
         <button class="orders-tab" id="tab-done" onclick="setOrderTab('done')">
           <span class="ico" style="margin-right:5px;"><i data-lucide="check" style="width:13px;height:13px;"></i></span>
           Выполненные
@@ -995,6 +999,7 @@
           <option value="">📋 Подборка</option>
           <option value="call">☎️ Прозвон</option>
           <option value="inWork">🔨 В работу (Планёрка)</option>
+          <option value="ownWarehouse">🏠 Наш склад</option>
           <option value="cancelled">❌ Отменен</option>
         </select>
       </div>

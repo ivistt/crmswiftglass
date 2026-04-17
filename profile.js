@@ -384,10 +384,26 @@ function renderSalaryOrdersList(orderItems) {
     return '<div style="font-size:12px;color:var(--text3);margin-top:8px;">Заказов нет</div>';
   }
   return '<div style="display:flex;flex-direction:column;gap:6px;margin-top:10px;">'
-    + orderItems.map(item => '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:12px;color:var(--text3);">'
-      + '<span>' + escapeHtml(item.id) + ' · ' + escapeHtml(item.car || '—') + '</span>'
-      + '<span style="font-weight:800;color:var(--accent);white-space:nowrap;">' + (Number(item.amount) || 0).toLocaleString('ru') + ' ₴</span>'
-      + '</div>').join('')
+    + orderItems.map(item => {
+      const breakdown = Array.isArray(item.breakdown) ? item.breakdown : [];
+      const breakdownHtml = breakdown.length
+        ? '<div style="display:flex;flex-direction:column;gap:3px;margin-top:5px;">'
+          + breakdown.map(part => '<div style="display:flex;justify-content:space-between;gap:10px;color:var(--text3);font-size:11px;">'
+            + '<span>' + escapeHtml(part.label || 'Начисление') + '</span>'
+            + '<span style="white-space:nowrap;color:' + ((Number(part.amount) || 0) === 0 ? 'var(--yellow)' : 'inherit') + ';">' + (Number(part.amount) || 0).toLocaleString('ru') + ' ₴</span>'
+            + '</div>').join('')
+          + '</div>'
+        : '';
+      return '<div style="padding:8px 0;border-bottom:1px solid var(--border);">'
+        + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;font-size:12px;color:var(--text2);">'
+        + '<div style="min-width:0;">'
+        + '<div style="font-weight:800;color:var(--text);">' + escapeHtml(item.id) + ' · ' + escapeHtml(item.car || '—') + '</div>'
+        + breakdownHtml
+        + '</div>'
+        + '<span style="font-weight:800;color:var(--accent);white-space:nowrap;">' + (Number(item.amount) || 0).toLocaleString('ru') + ' ₴</span>'
+        + '</div>'
+        + '</div>';
+    }).join('')
     + '</div>';
 }
 
