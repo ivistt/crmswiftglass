@@ -342,6 +342,9 @@ function renderAssistantSalarySection(assistantWorkers, assistantWorker, todayRe
 function getSeniorWorkedAssistants() {
   if (!canManageAssistantSalary()) return [];
   const names = new Set();
+  (workers || [])
+    .filter(worker => worker.systemRole === 'junior' && worker.name !== currentWorkerName)
+    .forEach(worker => names.add(worker.name));
   (orders || []).forEach(order => {
     if (!order || order.isCancelled) return;
     if (order.responsible === currentWorkerName && order.assistant) {

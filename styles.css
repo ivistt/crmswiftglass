@@ -2500,6 +2500,12 @@ input[type="datetime-local"] {
   margin-bottom: 14px;
 }
 
+.owner-cash-confirm-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .owner-manual-payment-card {
   padding: 14px;
   margin-bottom: 14px;

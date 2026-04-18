@@ -280,6 +280,14 @@ function renderOrderCard(o) {
   const clientPaidHtml = clientTotal > 0
     ? `<span class="order-card-client-total" title="Клиент оплатил / общая сумма заказа"><span>${(Number(o.debt) || 0).toLocaleString('ru')}</span><span class="order-card-client-total-separator">/</span><span>${clientTotal.toLocaleString('ru')} ₴</span></span>`
     : '';
+  const specialistBonusFlags = [
+    currentWorkerName === 'Roma' && Number(o.tatu) > 0
+      ? `<span class="status-badge status-call" title="В заказе есть тату">Тату ${(Number(o.tatu) || 0).toLocaleString('ru')} ₴</span>`
+      : '',
+    currentWorkerName === 'Lyosha' && Number(o.toning) > 0
+      ? `<span class="status-badge status-own-warehouse" title="В заказе есть тонировка">Тонировка ${(Number(o.toning) || 0).toLocaleString('ru')} ₴</span>`
+      : '',
+  ].filter(Boolean).join('');
   return `
     <div class="order-card ${getOrderCardStateClass(o)}" onclick="${cardClickAction}">
       <div class="order-card-top">
@@ -287,6 +295,7 @@ function renderOrderCard(o) {
           <div class="order-card-status-row">
             <span class="order-id">${o.id}</span>
             ${renderOrderStatusBadges(o)}
+            ${specialistBonusFlags}
           </div>
           <div class="order-card-title-row">
             <span class="order-name">${o.car || '—'}</span>
@@ -954,6 +963,31 @@ async function rememberClientAddressFromOrder(order) {
     manualClients[idx] = { ...manualClients[idx], ...savedClient, name, phone, address };
   } else {
     manualClients.push(savedClient || { name, phone, address, orders: [] });
+  }
+}
+
+async function rememberCarDirectoryFromOrder(order) {
+  const model = String(order?.car || '').trim();
+  const eurocode = String(order?.code || '').trim();
+  if (!model || !eurocode || typeof sbUpsertCarDirectory !== 'function') return;
+
+  try {
+    const saved = await sbUpsertCarDirectory(model, eurocode);
+    if (!Array.isArray(carDirectory)) return;
+
+    const savedId = saved?.id;
+    const idx = carDirectory.findIndex(item =>
+      (savedId && item.id === savedId) ||
+      String(item.model || '').trim().toLowerCase() === model.toLowerCase()
+    );
+    const nextRow = saved || { model, eurocode };
+    if (idx !== -1) {
+      carDirectory[idx] = { ...carDirectory[idx], ...nextRow, model, eurocode };
+    } else {
+      carDirectory.push(nextRow);
+    }
+  } catch (e) {
+    console.warn('Failed to remember car directory row:', e);
   }
 }
 
@@ -1784,6 +1818,7 @@ async function saveOrder() {
 
     if (isNew) {
       orders.unshift(saved);
+      await rememberCarDirectoryFromOrder(saved);
       try {
         await rememberAssistantForResponsible(data.responsible, data.assistant);
       } catch (e) {
@@ -1798,6 +1833,7 @@ async function saveOrder() {
     } else {
       const idx = orders.findIndex(o => o.id === editingOrderId);
       if (idx !== -1) orders[idx] = saved;
+      await rememberCarDirectoryFromOrder(saved);
       try {
         await rememberAssistantForResponsible(data.responsible, data.assistant);
       } catch (e) {

@@ -5,6 +5,7 @@
 let currentMonthFilter = null;
 let ownerPaymentFilters = { client: true, supplier: true, dropshipper: true, fop: true, manual: true };
 let ownerCashSelectedWorker = '';
+let ownerCashConfirmFilter = 'all';
 let calendarCursorDate = new Date();
 let calendarWorkerFilters = [];
 const THEME_STORAGE_KEY = 'crm_theme';
@@ -714,17 +715,28 @@ function getOwnerCashSeniorNames() {
   return names;
 }
 
-function getOwnerCashLogs() {
+function getOwnerCashLogs(confirmFilter = ownerCashConfirmFilter) {
   const seniorNames = getOwnerCashSeniorNames();
   return [...(window.allCashLog || [])]
-    .filter(entry => String(entry?.cash_account || '').toLowerCase() !== 'fop')
-    .filter(entry => String(entry?.cash_account || '').toLowerCase() !== 'card' || entry.fop_confirmed === true)
     .filter(entry => entry?.manual_payment !== true)
-    .filter(entry => seniorNames.includes(entry.worker_name));
+    .filter(entry => seniorNames.includes(entry.worker_name))
+    .filter(entry => {
+      const account = String(entry?.cash_account || 'cash').toLowerCase();
+      if (account === 'fop') return entry.worker_name === 'Oleg Starshiy';
+      if (account === 'card') return entry.worker_name === 'Sasha Manager';
+      return account === 'cash';
+    })
+    .filter(entry => {
+      const account = String(entry?.cash_account || 'cash').toLowerCase();
+      const isConfirmable = account === 'fop' || account === 'card';
+      if (confirmFilter === 'confirmed') return !isConfirmable || entry.fop_confirmed === true;
+      if (confirmFilter === 'pending') return isConfirmable && entry.fop_confirmed !== true;
+      return true;
+    });
 }
 
 function getOwnerCurrentCashTotal() {
-  return getOwnerCashLogs().reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+  return getOwnerCashLogs('confirmed').reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
 }
 
 function getOwnerCashSafeKey(value) {
@@ -740,6 +752,11 @@ function getOwnerCashEntryTime(entry) {
 
 function setOwnerCashSelectedWorker(workerName) {
   ownerCashSelectedWorker = ownerCashSelectedWorker === workerName ? '' : workerName;
+  renderOwnerCashScreen();
+}
+
+function setOwnerCashConfirmFilter(filter) {
+  ownerCashConfirmFilter = ['all', 'confirmed', 'pending'].includes(filter) ? filter : 'all';
   renderOwnerCashScreen();
 }
 
@@ -918,7 +935,7 @@ function renderOwnerEmployeeCashHistory(workerName, logs) {
             <div class="owner-cash-entry-row">
               <div class="owner-cash-entry-main">
                 <div class="owner-cash-entry-comment">${escapeHtml(comment)}</div>
-                <div class="owner-cash-entry-meta">${time ? escapeHtml(time) : '—'}</div>
+                <div class="owner-cash-entry-meta">${time ? escapeHtml(time) : '—'} ${renderOwnerCashEntryConfirmBadge(entry)}</div>
               </div>
               <div style="display:flex;align-items:center;gap:8px;">
                 <div class="owner-cash-entry-amount" style="color:${amount >= 0 ? 'var(--accent)' : '#ef4444'};">${amount.toLocaleString('ru')} ₴</div>
@@ -991,6 +1008,15 @@ function renderOwnerEmployeeCashHistory(workerName, logs) {
       <div>${yearsHtml}</div>
     </div>
   `;
+}
+
+function renderOwnerCashEntryConfirmBadge(entry) {
+  const account = String(entry?.cash_account || 'cash').toLowerCase();
+  if (account !== 'fop' && account !== 'card') return '';
+  const confirmed = entry?.fop_confirmed === true;
+  const label = confirmed ? 'подтверждено' : 'ожидает подтверждения';
+  const color = confirmed ? 'var(--accent)' : 'var(--yellow)';
+  return `<span style="margin-left:6px;color:${color};font-weight:800;">${label}</span>`;
 }
 
 function isOwnerFopPaymentEntryVisible(entry) {
@@ -1590,6 +1616,13 @@ function renderOwnerCashScreen() {
   const selectedWorkerHistoryHtml = ownerCashSelectedWorker
     ? renderOwnerEmployeeCashHistory(ownerCashSelectedWorker, logs)
     : '';
+  const filtersHtml = `
+    <div class="owner-cash-confirm-filters">
+      <button class="orders-tab ${ownerCashConfirmFilter === 'all' ? 'active' : ''}" onclick="setOwnerCashConfirmFilter('all')">Все</button>
+      <button class="orders-tab ${ownerCashConfirmFilter === 'confirmed' ? 'active' : ''}" onclick="setOwnerCashConfirmFilter('confirmed')">Подтверждено</button>
+      <button class="orders-tab ${ownerCashConfirmFilter === 'pending' ? 'active' : ''}" onclick="setOwnerCashConfirmFilter('pending')">Ожидает</button>
+    </div>
+  `;
   const currentCashHtml = `
     <div class="fin-month-card" style="margin-bottom:12px;">
       <div style="padding:14px 16px;border-bottom:1px solid var(--border);">
@@ -1604,6 +1637,7 @@ function renderOwnerCashScreen() {
           </div>
         </div>
       </div>
+      <div style="padding:12px 16px 0;">${filtersHtml}</div>
       <div style="padding:12px 16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;">
         ${currentCashRows.length ? currentCashRows.map(row => `
           <div class="owner-cash-worker-row ${ownerCashSelectedWorker === row.workerName ? 'active' : ''}" onclick="setOwnerCashSelectedWorker('${escapeAttr(row.workerName)}')">
