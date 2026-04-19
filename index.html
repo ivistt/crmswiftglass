@@ -723,7 +723,7 @@
           </div>
           <div class="form-group">
             <label class="form-label">VIN код</label>
-            <input class="form-input" type="text" id="f-vin" placeholder="17 символов" maxlength="17" autocomplete="off">
+            <textarea class="form-input" id="f-vin" placeholder="17 символов" maxlength="17" autocomplete="off" rows="2"></textarea>
           </div>
           <div class="form-group">
             <label class="form-label">🚗 Автомобиль</label>
@@ -740,6 +740,18 @@
                 autocomplete="off" oninput="acFilter('code')" onfocus="acOpen('code')" onblur="acBlur('code')" onkeydown="acKey(event,'code')">
               <div class="ac-dropdown" id="ac-code-list"></div>
             </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">🏭 Производитель стекла</label>
+            <select class="form-select" id="f-glass-manufacturer">
+              <option value="">— выбрать —</option>
+              <option value="🇨🇳 XYG (Китай)">🇨🇳 XYG (Китай)</option>
+              <option value="🇨🇳 BENSON (Китай)">🇨🇳 BENSON (Китай)</option>
+              <option value="🇪🇺 Saint-Gobain Sekurit (Европа)">🇪🇺 Saint-Gobain Sekurit (Европа)</option>
+              <option value="🇪🇺 Pilkington (Европа)">🇪🇺 Pilkington (Европа)</option>
+              <option value="🇺🇸 GUARDIAN">🇺🇸 GUARDIAN</option>
+              <option value="🇵🇱Carlex">🇵🇱Carlex</option>
+            </select>
           </div>
           <div class="form-group">
             <label class="checkbox order-flag-checkbox">
@@ -790,7 +802,7 @@
           </div>
           <div class="form-group">
             <label class="form-label">📝 Заметки</label>
-            <input class="form-input" type="text" id="f-notes" placeholder="—">
+            <textarea class="form-input" id="f-notes" placeholder="—" rows="3"></textarea>
           </div>
         </div>
       </div>

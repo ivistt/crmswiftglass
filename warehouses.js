@@ -269,6 +269,7 @@ function renderWarehouseOrderCard(o) {
 }
 
 function openDropshippersScreen() {
+  if (!canManageDropshippers()) return;
   currentDropshipperFilter = null;
   renderDropshippersScreen();
   showScreen('dropshippers');
@@ -353,7 +354,7 @@ function findWorkerForDropshipper(dropshipperName) {
 }
 
 function renderDropshipperAdjustmentForm() {
-  if (currentRole !== 'owner') return '';
+  if (!canManageDropshippers()) return '';
   const linkedWorker = findWorkerForDropshipper(currentDropshipperFilter);
   const hint = linkedWorker
     ? `Связано с кассой: ${escapeHtml(getWorkerDisplayName(linkedWorker.name))}`
@@ -542,6 +543,7 @@ function renderDropshipperPaymentsTree(list) {
 }
 
 function openDropshipperDetail(name) {
+  if (!canManageDropshippers()) return;
   currentDropshipperFilter = name;
   const titleEl = document.getElementById('dropshipper-detail-title');
   if (titleEl) titleEl.textContent = `Дропшиппер: ${name}`;
@@ -556,6 +558,8 @@ function renderDropshipperDetail() {
   const totalDue = list.reduce((sum, o) => sum + (Number(o.dropshipperPayout) || 0), 0);
   const totalPaid = list.reduce((sum, o) => sum + getDropshipperPaid(o), 0);
   const totalLeft = Math.max(0, totalDue - totalPaid);
+  const pendingOrders = list.filter(o => getDropshipperPaid(o) < (Number(o.dropshipperPayout) || 0));
+  const completedOrders = list.filter(o => getDropshipperPaid(o) >= (Number(o.dropshipperPayout) || 0));
   let html = `
     <div class="profile-summary" style="margin-bottom:14px;">
       <div class="profile-summary-card">
@@ -573,13 +577,35 @@ function renderDropshipperDetail() {
     </div>
     <button class="btn-primary" style="width:100%;min-height:44px;margin-bottom:14px;font-weight:800;" onclick="openDropshipperPaymentModal()" ${totalLeft <= 0 ? 'disabled' : ''}>Выплатить</button>
     ${renderDropshipperAdjustmentForm()}
-    <div style="font-size:12px;font-weight:800;color:var(--text3);letter-spacing:0.04em;margin:16px 0 10px;">ЗАКАЗЫ</div>
-    ${renderDropshipperOrdersTree(list)}
+    ${renderDropshipperStatusOverview(pendingOrders, completedOrders)}
+    <div style="font-size:12px;font-weight:800;color:var(--text3);letter-spacing:0.04em;margin:16px 0 10px;">ОЖИДАЮЩИЕ ОПЛАТЫ</div>
+    ${pendingOrders.length ? renderDropshipperOrdersTree(pendingOrders) : '<div class="empty-state" style="padding:18px;"><h3>Ожидающих нет</h3><p>Все заказы этого дропшиппера закрыты по оплате</p></div>'}
+    <div style="font-size:12px;font-weight:800;color:var(--text3);letter-spacing:0.04em;margin:18px 0 10px;">ВЫПОЛНЕННЫЕ</div>
+    ${completedOrders.length ? renderDropshipperOrdersTree(completedOrders) : '<div class="empty-state" style="padding:18px;"><h3>Выполненных нет</h3><p>После выплаты заказы появятся здесь</p></div>'}
     <div style="font-size:12px;font-weight:800;color:var(--text3);letter-spacing:0.04em;margin:18px 0 10px;">ВЫПЛАТЫ</div>
     ${renderDropshipperPaymentsTree(list)}
   `;
   container.innerHTML = html;
   initIcons();
+}
+
+function renderDropshipperStatusOverview(pendingOrders, completedOrders) {
+  const pendingLeft = pendingOrders.reduce((sum, o) => sum + Math.max(0, (Number(o.dropshipperPayout) || 0) - getDropshipperPaid(o)), 0);
+  const completedPaid = completedOrders.reduce((sum, o) => sum + getDropshipperPaid(o), 0);
+  return `
+    <div class="profile-summary" style="margin-bottom:14px;">
+      <div class="profile-summary-card">
+        <div class="profile-summary-label">Ожидающие</div>
+        <div class="profile-summary-value" style="color:var(--yellow);">${pendingLeft.toLocaleString('ru')} ₴</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:4px;">Заказов: ${pendingOrders.length}</div>
+      </div>
+      <div class="profile-summary-card">
+        <div class="profile-summary-label">Выполненные</div>
+        <div class="profile-summary-value" style="color:var(--accent);">${completedPaid.toLocaleString('ru')} ₴</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:4px;">Заказов: ${completedOrders.length}</div>
+      </div>
+    </div>
+  `;
 }
 
 function openDropshipperPaymentModal() {
@@ -706,7 +732,7 @@ async function saveDropshipperPayment() {
 }
 
 async function saveDropshipperAdjustment() {
-  if (currentRole !== 'owner') return;
+  if (!canManageDropshippers()) return;
   const amount = Number(document.getElementById('dropshipper-adjustment-amount')?.value) || 0;
   const comment = document.getElementById('dropshipper-adjustment-comment')?.value.trim() || '';
   if (!currentDropshipperFilter) return;

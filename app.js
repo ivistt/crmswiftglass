@@ -113,7 +113,7 @@ function updateNavbarVisibility() {
   } else if (currentRole === 'manager') {
     // Менеджер: Записи
     if (bottomNav)  bottomNav.style.display  = '';
-    if (navHome)    navHome.style.display    = 'none';
+    if (navHome)    navHome.style.display    = canManageDropshippers() ? '' : 'none';
     if (navCash)    navCash.style.display    = currentWorkerName === 'Sasha Manager' ? '' : 'none';
     if (navProfile) navProfile.style.display = '';
     if (navClients) navClients.style.display = canViewClients() ? '' : 'none';
@@ -500,7 +500,7 @@ function updateHomeBackLabels() {
 }
 
 function goHome() {
-  if (currentRole === 'owner') {
+  if (currentRole === 'owner' || canManageDropshippers()) {
     renderHome();
     showScreen('home');
   } else {
@@ -598,6 +598,9 @@ function renderHome() {
       </div>
     `;
 
+  }
+
+  if (canManageDropshippers()) {
     const dropshipperOrders = orders.filter(o => isOrderFinanciallyActive(o) && o.dropshipper && Number(o.dropshipperPayout) > 0);
     const dropshipperTotal = dropshipperOrders.reduce((sum, o) => sum + (Number(o.dropshipperPayout) || 0), 0);
     container.innerHTML += `

@@ -42,12 +42,6 @@ function renderWorkers() {
         </div>
         ${currentRole === 'owner' ? `
           <div style="display:flex;gap:8px;align-items:center;">
-            ${w.systemRole === 'senior' ? `
-              <button class="btn-secondary" style="font-size:12px;padding:6px 10px;display:flex;align-items:center;gap:4px;"
-                onclick="openWorkerCashModal('${escapeAttr(w.name)}')">
-                <i data-lucide="wallet" style="width:13px;height:13px;"></i> Касса
-              </button>
-            ` : ''}
             <button class="btn-edit-worker" onclick="openWorkerEditModal('${w.id}')" title="Редактировать">
               <i data-lucide="pencil" style="width:14px;height:14px;"></i>
               <span>Edit</span>

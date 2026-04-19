@@ -193,7 +193,8 @@ function renderCashScreen() {
     + renderCashSection(regularCashLog, balance, today, { title: 'Касса (наличка)', account: 'cash', buttonText: '+ Запись' })
     + (currentWorkerName === FOP_CASH_WORKER_NAME
       ? renderCashSection(confirmedFopCashLog, fopBalance, today, { title: 'Касса БАБЕНКО', account: 'fop', buttonText: '+ БАБЕНКО', pendingEntries: pendingFopCashLog })
-      : '');
+      : '')
+    + renderWorkerDropshipperCashSection();
 
   initIcons();
 }
@@ -342,9 +343,6 @@ function renderAssistantSalarySection(assistantWorkers, assistantWorker, todayRe
 function getSeniorWorkedAssistants() {
   if (!canManageAssistantSalary()) return [];
   const names = new Set();
-  (workers || [])
-    .filter(worker => worker.systemRole === 'junior' && worker.name !== currentWorkerName)
-    .forEach(worker => names.add(worker.name));
   (orders || []).forEach(order => {
     if (!order || order.isCancelled) return;
     if (order.responsible === currentWorkerName && order.assistant) {
@@ -587,6 +585,87 @@ function renderManagerCashSections() {
       confirmToast: 'Карта Саши подтверждена ✓',
       defaultPendingComment: 'КАРТА САША',
   });
+}
+
+function getCurrentWorkerDropshipperNames() {
+  if (typeof findWorkerForDropshipper !== 'function') return [];
+  return (refDropshippers || [])
+    .map(row => row.name || '')
+    .filter(name => {
+      const worker = findWorkerForDropshipper(name);
+      return worker?.name === currentWorkerName;
+    });
+}
+
+function getProfileDropshipperPaid(order) {
+  return (order?.dropshipperPayments || []).reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
+}
+
+function renderWorkerDropshipperCashSection() {
+  const dropshipperNames = getCurrentWorkerDropshipperNames();
+  if (!dropshipperNames.length) return '';
+
+  const list = (orders || [])
+    .filter(order => isOrderFinanciallyActive(order))
+    .filter(order => dropshipperNames.includes(order.dropshipper))
+    .filter(order => Number(order.dropshipperPayout) > 0)
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || String(b.time || '').localeCompare(String(a.time || '')));
+
+  const done = list.filter(order => getProfileDropshipperPaid(order) >= (Number(order.dropshipperPayout) || 0));
+  const pending = list.filter(order => getProfileDropshipperPaid(order) < (Number(order.dropshipperPayout) || 0));
+  const pendingTotal = pending.reduce((sum, order) => sum + Math.max(0, (Number(order.dropshipperPayout) || 0) - getProfileDropshipperPaid(order)), 0);
+  const doneTotal = done.reduce((sum, order) => sum + getProfileDropshipperPaid(order), 0);
+
+  return '<div class="profile-today-card" style="margin-top:12px;">'
+    + '<div class="profile-today-label"><i data-lucide="handshake" style="width:15px;height:15px;"></i> Оплата по дропу</div>'
+    + '<div style="font-size:12px;color:var(--text3);margin-top:6px;">' + dropshipperNames.map(escapeHtml).join(', ') + '</div>'
+    + '<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;margin-top:12px;">'
+    + '<div style="padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--surface2);">'
+    + '<div style="font-size:11px;font-weight:800;color:var(--text3);letter-spacing:0.05em;">ОЖИДАЮЩИЕ</div>'
+    + '<div style="font-size:22px;font-weight:900;color:var(--yellow);margin-top:6px;">' + pendingTotal.toLocaleString('ru') + ' ₴</div>'
+    + '<div style="font-size:11px;color:var(--text3);margin-top:3px;">Заказов: ' + pending.length + '</div>'
+    + '</div>'
+    + '<div style="padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--surface2);">'
+    + '<div style="font-size:11px;font-weight:800;color:var(--text3);letter-spacing:0.05em;">ВЫПОЛНЕННЫЕ</div>'
+    + '<div style="font-size:22px;font-weight:900;color:var(--accent);margin-top:6px;">' + doneTotal.toLocaleString('ru') + ' ₴</div>'
+    + '<div style="font-size:11px;color:var(--text3);margin-top:3px;">Заказов: ' + done.length + '</div>'
+    + '</div>'
+    + '</div>'
+    + renderWorkerDropshipperOrdersGroup('ОЖИДАЮТ ОПЛАТЫ', pending, 'var(--yellow)')
+    + renderWorkerDropshipperOrdersGroup('ВЫПОЛНЕННЫЕ', done, 'var(--accent)')
+    + '</div>';
+}
+
+function renderWorkerDropshipperOrdersGroup(title, rows, color) {
+  const html = rows.length
+    ? rows.map(renderWorkerDropshipperOrderRow).join('')
+    : '<div style="text-align:center;color:var(--text3);font-size:13px;padding:10px 0;">Заказов нет</div>';
+  return '<div style="margin-top:14px;">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">'
+    + '<div style="font-size:12px;font-weight:800;color:var(--text3);letter-spacing:0.04em;">' + escapeHtml(title) + '</div>'
+    + '<div style="font-size:13px;font-weight:900;color:' + color + ';">' + rows.length + '</div>'
+    + '</div>'
+    + '<div style="background:var(--surface2);border-radius:10px;padding:0 12px;">'
+    + html
+    + '</div>'
+    + '</div>';
+}
+
+function renderWorkerDropshipperOrderRow(order) {
+  const due = Number(order.dropshipperPayout) || 0;
+  const paid = getProfileDropshipperPaid(order);
+  const left = Math.max(0, due - paid);
+  const isDone = left <= 0;
+  return '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);cursor:pointer;" onclick="openOrderDetail(\'' + escapeJsString(order.id) + '\')">'
+    + '<div style="min-width:0;">'
+    + '<div style="font-size:13px;color:var(--text2);font-weight:800;">' + escapeHtml(order.car || order.id || '—') + '</div>'
+    + '<div style="font-size:11px;color:var(--text3);margin-top:2px;">' + escapeHtml(formatDate(order.date)) + (order.time ? ' · ' + escapeHtml(order.time) : '') + ' · ' + escapeHtml(order.client || '—') + '</div>'
+    + '</div>'
+    + '<div style="text-align:right;flex-shrink:0;">'
+    + '<div style="font-size:15px;font-weight:900;color:' + (isDone ? 'var(--accent)' : 'var(--yellow)') + ';">' + paid.toLocaleString('ru') + ' / ' + due.toLocaleString('ru') + ' ₴</div>'
+    + '<div style="font-size:11px;color:var(--text3);margin-top:2px;">' + (isDone ? 'выполнено' : 'осталось ' + left.toLocaleString('ru') + ' ₴') + '</div>'
+    + '</div>'
+    + '</div>';
 }
 
 function renderCashSection(log, balance, today, options = {}) {

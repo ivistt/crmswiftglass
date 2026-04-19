@@ -472,6 +472,7 @@ function rowToOrder(r) {
     vin:             r.vin || '',
     car:             r.car,
     code:            r.code,
+    glassManufacturer: r.glass_manufacturer || '',
     notes:           r.notes,
     mount:           r.mount,
     serviceType:     r.service_type,
@@ -542,6 +543,7 @@ function orderToRow(o) {
     vin:              o.vin || null,
     car:              o.car,
     code:             o.code,
+    glass_manufacturer: o.glassManufacturer || null,
     notes:            o.notes,
     mount:            Number(o.mount)     || 0,
     service_type:     o.serviceType,
@@ -1038,6 +1040,7 @@ function canViewClients()  { return currentRole === 'owner' || currentRole === '
 function canViewWorkers()  { return currentRole === 'owner'; }
 function canDeleteOrder()  { return currentRole === 'owner' || currentRole === 'manager'; }
 function canViewFinance()  { return currentRole === 'owner'; }
+function canManageDropshippers() { return currentRole === 'owner' || currentWorkerName === 'Sasha Manager'; }
 function canMarkWorkerDone() { return currentRole === 'senior' || currentRole === 'extra'; }
 
 function getClients() {

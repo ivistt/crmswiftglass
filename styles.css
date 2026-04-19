@@ -32,6 +32,10 @@
   --navbar-bg: rgba(255,255,255,0.95);
   --navbar-shadow: 0 8px 40px rgba(15,23,42,0.14), 0 1px 0 rgba(255,255,255,0.85) inset;
   --modal-overlay-bg: rgba(15,23,42,0.35);
+  --order-pill-bg: #ffffff;
+  --order-pill-border: rgba(0,0,0,0.08);
+  --order-pill-text: #111827;
+  --order-pill-muted: #6b7280;
   --radius: 14px;
   --radius-sm: 10px;
   --radius-lg: 20px;
@@ -72,6 +76,10 @@
   --navbar-bg: rgba(17,17,17,0.95);
   --navbar-shadow: 0 8px 40px rgba(0,0,0,0.6), 0 1px 0 rgba(255,255,255,0.06) inset;
   --modal-overlay-bg: rgba(0,0,0,0.7);
+  --order-pill-bg: rgba(255,255,255,0.09);
+  --order-pill-border: rgba(255,255,255,0.12);
+  --order-pill-text: #ffffff;
+  --order-pill-muted: rgba(255,255,255,0.55);
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -1194,34 +1202,92 @@ body {
   min-width: 0;
 }
 
-.order-card-client-total {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
-  font-weight: 800;
-  white-space: nowrap;
-  color: var(--accent);
-  background: var(--green-dim);
-  border: 1px solid rgba(0,229,160,0.28);
-  border-radius: 5px;
-  padding: 2px 7px;
-}
-.order-card-client-total-separator {
-  color: var(--text3);
-  font-weight: 700;
-}
-
 .order-card-meta {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
 .order-meta-item {
   font-size: 12px;
   color: var(--text2);
+}
+
+.order-meta-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 25px;
+  max-width: 100%;
+  padding: 4px 9px;
+  border-radius: 8px;
+  background: var(--order-pill-bg);
+  border: 1px solid var(--order-pill-border);
+  color: var(--order-pill-text);
+  font-weight: 700;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.order-meta-client-pill {
+  flex: 1 1 260px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.order-meta-client-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.order-meta-pill svg {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  color: var(--order-pill-text);
+}
+
+.order-meta-client-money-pill {
+  background: linear-gradient(0deg, rgba(0,184,122,0.18), rgba(0,184,122,0.18)), var(--order-pill-bg);
+  border-color: rgba(0,184,122,0.42);
+  box-shadow: 0 4px 14px rgba(0,184,122,0.14);
+}
+
+.order-meta-client-money-pill svg {
+  color: #0f8f68;
+}
+
+.order-meta-inline-money {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 4px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-weight: 800;
+  color: #0f8f68;
+}
+
+.order-meta-money-separator {
+  color: var(--order-pill-muted);
+}
+
+[data-theme="dark"] .order-meta-inline-money {
+  color: var(--accent);
+}
+
+[data-theme="dark"] .order-meta-client-money-pill {
+  background: linear-gradient(0deg, rgba(0,229,160,0.16), rgba(0,229,160,0.16)), var(--order-pill-bg);
+  border-color: rgba(0,229,160,0.36);
+  box-shadow: 0 4px 16px rgba(0,229,160,0.12);
+}
+
+[data-theme="dark"] .order-meta-client-money-pill svg {
+  color: var(--accent);
 }
 
 /* ===== STATUS BADGES ===== */

@@ -29,6 +29,33 @@ const SERVICE_TYPE_OPTIONS = [
   { group: 'Нестандартные работы', name: 'Нестандартные работы', rate: 0, salaryCategory: 'custom' },
 ];
 const CUSTOM_SERVICE_TYPE_NAME = 'Нестандартные работы';
+const GLASS_MANUFACTURERS = [
+  {
+    name: '🇨🇳 XYG (Китай)',
+    description: 'Средний сегмент (хороший аналог)\nГеометрия уступает европейским производителям\nМассово используется на рынке',
+  },
+  {
+    name: '🇨🇳 BENSON (Китай)',
+    description: 'Средний сегмент (хороший аналог)\nГеометрия уступает европейским производителям\nМассово используется на рынке',
+  },
+  {
+    name: '🇪🇺 Saint-Gobain Sekurit (Европа)',
+    description: 'Отличная геометрия, максимальное качество',
+  },
+  {
+    name: '🇪🇺 Pilkington (Европа)',
+    description: 'стабильное стекло уровня оригинала, но многое зависит от партии: бывает не идеал, но в среднем без сюрпризов',
+  },
+  {
+    name: '🇺🇸 GUARDIAN',
+    description: 'Средний сегмент, ближе к хорошему аналогу\nАмериканский производитель, стабильное качество',
+  },
+  {
+    name: '🇵🇱Carlex',
+    description: 'Средний сегмент (аналог)\nПольское производство, часто встречается в Европе',
+  },
+];
+const GLASS_MANUFACTURER_BY_NAME = Object.fromEntries(GLASS_MANUFACTURERS.map(item => [item.name, item]));
 
 const STATIC_MANAGER_OPTIONS = [
   { name: 'Maksim', label: '🦊 Макс' },
@@ -58,6 +85,14 @@ function _escapeAttr(value) {
     .replace(/"/g, '&quot;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
+}
+
+function getGlassManufacturerCopyText(name) {
+  const manufacturer = GLASS_MANUFACTURER_BY_NAME[name];
+  if (!name) return '';
+  return manufacturer?.description
+    ? `Производитель стекла: ${name}\n${manufacturer.description}`
+    : `Производитель стекла: ${name}`;
 }
 
 function calcClientPaymentStatus(totalPaid, totalAmount) {
@@ -277,8 +312,11 @@ function renderOrderCard(o) {
   const canQuickConfirm = canQuickConfirmOrderAmounts(o);
   const cardClickAction = canEditListActions ? `openOrderModal('${escapeAttr(o.id)}')` : `openOrderDetail('${escapeAttr(o.id)}')`;
   const clientTotal = getOrderClientTotal(o);
-  const clientPaidHtml = clientTotal > 0
-    ? `<span class="order-card-client-total" title="Клиент оплатил / общая сумма заказа"><span>${(Number(o.debt) || 0).toLocaleString('ru')}</span><span class="order-card-client-total-separator">/</span><span>${clientTotal.toLocaleString('ru')} ₴</span></span>`
+  const clientPaidInlineHtml = clientTotal > 0
+    ? `<span class="order-meta-inline-money" title="Клиент оплатил / общая сумма заказа"><span>${(Number(o.debt) || 0).toLocaleString('ru')}</span><span class="order-meta-money-separator">/</span><span>${clientTotal.toLocaleString('ru')} ₴</span></span>`
+    : '';
+  const supplierPaidInlineHtml = (Number(o.check) > 0 || Number(o.purchase) > 0)
+    ? `<span class="order-meta-inline-money"><span>${(Number(o.check) || 0).toLocaleString('ru')}</span><span class="order-meta-money-separator">/</span><span>${(Number(o.purchase) || 0).toLocaleString('ru')} ₴</span></span>`
     : '';
   const specialistBonusFlags = [
     currentWorkerName === 'Roma' && Number(o.tatu) > 0
@@ -299,7 +337,6 @@ function renderOrderCard(o) {
           </div>
           <div class="order-card-title-row">
             <span class="order-name">${o.car || '—'}</span>
-            ${clientPaidHtml}
           </div>
         </div>
         <div class="order-card-actions">
@@ -329,13 +366,12 @@ function renderOrderCard(o) {
         </div>
       </div>
       <div class="order-card-meta">
-        <span class="order-meta-item">${icon('user')} ${o.client || '—'}</span>
-        <span class="order-meta-item">${icon('phone')} ${o.phone || '—'}</span>
-        <span class="order-meta-item">${icon('calendar')} ${formatDate(o.date)}</span>
-        <span class="order-meta-item">${icon('hard-hat')} ${getWorkerDisplayPair(o.responsible, o.assistant)}</span>
-        ${o.manager ? `<span class="order-meta-item">${icon('user')} ${getWorkerDisplayName(o.manager)}</span>` : ''}
-        ${o.warehouse ? `<span class="order-meta-item">${icon('warehouse')} ${o.warehouse}</span>` : ''}
-        ${(Number(o.check) > 0 || Number(o.purchase) > 0) ? `<span class="order-meta-item" style="font-weight:700;"><span style="color:var(--yellow);">${(Number(o.check) || 0).toLocaleString('ru')}</span><span style="color:var(--text3);font-weight:600;">/</span><span style="color:var(--accent);">${(Number(o.purchase) || 0).toLocaleString('ru')}</span></span>` : ''}
+        <span class="order-meta-item order-meta-pill order-meta-client-pill ${clientPaidInlineHtml ? 'order-meta-client-money-pill' : ''}">${icon('user')} <span class="order-meta-client-name">${o.client || '—'}</span>${clientPaidInlineHtml}</span>
+        <span class="order-meta-item order-meta-pill">${icon('phone')} ${o.phone || '—'}</span>
+        <span class="order-meta-item order-meta-pill">${icon('calendar')} ${formatDate(o.date)}</span>
+        <span class="order-meta-item order-meta-pill">${getWorkerDisplayPair(o.responsible, o.assistant)}</span>
+        ${o.manager ? `<span class="order-meta-item order-meta-pill">${getWorkerDisplayName(o.manager)}</span>` : ''}
+        ${(o.warehouse || supplierPaidInlineHtml) ? `<span class="order-meta-item order-meta-pill">${o.warehouse || 'Склад —'}${supplierPaidInlineHtml}</span>` : ''}
         
       </div>
       ${canQuickConfirm ? `
@@ -635,6 +671,7 @@ function openOrderDetail(id) {
         ${field(`${icon('car')} Авто`, o.car)}
         ${field('VIN', o.vin, 'mono')}
         ${field(`${icon('hash')} Єврокод`, o.code, 'mono')}
+        ${field(`${icon('factory')} Производитель стекла`, o.glassManufacturer)}
         ${field(`${icon('warehouse')} Склад`, o.warehouse)}
         ${field(`${icon('hash')} Код склада`, o.warehouseCode, 'mono')}
         ${field(`${icon('list-checks')} Комплектация`, o.configuration)}
@@ -783,6 +820,8 @@ function copyOrderSummary(id) {
 
   if (o.car) lines.push(`Авто: ${o.car}`);
   if (o.phone) lines.push(`Телефон: ${o.phone}`);
+  const manufacturerText = getGlassManufacturerCopyText(o.glassManufacturer);
+  if (manufacturerText) lines.push(manufacturerText);
   services.forEach(([label, amount]) => lines.push(`${label}: ${fmt(amount)}`));
   if (services.length === 0 && Number(o.total) > 0) lines.push(`Услуги: ${fmt(o.total)}`);
   if (services.length > 0 && Number(o.total) > listedServicesTotal) lines.push(`Сумма услуг: ${fmt(o.total)}`);
@@ -1455,6 +1494,7 @@ function fillOrderForm(o) {
   set('f-vin', o.vin);
   set('f-car', o.car);
   set('f-code', o.code);
+  set('f-glass-manufacturer', o.glassManufacturer);
   set('f-notes', o.notes);
   set('f-mount', o.mount);
   set('f-molding', o.molding);
@@ -1520,7 +1560,7 @@ function fillOrderForm(o) {
 function clearOrderForm() {
   const ids = [
     'f-date','f-time','f-responsible','f-client','f-phone','f-address','f-vin','f-car','f-code',
-    'f-notes','f-mount','f-service-type','f-molding',
+    'f-glass-manufacturer','f-notes','f-mount','f-service-type','f-molding',
     'f-extra-work','f-tatu','f-toning','f-delivery','f-warehouse','f-warehouse-code','f-configuration',
     'f-payment-status','f-check','f-supplier-left','f-debt','f-client-left','f-debt-date','f-total',
     'f-supplier-status','f-purchase','f-income',
@@ -1696,6 +1736,7 @@ async function saveOrder() {
     vin:             get('f-vin'),
     car:             get('f-car'),
     code:            get('f-code'),
+    glassManufacturer: get('f-glass-manufacturer'),
     notes:           get('f-notes'),
     mount:           getN('f-mount'),
     serviceType:     get('f-service-type'),
