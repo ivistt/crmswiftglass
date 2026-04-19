@@ -113,7 +113,7 @@ function updateNavbarVisibility() {
   } else if (currentRole === 'manager') {
     // Менеджер: Записи
     if (bottomNav)  bottomNav.style.display  = '';
-    if (navHome)    navHome.style.display    = canManageDropshippers() ? '' : 'none';
+    if (navHome)    navHome.style.display    = canViewDashboard() ? '' : 'none';
     if (navCash)    navCash.style.display    = currentWorkerName === 'Sasha Manager' ? '' : 'none';
     if (navProfile) navProfile.style.display = '';
     if (navClients) navClients.style.display = canViewClients() ? '' : 'none';
@@ -154,27 +154,27 @@ function openFinanceScreen() {
 }
 
 async function openOwnerCashScreen() {
-  if (currentRole !== 'owner') return;
+  if (!canViewOwnerCash()) return;
   try { window.allCashLog = await sbFetchAllCashLog(); } catch(e) { window.allCashLog = window.allCashLog || []; }
   renderOwnerCashScreen();
   showScreen('owner-cash');
 }
 
 async function openOwnerPaymentsScreen() {
-  if (currentRole !== 'owner') return;
+  if (!canViewOwnerPayments()) return;
   try { window.allCashLog = await sbFetchAllCashLog(); } catch(e) { window.allCashLog = window.allCashLog || []; }
   renderOwnerPaymentsScreen();
   showScreen('owner-payments');
 }
 
 function openOwnerTodayScreen() {
-  if (currentRole !== 'owner') return;
+  if (!canViewOwnerToday()) return;
   renderOwnerTodayScreen();
   showScreen('owner-today');
 }
 
 function openCalendarScreen() {
-  if (currentRole !== 'owner') return;
+  if (!canViewCalendar()) return;
   renderCalendarScreen();
   showScreen('calendar');
   setActiveNav('calendar');
@@ -500,7 +500,7 @@ function updateHomeBackLabels() {
 }
 
 function goHome() {
-  if (currentRole === 'owner' || canManageDropshippers()) {
+  if (canViewDashboard()) {
     renderHome();
     showScreen('home');
   } else {
@@ -738,8 +738,12 @@ function getOwnerCashLogs(confirmFilter = ownerCashConfirmFilter) {
     });
 }
 
+function getOwnerCashBalanceLogs() {
+  return getOwnerCashLogs('confirmed');
+}
+
 function getOwnerCurrentCashTotal() {
-  return getOwnerCashLogs('confirmed').reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+  return getOwnerCashBalanceLogs().reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
 }
 
 function getOwnerCashSafeKey(value) {
@@ -1599,10 +1603,12 @@ function renderOwnerCashScreen() {
   const seniorNames = getOwnerCashSeniorNames();
   const logs = getOwnerCashLogs()
     .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+  const balanceLogs = getOwnerCashBalanceLogs()
+    .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
 
   const balances = {};
   const snapshotsByDay = {};
-  for (const entry of logs) {
+  for (const entry of balanceLogs) {
     const workerName = entry.worker_name;
     balances[workerName] = (balances[workerName] || 0) + (Number(entry.amount) || 0);
     const day = _ownerCashEntryDate(entry);
@@ -1632,7 +1638,7 @@ function renderOwnerCashScreen() {
         <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">
           <div>
             <div class="fin-month-name">Текущая касса</div>
-            <div class="fin-month-sub">Нажмите на сотрудника, чтобы открыть историю кассы</div>
+            <div class="fin-month-sub">Баланс считает только подтвержденные записи</div>
           </div>
           <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
             <div style="font-size:22px;font-weight:900;color:${currentCashTotal >= 0 ? 'var(--accent)' : '#ef4444'};white-space:nowrap;">${currentCashTotal.toLocaleString('ru')} ₴</div>

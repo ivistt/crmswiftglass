@@ -68,7 +68,10 @@ function canMarkWorkerDone() {
 }
 
 function canQuickConfirmOrderAmounts(order) {
-  return currentRole === 'senior' && order?.responsible === currentWorkerName && !order?.isCancelled && !order?.workerDone;
+  return currentRole === 'senior'
+    && order?.responsible === currentWorkerName
+    && isOrderFinanciallyActive(order)
+    && !order?.workerDone;
 }
 
 function _dailyBaseOrderId() {
@@ -1811,14 +1814,14 @@ async function saveOrder() {
   const newFinanciallyActive = isOrderFinanciallyActive(data);
   const oldCashSupplierPaid = oldFinanciallyActive ? (hasSupplierPaymentHistory ? sumCashSupplierPayments(oldSupplierPayments) : oldCheck) : 0;
   const newCashSupplierPaid = newFinanciallyActive ? (hasSupplierPaymentHistory ? sumCashSupplierPayments(newSupplierPayments) : newCheck) : 0;
-  const cashSupplierDiff = newCashSupplierPaid - oldCashSupplierPaid;
+  const cashSupplierDiff = newFinanciallyActive ? (newCashSupplierPaid - oldCashSupplierPaid) : 0;
 
   // Дельта наличных платежей от клиента (для зачисления в кассу мастера)
   const oldClientPayments = existingOrder?.clientPayments || [];
   const newClientPayments = data.clientPayments || [];
   const oldCashClientPaid = oldFinanciallyActive ? getCashClientPaidForOrderSnapshot({ ...existingOrder, clientPayments: oldClientPayments }) : 0;
   const newCashClientPaid = newFinanciallyActive ? getCashClientPaidForOrderSnapshot({ ...data, clientPayments: newClientPayments }) : 0;
-  const cashClientDiff = newCashClientPaid - oldCashClientPaid;
+  const cashClientDiff = newFinanciallyActive ? (newCashClientPaid - oldCashClientPaid) : 0;
   const cashEntries = [];
 
   if ((currentRole === 'senior' || currentRole === 'owner') && cashSupplierDiff !== 0) {
@@ -2222,6 +2225,10 @@ async function toggleWorkerDone(orderId) {
   const o = orders.find(x => x.id === orderId);
   if (!o) return;
   if (o.responsible !== currentWorkerName) return;
+  if (!isOrderFinanciallyActive(o)) {
+    showToast('Выполнить можно только заказ в работе', 'error');
+    return;
+  }
   if (o.workerDone) return;
   if (!confirm(`Отметить заказ ${o.id} выполненным? После этого будет начислена зарплата.`)) return;
   o.workerDone = true;

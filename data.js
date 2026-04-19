@@ -14,6 +14,37 @@ function getHeaders() {
   };
 }
 
+function getFriendlyApiErrorMessage(raw, status = 0) {
+  const text = String(raw || '').trim();
+  let code = text;
+  try {
+    const parsed = JSON.parse(text);
+    code = parsed?.error || parsed?.message || text;
+  } catch (e) {
+    // plain text response
+  }
+
+  const normalized = String(code || '').trim();
+  if (normalized === 'Forbidden') return 'Нет доступа к этому действию';
+  if (normalized === 'Unauthorized') return 'Сессия устарела, войдите заново';
+  if (normalized === 'Comment required') return 'Комментарий обязателен';
+  if (normalized === 'Payment method required') return 'Выберите способ оплаты';
+  if (normalized === 'Invalid cash account') return 'Некорректный тип кассы';
+  if (normalized === 'Forbidden cash entry') return 'Нет доступа к этой кассовой записи';
+  if (normalized === 'Forbidden cash worker') return 'Нет доступа к кассе этого сотрудника';
+  if (normalized === 'Order is not active') return 'Заказ не в работе или отменён';
+  if (normalized === 'Order not found') return 'Заказ не найден';
+  if (normalized === 'Cash entry not found') return 'Запись кассы не найдена';
+  if (status === 403) return 'Нет доступа к этому действию';
+  if (status === 401) return 'Сессия устарела, войдите заново';
+  return normalized || `Ошибка сервера${status ? ' ' + status : ''}`;
+}
+
+async function throwApiError(res) {
+  const raw = await res.text().catch(() => '');
+  throw new Error(getFriendlyApiErrorMessage(raw, res.status));
+}
+
 function icon(name, className = 'svg-icon') {
   return `<span class="${className}" style="--icon-url:url('images/ico/${name}.svg');" aria-hidden="true"></span>`;
 }
@@ -35,7 +66,7 @@ function getWorkerDisplayPair(responsible, assistant) {
 
 async function sbFetchOrders() {
   const res = await fetch(`${WORKER_URL}/api/orders`, { headers: getHeaders() });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) await throwApiError(res);
   const body = await res.json();
   const rows = Array.isArray(body) ? body : (body.data ?? body.orders ?? []);
   return rows.map(rowToOrder);
@@ -47,7 +78,7 @@ async function sbInsertOrder(o) {
     headers: getHeaders(),
     body: JSON.stringify(orderToRow(o)),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) await throwApiError(res);
   const rows = await res.json();
   return rowToOrder(rows[0]);
 }
@@ -58,7 +89,7 @@ async function sbUpdateOrder(o) {
     headers: getHeaders(),
     body: JSON.stringify(orderToRow(o)),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) await throwApiError(res);
   const rows = await res.json();
   return rows[0] ? rowToOrder(rows[0]) : o;
 }
@@ -74,7 +105,7 @@ async function sbSaveOrderWithCash(o, { isNew = false, cashEntries = [], rollbac
       cash_entries: cashEntries,
     }),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) await throwApiError(res);
   const body = await res.json();
   return {
     order: body?.order ? rowToOrder(body.order) : o,
@@ -88,7 +119,7 @@ async function sbPatchOrderFields(id, fields) {
     headers: getHeaders(),
     body: JSON.stringify(fields),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) await throwApiError(res);
   const rows = await res.json();
   return rows[0] ? rowToOrder(rows[0]) : null;
 }
@@ -98,7 +129,7 @@ async function sbDeleteOrder(id) {
     method: 'DELETE',
     headers: getHeaders(),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) await throwApiError(res);
 }
 
 async function sbDeleteDoneOrders() {
@@ -106,14 +137,14 @@ async function sbDeleteDoneOrders() {
     method: 'DELETE',
     headers: getHeaders(),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) await throwApiError(res);
 }
 
 // ── WORKERS ──────────────────────────────────────────────────
 
 async function sbFetchWorkers() {
   const res = await fetch(`${WORKER_URL}/api/workers`, { headers: getHeaders() });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) await throwApiError(res);
   const body = await res.json();
   const rows = Array.isArray(body) ? body : (body.data ?? body.workers ?? []);
   return rows.map(rowToWorker);
@@ -126,7 +157,7 @@ async function sbDeleteWorker(id) {
     method: 'DELETE',
     headers: getHeaders(),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) await throwApiError(res);
 }
 
 // Установка PIN сотруднику (хешируется на стороне Worker)
@@ -136,7 +167,7 @@ async function sbSetWorkerPin(workerId, pin) {
     headers: getHeaders(),
     body: JSON.stringify({ workerId, pin }),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) await throwApiError(res);
 }
 
 async function sbInsertWorker(entry) {
@@ -145,7 +176,7 @@ async function sbInsertWorker(entry) {
     headers: getHeaders(),
     body: JSON.stringify(entry),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) await throwApiError(res);
   const rows = await res.json();
   return rows && rows.length ? rowToWorker(rows[0]) : null;
 }
@@ -167,7 +198,7 @@ async function sbUpdateWorker(workerId, updates) {
     headers: getHeaders(),
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) await throwApiError(res);
   const rows = await res.json();
   return rows[0] ? rowToWorker(rows[0]) : null;
 }
@@ -179,13 +210,13 @@ async function sbFetchWorkerProblems(workerName) {
     `${WORKER_URL}/api/problems?worker=${encodeURIComponent(workerName)}`,
     { headers: getHeaders() }
   );
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) await throwApiError(res);
   return res.json();
 }
 
 async function sbFetchAllProblems() {
   const res = await fetch(`${WORKER_URL}/api/problems/all`, { headers: getHeaders() });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) await throwApiError(res);
   return res.json();
 }
 
@@ -195,7 +226,7 @@ async function sbInsertWorkerProblem(entry) {
     headers: getHeaders(),
     body: JSON.stringify(entry),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) await throwApiError(res);
   const rows = await res.json();
   return rows[0];
 }
@@ -205,7 +236,7 @@ async function sbDeleteWorkerProblem(id) {
     method: 'DELETE',
     headers: getHeaders(),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) await throwApiError(res);
 }
 
 // ── WORKER SALARIES ──────────────────────────────────────────
@@ -215,13 +246,13 @@ async function sbFetchWorkerSalaries(workerName) {
     `${WORKER_URL}/api/salaries?worker=${encodeURIComponent(workerName)}`,
     { headers: getHeaders() }
   );
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) await throwApiError(res);
   return res.json();
 }
 
 async function sbFetchAllSalaries() {
   const res = await fetch(`${WORKER_URL}/api/salaries/all`, { headers: getHeaders() });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) await throwApiError(res);
   return res.json();
 }
 
@@ -230,7 +261,7 @@ async function sbFetchSalariesByOrder(orderId) {
     `${WORKER_URL}/api/salaries/by-order/${encodeURIComponent(orderId)}`,
     { headers: getHeaders() }
   );
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) await throwApiError(res);
   return res.json();
 }
 
@@ -240,7 +271,7 @@ async function sbInsertWorkerSalary(entry) {
     headers: getHeaders(),
     body: JSON.stringify(entry),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) await throwApiError(res);
   const rows = await res.json();
   return rows[0];
 }
@@ -251,7 +282,7 @@ async function sbUpdateWorkerSalary(id, amount) {
     headers: getHeaders(),
     body: JSON.stringify({ amount }),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) await throwApiError(res);
   const rows = await res.json();
   return rows[0];
 }
@@ -261,7 +292,7 @@ async function sbDeleteWorkerSalary(id) {
     method: 'DELETE',
     headers: getHeaders(),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) await throwApiError(res);
 }
 
 // ── CASH LOG ─────────────────────────────────────────────────
@@ -271,13 +302,13 @@ async function sbFetchCashLog(workerName) {
     `${WORKER_URL}/api/cash?worker=${encodeURIComponent(workerName)}`,
     { headers: getHeaders() }
   );
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) await throwApiError(res);
   return res.json();
 }
 
 async function sbFetchAllCashLog() {
   const res = await fetch(`${WORKER_URL}/api/cash/all`, { headers: getHeaders() });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) await throwApiError(res);
   return res.json();
 }
 
@@ -287,7 +318,7 @@ async function sbInsertCashEntry(entry) {
     headers: getHeaders(),
     body: JSON.stringify(entry),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) await throwApiError(res);
   const rows = await res.json();
   return rows[0];
 }
@@ -298,7 +329,7 @@ async function sbUpdateCashEntry(id, updates) {
     headers: getHeaders(),
     body: JSON.stringify(updates),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) await throwApiError(res);
   const rows = await res.json();
   return rows[0];
 }
@@ -307,7 +338,7 @@ async function sbUpdateCashEntry(id, updates) {
 
 async function sbFetchRef(table) {
   const res = await fetch(`${WORKER_URL}/api/ref/${table}`, { headers: getHeaders() });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) await throwApiError(res);
   return res.json();
 }
 
@@ -328,7 +359,7 @@ async function sbFetchCarDirectory() {
 
   for (let offset = 0; ; offset += pageSize) {
     const res = await fetch(`${WORKER_URL}/api/car-directory?offset=${offset}&limit=${pageSize}`, { headers: getHeaders() });
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) await throwApiError(res);
     const body = await res.json();
     const rows = Array.isArray(body) ? body : (body.data ?? []);
     let added = 0;
@@ -353,7 +384,7 @@ async function sbUpsertCarDirectory(model, eurocode) {
     headers: getHeaders(),
     body: JSON.stringify({ model, eurocode }),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) await throwApiError(res);
   const rows = await res.json();
   return rows[0];
 }
@@ -364,7 +395,7 @@ async function sbUpdateCarDirectory(id, model, eurocode) {
     headers: getHeaders(),
     body: JSON.stringify({ model, eurocode }),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) await throwApiError(res);
   const rows = await res.json();
   return rows[0];
 }
@@ -374,7 +405,7 @@ async function sbDeleteCarDirectory(id) {
     method: 'DELETE',
     headers: getHeaders(),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) await throwApiError(res);
 }
 
 // ── CLIENTS ─────────────────────────────────────────────────
@@ -386,7 +417,7 @@ async function sbFetchManualClients() {
 
   for (let offset = 0; ; offset += pageSize) {
     const res = await fetch(`${WORKER_URL}/api/clients?offset=${offset}&limit=${pageSize}`, { headers: getHeaders() });
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) await throwApiError(res);
     const body = await res.json();
     const rows = Array.isArray(body) ? body : (body.data ?? body.clients ?? []);
     let added = 0;
@@ -411,7 +442,7 @@ async function sbInsertManualClient(client) {
     headers: getHeaders(),
     body: JSON.stringify(manualClientToRow(client)),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) await throwApiError(res);
   const rows = await res.json();
   return rowToManualClient(Array.isArray(rows) ? rows[0] : rows);
 }
@@ -422,7 +453,7 @@ async function sbUpsertManualClient(client) {
     headers: getHeaders(),
     body: JSON.stringify(manualClientToRow(client)),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) await throwApiError(res);
   const rows = await res.json();
   return rowToManualClient(Array.isArray(rows) ? rows[0] : rows);
 }
@@ -651,7 +682,7 @@ async function sbUpdateWorkerFormula(workerId, formula) {
     headers: getHeaders(),
     body: JSON.stringify({ salary_formula: formula }),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) await throwApiError(res);
   const rows = await res.json();
   return rows[0] ? rowToWorker(rows[0]) : null;
 }
@@ -1041,6 +1072,11 @@ function canViewWorkers()  { return currentRole === 'owner'; }
 function canDeleteOrder()  { return currentRole === 'owner' || currentRole === 'manager'; }
 function canViewFinance()  { return currentRole === 'owner'; }
 function canManageDropshippers() { return currentRole === 'owner' || currentWorkerName === 'Sasha Manager'; }
+function canViewDashboard() { return currentRole === 'owner' || canManageDropshippers(); }
+function canViewOwnerCash() { return currentRole === 'owner'; }
+function canViewOwnerPayments() { return currentRole === 'owner'; }
+function canViewOwnerToday() { return currentRole === 'owner'; }
+function canViewCalendar() { return currentRole === 'owner'; }
 function canMarkWorkerDone() { return currentRole === 'senior' || currentRole === 'extra'; }
 
 function getClients() {

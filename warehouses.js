@@ -336,6 +336,11 @@ function leadingSymbol(value) {
 }
 
 function findWorkerForDropshipper(dropshipperName) {
+  const refRow = (refDropshippers || []).find(row => String(row?.name || '').trim() === String(dropshipperName || '').trim());
+  if (refRow?.worker_name) {
+    return (workers || []).find(worker => worker.name === refRow.worker_name) || { name: refRow.worker_name };
+  }
+
   const target = normalizeDropshipperWorkerText(dropshipperName);
   const targetSymbol = leadingSymbol(dropshipperName);
   const targetTokens = target.split(' ').filter(token => token.length > 1);
@@ -691,43 +696,74 @@ async function saveDropshipperPayment() {
 
   let remaining = amount;
   const timestamp = new Date().toISOString();
+  const updates = [];
+  let rolledBack = false;
   try {
-    const cashWorkerName = DROPSHIPPER_CASH_PAYMENT_WORKERS[method] || '';
-    if (cashWorkerName) {
-      const cashEntry = await sbInsertCashEntry({
-        worker_name: cashWorkerName,
-        amount: -amount,
-        comment: `Выплата дропшипперу ${currentDropshipperFilter}, ${formatDate(date)}`,
-      });
-      if (Array.isArray(window.allCashLog) && cashEntry) window.allCashLog.unshift(cashEntry);
-      if (typeof workerCashLog !== 'undefined' && cashWorkerName === currentWorkerName && cashEntry) {
-        workerCashLog.unshift(cashEntry);
-      }
-    }
-
     for (const item of eligible) {
       if (remaining <= 0) break;
       const part = Math.min(item.left, remaining);
-      const nextOrder = {
-        ...item.order,
-        dropshipperPayments: [
-          ...(item.order.dropshipperPayments || []),
-          { amount: part, date, method, dropshipper: currentDropshipperFilter, timestamp },
-        ],
-      };
-      const saved = await sbUpdateOrder(nextOrder);
-      const idx = orders.findIndex(o => o.id === item.order.id);
-      if (idx !== -1) orders[idx] = saved || nextOrder;
+      updates.push({
+        originalOrder: item.order,
+        nextOrder: {
+          ...item.order,
+          dropshipperPayments: [
+            ...(item.order.dropshipperPayments || []),
+            { amount: part, date, method, dropshipper: currentDropshipperFilter, timestamp },
+          ],
+        },
+      });
       remaining -= part;
     }
+
+    const savedUpdates = [];
+    for (const item of updates) {
+      const saved = await sbUpdateOrder(item.nextOrder);
+      const idx = orders.findIndex(o => o.id === item.originalOrder.id);
+      if (idx !== -1) orders[idx] = saved || item.nextOrder;
+      savedUpdates.push(item);
+    }
+
+    try {
+      const cashWorkerName = DROPSHIPPER_CASH_PAYMENT_WORKERS[method] || '';
+      if (cashWorkerName) {
+        const cashEntry = await sbInsertCashEntry({
+          worker_name: cashWorkerName,
+          amount: -amount,
+          comment: `Выплата дропшипперу ${currentDropshipperFilter}, ${formatDate(date)}`,
+        });
+        if (Array.isArray(window.allCashLog) && cashEntry) window.allCashLog.unshift(cashEntry);
+        if (typeof workerCashLog !== 'undefined' && cashWorkerName === currentWorkerName && cashEntry) {
+          workerCashLog.unshift(cashEntry);
+        }
+      }
+    } catch (cashError) {
+      await rollbackDropshipperPaymentOrders(savedUpdates);
+      rolledBack = true;
+      throw cashError;
+    }
+
     closeDropshipperPaymentModal();
     renderDropshipperDetail();
     if (document.getElementById('screen-owner-payments')?.classList.contains('active')) renderOwnerPaymentsScreen();
     showToast('Выплата записана ✓');
   } catch (e) {
+    if (!rolledBack) await rollbackDropshipperPaymentOrders(updates);
     showToast('Ошибка выплаты: ' + e.message, 'error');
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Сохранить'; }
+  }
+}
+
+async function rollbackDropshipperPaymentOrders(items) {
+  for (const item of items || []) {
+    if (!item?.originalOrder?.id) continue;
+    try {
+      const saved = await sbUpdateOrder(item.originalOrder);
+      const idx = orders.findIndex(o => o.id === item.originalOrder.id);
+      if (idx !== -1) orders[idx] = saved || item.originalOrder;
+    } catch (e) {
+      console.warn('Failed to rollback dropshipper payment order:', e);
+    }
   }
 }
 
