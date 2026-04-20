@@ -305,8 +305,9 @@
           <select class="filter-select" id="filter-worker" onchange="refreshOrdersView()">
             <option value="">Все сотрудники</option>
           </select>
-          <input class="filter-input" type="date" id="filter-date"
-            oninput="refreshOrdersView()" style="width:100%;">
+          <button class="filter-select order-date-filter-btn" id="filter-date-btn" onclick="openOrderDateFilterModal()" type="button" style="width:100%;">
+            Дата
+          </button>
         </div>
       </div>
       <div class="orders-grid" id="orders-list"></div>

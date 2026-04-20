@@ -5,10 +5,11 @@
 let editingOrderId  = null;      // null = новый, иначе id редактируемого
 let currentOrderTab = 'selection';  // 'selection' | 'call' | 'planner' | 'done' — для owner/manager
 let currentWorkerTab = 'actual'; // 'actual' | 'today' | 'done' | 'future' | 'past' | 'all' — для специалистов
-let ordersVisibleCount = 10;
-let lastOrdersListSignature = '';
 let ordersFiltersOpen = false;
 let currentOrderDetailId = null;
+let orderDateFilterExact = '';
+let orderDateFilterFrom = '';
+let orderDateFilterTo = '';
 const deletingOrderIds = new Set();
 const SERVICE_TYPE_OPTIONS = [
   { group: 'Монтаж', name: 'Монтаж лобового', rate: 400, salaryCategory: 'mount' },
@@ -323,6 +324,12 @@ function renderOrderCard(o) {
   const supplierPaidInlineHtml = (Number(o.check) > 0 || Number(o.purchase) > 0)
     ? `<span class="order-meta-inline-money"><span>${(Number(o.check) || 0).toLocaleString('ru')}</span><span class="order-meta-money-separator">/</span><span>${(Number(o.purchase) || 0).toLocaleString('ru')} ₴</span></span>`
     : '';
+  const warehouseCodeInlineHtml = currentWorkerName === 'Sasha Manager' && o.warehouseCode
+    ? `<span style="margin-left:6px;color:var(--accent);font-weight:900;">${escapeHtml(o.warehouseCode)}</span>`
+    : '';
+  const warehousePillHtml = (o.warehouse || warehouseCodeInlineHtml || supplierPaidInlineHtml)
+    ? `<span class="order-meta-item order-meta-pill">${escapeHtml(o.warehouse || 'Склад —')}${warehouseCodeInlineHtml}${supplierPaidInlineHtml}</span>`
+    : '';
   const servicesHtml = renderOrderCardServices(o);
   const callNotesHtml = renderOrderCardCallNotes(o);
   const specialistBonusFlags = [
@@ -353,7 +360,7 @@ function renderOrderCard(o) {
         <span class="order-meta-item order-meta-pill">${icon('calendar')} ${formatDate(o.date)}</span>
         <span class="order-meta-item order-meta-pill">${getWorkerDisplayPair(o.responsible, o.assistant)}</span>
         ${o.manager ? `<span class="order-meta-item order-meta-pill">${getWorkerDisplayName(o.manager)}</span>` : ''}
-        ${(o.warehouse || supplierPaidInlineHtml) ? `<span class="order-meta-item order-meta-pill">${o.warehouse || 'Склад —'}${supplierPaidInlineHtml}</span>` : ''}
+        ${warehousePillHtml}
         
       </div>
       ${servicesHtml}
@@ -644,38 +651,106 @@ function _filterSpecialistOrdersByTab(list) {
   return ownOrders;
 }
 
-function _getOrdersListSignature(scope, { search, dateF = '', statF = '', sort = '', ym = '' }) {
-  return [
-    scope,
-    currentRole || '',
-    currentOrderTab || '',
-    currentWorkerTab || '',
-    search || '',
-    dateF || '',
-    statF || '',
-    sort || '',
-    ym || '',
-  ].join('|');
+function getOrderDateFilterLabel() {
+  if (orderDateFilterExact) return formatDate(orderDateFilterExact);
+  if (orderDateFilterFrom && orderDateFilterTo) return `${formatDate(orderDateFilterFrom)} — ${formatDate(orderDateFilterTo)}`;
+  if (orderDateFilterFrom) return `От ${formatDate(orderDateFilterFrom)}`;
+  if (orderDateFilterTo) return `До ${formatDate(orderDateFilterTo)}`;
+  return 'Дата';
 }
 
-function _prepareVisibleOrders(list, signature) {
-  if (lastOrdersListSignature !== signature) {
-    ordersVisibleCount = 10;
-    lastOrdersListSignature = signature;
-  }
-  return list.slice(0, ordersVisibleCount);
+function updateOrderDateFilterButton() {
+  const btn = document.getElementById('filter-date-btn');
+  if (!btn) return;
+  btn.textContent = getOrderDateFilterLabel();
+  btn.classList.toggle('active', !!(orderDateFilterExact || orderDateFilterFrom || orderDateFilterTo));
 }
 
-function loadMoreOrders() {
-  ordersVisibleCount += 10;
-  if (currentMonthFilter) {
-    renderOrdersForMonth(currentMonthFilter);
-  } else {
-    renderOrders();
+function orderMatchesDateFilter(order) {
+  const date = String(order?.date || '').slice(0, 10);
+  if (!date) return !(orderDateFilterExact || orderDateFilterFrom || orderDateFilterTo);
+  if (orderDateFilterExact) return date === orderDateFilterExact;
+  if (orderDateFilterFrom && date < orderDateFilterFrom) return false;
+  if (orderDateFilterTo && date > orderDateFilterTo) return false;
+  return true;
+}
+
+function openOrderDateFilterModal() {
+  let modal = document.getElementById('order-date-filter-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'order-date-filter-modal';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
   }
+  modal.innerHTML = `
+    <div class="modal" style="max-width:420px;">
+      <div class="modal-header">
+        <div class="modal-title">Фильтр по дате</div>
+        <button class="modal-close" onclick="closeOrderDateFilterModal()">${icon('x')}</button>
+      </div>
+      <div class="modal-body" style="display:grid;gap:12px;">
+        <div style="padding:12px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;">
+          <div style="font-size:12px;font-weight:900;color:var(--text3);letter-spacing:0.04em;margin-bottom:10px;">КОНКРЕТНОЕ ЧИСЛО</div>
+          <div class="form-group">
+            <label class="form-label">Дата</label>
+            <input class="form-input" type="date" id="order-date-filter-exact" value="${escapeAttr(orderDateFilterExact)}">
+          </div>
+        </div>
+        <div style="padding:12px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;">
+          <div style="font-size:12px;font-weight:900;color:var(--text3);letter-spacing:0.04em;margin-bottom:10px;">ДИАПАЗОН</div>
+          <div class="form-group">
+            <label class="form-label">Дата от</label>
+            <input class="form-input" type="date" id="order-date-filter-from" value="${escapeAttr(orderDateFilterFrom)}">
+          </div>
+          <div class="form-group" style="margin-top:10px;">
+            <label class="form-label">Дата до</label>
+            <input class="form-input" type="date" id="order-date-filter-to" value="${escapeAttr(orderDateFilterTo)}">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="clearOrderDateFilter()">Сбросить</button>
+        <button class="btn-primary" onclick="applyOrderDateFilter()">Применить</button>
+      </div>
+    </div>
+  `;
+  modal.classList.add('active');
+  initIcons();
+}
+
+function closeOrderDateFilterModal() {
+  document.getElementById('order-date-filter-modal')?.classList.remove('active');
+}
+
+function applyOrderDateFilter() {
+  const exact = document.getElementById('order-date-filter-exact')?.value || '';
+  let from = document.getElementById('order-date-filter-from')?.value || '';
+  let to = document.getElementById('order-date-filter-to')?.value || '';
+  if (from && to && from > to) {
+    const tmp = from;
+    from = to;
+    to = tmp;
+  }
+  orderDateFilterExact = exact;
+  orderDateFilterFrom = exact ? '' : from;
+  orderDateFilterTo = exact ? '' : to;
+  closeOrderDateFilterModal();
+  updateOrderDateFilterButton();
+  refreshOrdersView();
+}
+
+function clearOrderDateFilter() {
+  orderDateFilterExact = '';
+  orderDateFilterFrom = '';
+  orderDateFilterTo = '';
+  closeOrderDateFilterModal();
+  updateOrderDateFilterButton();
+  refreshOrdersView();
 }
 
 function refreshOrdersView() {
+  updateOrderDateFilterButton();
   if (currentMonthFilter) {
     renderOrdersForMonth(currentMonthFilter);
   } else {
@@ -683,15 +758,8 @@ function refreshOrdersView() {
   }
 }
 
-function _renderOrdersListWithLoadMore(container, list, signature) {
-  const visibleList = _prepareVisibleOrders(list, signature);
-  const hasMore = visibleList.length < list.length;
-  container.innerHTML = visibleList.map(o => renderOrderCard(o)).join('')
-    + (hasMore ? `
-      <div style="display:flex;justify-content:center;margin-top:14px;">
-        <button class="btn-secondary" onclick="loadMoreOrders()">Подгрузить еще</button>
-      </div>
-    ` : '');
+function _renderOrdersList(container, list) {
+  container.innerHTML = list.map(o => renderOrderCard(o)).join('');
 }
 
 function normalizeOrderSearchText(value) {
@@ -733,8 +801,8 @@ function orderMatchesSearch(order, query) {
 // ---------- РЕНДЕР СПИСКА ----------
 function renderOrders() {
   populateOrderWorkerFilter();
+  updateOrderDateFilterButton();
   const search = document.getElementById('filter-search')?.value || '';
-  const dateF  = document.getElementById('filter-date')?.value || '';
   const statF  = document.getElementById('filter-status')?.value || '';
   const workerF = document.getElementById('filter-worker')?.value || '';
   const sort   = document.getElementById('filter-sort')?.value || 'desc';
@@ -762,7 +830,7 @@ function renderOrders() {
   }
 
   if (search) list = list.filter(o => orderMatchesSearch(o, search));
-  if (dateF) list = list.filter(o => o.date === dateF);
+  if (orderDateFilterExact || orderDateFilterFrom || orderDateFilterTo) list = list.filter(orderMatchesDateFilter);
   if (statF) list = list.filter(o => getEffectivePaymentStatus(o) === statF);
   if (workerF) list = list.filter(o => o.responsible === workerF || o.assistant === workerF || o.manager === workerF);
 
@@ -773,11 +841,8 @@ function renderOrders() {
   });
 
   const container = document.getElementById('orders-list');
-  const signature = _getOrdersListSignature('all', { search, dateF, statF, sort, workerF });
 
   if (!list.length) {
-    lastOrdersListSignature = signature;
-    ordersVisibleCount = 10;
     const specialistEmptyMap = {
       today: '<h3>Нет сегодняшних записей</h3><p>На сегодня задач нет</p>',
       actual: '<h3>Нет актуальных записей</h3><p>В планёрке нет активных задач</p>',
@@ -793,7 +858,7 @@ function renderOrders() {
     return;
   }
 
-  _renderOrdersListWithLoadMore(container, list, signature);
+  _renderOrdersList(container, list);
 }
 
 function _isCallOrderVisibleInCurrentContext(o) {
@@ -2459,8 +2524,8 @@ function openMonthOrders(ym) {
 
 function renderOrdersForMonth(ym) {
   populateOrderWorkerFilter();
+  updateOrderDateFilterButton();
   const search = document.getElementById('filter-search')?.value || '';
-  const dateF  = document.getElementById('filter-date')?.value || '';
   const statF  = document.getElementById('filter-status')?.value || '';
   const workerF = document.getElementById('filter-worker')?.value || '';
   const sort   = document.getElementById('filter-sort')?.value || 'desc';
@@ -2488,7 +2553,7 @@ function renderOrdersForMonth(ym) {
   }
 
   if (search) list = list.filter(o => orderMatchesSearch(o, search));
-  if (dateF) list = list.filter(o => o.date === dateF);
+  if (orderDateFilterExact || orderDateFilterFrom || orderDateFilterTo) list = list.filter(orderMatchesDateFilter);
   if (statF) list = list.filter(o => getEffectivePaymentStatus(o) === statF);
   if (workerF) list = list.filter(o => o.responsible === workerF || o.assistant === workerF || o.manager === workerF);
   list.sort((a, b) => {
@@ -2498,11 +2563,8 @@ function renderOrdersForMonth(ym) {
   });
 
   const container = document.getElementById('orders-list');
-  const signature = _getOrdersListSignature('month', { search, dateF, statF, sort, workerF, ym });
 
   if (!list.length) {
-    lastOrdersListSignature = signature;
-    ordersVisibleCount = 10;
     container.innerHTML = `
       <div class="empty-state">
         <div class="empty-state-icon">${icon('clipboard-list')}</div>
@@ -2512,7 +2574,7 @@ function renderOrdersForMonth(ym) {
     return;
   }
 
-  _renderOrdersListWithLoadMore(container, list, signature);
+  _renderOrdersList(container, list);
 }
 
 // ---------- WORKER DONE — СПЕЦИАЛИСТ ОТМЕЧАЕТ ВЫПОЛНЕНИЕ ----------

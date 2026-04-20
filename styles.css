@@ -993,6 +993,18 @@ body {
 }
 
 .filter-select { -webkit-appearance: none; appearance: none; }
+.order-date-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  cursor: pointer;
+}
+.order-date-filter-btn.active {
+  border-color: var(--accent-dim2);
+  color: var(--accent);
+  background: var(--green-dim);
+}
 
 /* ===== ORDER TABS ===== */
 .orders-tabs {
