@@ -1047,13 +1047,22 @@ let refSupplierStatuses = [];
 
 // ── HELPERS ──────────────────────────────────────────────────
 
-function generateOrderId() {
+function getOrderIdNumber(id) {
+  const m = String(id || '').match(/SG-(\d+)/);
+  return m ? parseInt(m[1], 10) : 0;
+}
+
+function formatOrderId(num) {
+  return 'SG-' + String(Math.max(1, Number(num) || 1)).padStart(4, '0');
+}
+
+function generateOrderId(afterId = '') {
   const nums = orders.map(o => {
-    const m = (o.id || '').match(/SG-(\d+)/);
-    return m ? parseInt(m[1]) : 0;
+    return getOrderIdNumber(o.id);
   });
-  const next = (nums.length ? Math.max(...nums) : 0) + 1;
-  return 'SG-' + String(next).padStart(4, '0');
+  const localNext = (nums.length ? Math.max(...nums) : 0) + 1;
+  const afterNext = getOrderIdNumber(afterId) + 1;
+  return formatOrderId(Math.max(localNext, afterNext));
 }
 
 function canCreateOrder()    { return currentRole === 'owner' || currentRole === 'manager'; }

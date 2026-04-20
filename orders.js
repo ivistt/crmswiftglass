@@ -903,6 +903,42 @@ async function addCashEntriesForDuplicatedOrder(order) {
   }
 }
 
+function isDuplicateOrderIdError(error) {
+  const msg = String(error?.message || error || '').toLowerCase();
+  return msg.includes('duplicate key') ||
+    msg.includes('already exists') ||
+    msg.includes('duplicate') ||
+    msg.includes('уже существует');
+}
+
+function replaceOrderIdInCashEntries(cashEntries, oldId, newId) {
+  if (!oldId || !newId || oldId === newId) return cashEntries;
+  return (cashEntries || []).map(entry => {
+    if (!entry || typeof entry.comment !== 'string') return entry;
+    return { ...entry, comment: entry.comment.split(oldId).join(newId) };
+  });
+}
+
+async function saveNewOrderWithNextIdOnConflict(order, saveFn, { cashEntries = [] } = {}) {
+  let currentCashEntries = cashEntries;
+  let lastError = null;
+
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      return await saveFn(currentCashEntries);
+    } catch (e) {
+      lastError = e;
+      if (!isDuplicateOrderIdError(e)) throw e;
+
+      const oldId = order.id;
+      order.id = generateOrderId(oldId);
+      currentCashEntries = replaceOrderIdInCashEntries(currentCashEntries, oldId, order.id);
+    }
+  }
+
+  throw lastError || new Error('Не удалось подобрать свободный ID заказа');
+}
+
 async function duplicateOrder(id) {
   if (currentRole !== 'owner' && currentRole !== 'manager') return;
   const source = orders.find(x => x.id === id);
@@ -920,7 +956,10 @@ async function duplicateOrder(id) {
   duplicate.isCancelled = false;
 
   try {
-    const saved = await sbInsertOrder(duplicate);
+    const saved = await saveNewOrderWithNextIdOnConflict(
+      duplicate,
+      () => sbInsertOrder(duplicate)
+    );
     const nextOrder = saved || duplicate;
     orders.unshift(nextOrder);
     await addCashEntriesForDuplicatedOrder(nextOrder);
@@ -1855,11 +1894,21 @@ async function saveOrder() {
   }
 
   try {
-    const result = await sbSaveOrderWithCash(data, {
-      isNew,
-      cashEntries,
-      rollbackOrder: existingOrder,
-    });
+    const result = isNew
+      ? await saveNewOrderWithNextIdOnConflict(
+          data,
+          currentCashEntries => sbSaveOrderWithCash(data, {
+            isNew: true,
+            cashEntries: currentCashEntries,
+            rollbackOrder: existingOrder,
+          }),
+          { cashEntries }
+        )
+      : await sbSaveOrderWithCash(data, {
+          isNew: false,
+          cashEntries,
+          rollbackOrder: existingOrder,
+        });
     const saved = result.order;
 
     if (isNew) {
