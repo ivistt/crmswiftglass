@@ -410,8 +410,8 @@ function renderSalaryOrdersList(orderItems) {
       const breakdown = Array.isArray(item.breakdown) ? item.breakdown : [];
       const breakdownHtml = breakdown.length
         ? '<div style="display:flex;flex-direction:column;gap:3px;margin-top:5px;">'
-          + breakdown.map(part => '<div style="display:flex;justify-content:space-between;gap:10px;color:var(--text3);font-size:11px;">'
-            + '<span>' + escapeHtml(part.label || 'Начисление') + '</span>'
+          + breakdown.map(part => '<div style="display:grid;grid-template-columns:minmax(0,max-content) max-content;align-items:center;column-gap:8px;color:var(--text3);font-size:11px;">'
+            + '<span style="min-width:0;">' + escapeHtml(part.label || 'Начисление') + '</span>'
             + '<span style="white-space:nowrap;color:' + ((Number(part.amount) || 0) === 0 ? 'var(--yellow)' : 'inherit') + ';">' + (Number(part.amount) || 0).toLocaleString('ru') + ' ₴</span>'
             + '</div>').join('')
           + '</div>'
@@ -419,10 +419,8 @@ function renderSalaryOrdersList(orderItems) {
       return '<div style="padding:8px 0;border-bottom:1px solid var(--border);">'
         + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;font-size:12px;color:var(--text2);">'
         + '<div style="min-width:0;">'
-        + '<div style="font-weight:800;color:var(--text);display:flex;align-items:center;gap:6px;flex-wrap:wrap;">'
-        + '<span>' + escapeHtml(item.id) + ' · ' + escapeHtml(item.car || '—') + '</span>'
-        + '<span style="font-size:10px;font-weight:900;color:var(--accent);background:rgba(29,233,182,.12);border:1px solid rgba(29,233,182,.22);border-radius:999px;padding:2px 6px;">Авто</span>'
-        + '</div>'
+        + '<div style="font-weight:800;color:var(--text);">' + escapeHtml(item.id) + ' · ' + escapeHtml(item.car || '—') + '</div>'
+        + '<div style="margin-top:5px;"><span style="display:inline-flex;font-size:10px;font-weight:900;color:var(--accent);background:rgba(29,233,182,.12);border:1px solid rgba(29,233,182,.22);border-radius:999px;padding:2px 6px;">Авто</span></div>'
         + breakdownHtml
         + '</div>'
         + '<span style="font-weight:800;color:var(--accent);white-space:nowrap;">' + (Number(item.amount) || 0).toLocaleString('ru') + ' ₴</span>'
@@ -486,8 +484,12 @@ function buildWorkerSalaryHistory(workerName, entries) {
               const label = entry.order_id === WORK_ATTENDANCE_ORDER_ID
                 ? 'Выход в работу'
                 : (entry.order_id === MANUAL_SALARY_REPORT_ORDER_ID ? 'Дневная ЗП' : `${isManual ? 'Ручная запись' : 'Заказ'} ${entry.order_id || '—'}`);
+              const history = typeof getSalaryEditHistory === 'function' ? getSalaryEditHistory(entry) : [];
+              const editedHtml = history.length
+                ? '<div style="font-size:11px;color:var(--text3);margin-top:2px;">Отредактировано владельцем</div>'
+                : '';
               return '<div style="display:flex;justify-content:space-between;gap:12px;font-size:12px;color:var(--text2);">'
-                + '<span>' + escapeHtml(label) + (isManual && entry.comment ? '<div style="font-size:11px;color:var(--text3);margin-top:2px;">' + escapeHtml(entry.comment) + '</div>' : '') + '</span>'
+                + '<span>' + escapeHtml(label) + (entry.comment ? '<div style="font-size:11px;color:var(--text3);margin-top:2px;">' + escapeHtml(entry.comment) + '</div>' : '') + editedHtml + '</span>'
                 + '<span style="font-weight:800;color:' + (Number(entry.amount) >= 0 ? 'var(--accent)' : '#ef4444') + ';white-space:nowrap;">' + Number(entry.amount).toLocaleString('ru') + ' ₴</span>'
                 + '</div>';
             }).join('')

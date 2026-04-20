@@ -310,6 +310,8 @@ function goBackFromOrdersList() {
 function renderOrderCard(o) {
   const canMark = canMarkWorkerDone() &&
     o.responsible === currentWorkerName;
+  const canPickServices = canMark && !o.workerDone && isOrderFinanciallyActive(o);
+  const specialServiceAction = getSpecialServiceAction(o);
   const canEditListActions = currentRole === 'owner' || currentRole === 'manager';
   const canDeleteListAction = canDeleteOrder();
   const canQuickConfirm = canQuickConfirmOrderAmounts(o);
@@ -321,6 +323,8 @@ function renderOrderCard(o) {
   const supplierPaidInlineHtml = (Number(o.check) > 0 || Number(o.purchase) > 0)
     ? `<span class="order-meta-inline-money"><span>${(Number(o.check) || 0).toLocaleString('ru')}</span><span class="order-meta-money-separator">/</span><span>${(Number(o.purchase) || 0).toLocaleString('ru')} ₴</span></span>`
     : '';
+  const servicesHtml = renderOrderCardServices(o);
+  const callNotesHtml = renderOrderCardCallNotes(o);
   const specialistBonusFlags = [
     currentWorkerName === 'Roma' && Number(o.tatu) > 0
       ? `<span class="status-badge status-call" title="В заказе есть тату">Тату ${(Number(o.tatu) || 0).toLocaleString('ru')} ₴</span>`
@@ -342,31 +346,6 @@ function renderOrderCard(o) {
             <span class="order-name">${o.car || '—'}</span>
           </div>
         </div>
-        <div class="order-card-actions">
-          ${canEditListActions ? `
-            <div class="order-card-action-dropdown" onclick="event.stopPropagation()">
-              <button class="icon-action-btn order-card-action-trigger" title="Действия заказа" onclick="toggleOrderActionMenu('${o.id}', event)">${icon('list')}</button>
-              <div class="order-card-action-menu" data-order-action-menu="${escapeAttr(o.id)}">
-                <button class="icon-action-btn" title="Скопировать данные" onclick="event.stopPropagation(); closeOrderActionMenus(); copyOrderSummary('${o.id}')">${icon('clipboard-list')}</button>
-                <button class="icon-action-btn" title="Создать дубликат" onclick="event.stopPropagation(); closeOrderActionMenus(); duplicateOrder('${o.id}')">${icon('plus')}</button>
-                <button class="icon-action-btn" title="Редактировать" onclick="event.stopPropagation(); closeOrderActionMenus(); openOrderModal('${o.id}')">${icon('pencil')}</button>
-                ${canDeleteListAction ? `<button type="button" class="icon-action-btn icon-action-danger" title="Удалить" onpointerdown="event.stopPropagation()" onclick="deleteOrder('${escapeAttr(o.id)}', event)">${icon('trash-2')}</button>` : ''}
-              </div>
-            </div>
-          ` : ''}
-          ${canMark ? `
-            <button
-              class="btn-check-done ${o.workerDone ? 'done' : ''}"
-              onclick="${o.workerDone ? 'event.stopPropagation(); return false;' : `event.stopPropagation(); toggleWorkerDone('${o.id}')`}"
-              title="${o.workerDone ? 'Заказ уже отмечен выполненным' : 'Отметить выполненным'}"
-              ${o.workerDone ? 'disabled' : ''}
-            >
-              <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <polyline points="2,7 5.5,10.5 12,3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-            </button>
-          ` : ''}
-        </div>
       </div>
       <div class="order-card-meta">
         <span class="order-meta-item order-meta-pill order-meta-client-pill ${clientPaidInlineHtml ? 'order-meta-client-money-pill' : ''}">${icon('user')} <span class="order-meta-client-name">${o.client || '—'}</span>${clientPaidInlineHtml}</span>
@@ -376,6 +355,47 @@ function renderOrderCard(o) {
         ${o.manager ? `<span class="order-meta-item order-meta-pill">${getWorkerDisplayName(o.manager)}</span>` : ''}
         ${(o.warehouse || supplierPaidInlineHtml) ? `<span class="order-meta-item order-meta-pill">${o.warehouse || 'Склад —'}${supplierPaidInlineHtml}</span>` : ''}
         
+      </div>
+      ${servicesHtml}
+      ${callNotesHtml}
+      <div class="order-card-actions">
+        ${canPickServices ? `
+          <button
+            class="btn-order-services ${o.serviceType ? 'selected' : ''}"
+            onclick="event.stopPropagation(); openOrderServicesModal('${escapeAttr(o.id)}')"
+            title="Выбрать выполненные услуги"
+          >Услуги</button>
+        ` : ''}
+        ${specialServiceAction ? `
+          <button
+            class="btn-order-services"
+            onclick="event.stopPropagation(); confirmSpecialServiceDone('${escapeAttr(o.id)}', '${specialServiceAction.type}')"
+            title="${escapeAttr(specialServiceAction.title)}"
+          >${specialServiceAction.label}</button>
+        ` : ''}
+        ${canEditListActions ? `
+          <div class="order-card-action-dropdown" onclick="event.stopPropagation()">
+            <button class="icon-action-btn order-card-action-trigger" title="Действия заказа" onclick="toggleOrderActionMenu('${o.id}', event)">${icon('list')}</button>
+            <div class="order-card-action-menu" data-order-action-menu="${escapeAttr(o.id)}">
+              <button class="icon-action-btn" title="Скопировать данные" onclick="event.stopPropagation(); closeOrderActionMenus(); copyOrderSummary('${o.id}')">${icon('clipboard-list')}</button>
+              <button class="icon-action-btn" title="Создать дубликат" onclick="event.stopPropagation(); closeOrderActionMenus(); duplicateOrder('${o.id}')">${icon('plus')}</button>
+              <button class="icon-action-btn" title="Редактировать" onclick="event.stopPropagation(); closeOrderActionMenus(); openOrderModal('${o.id}')">${icon('pencil')}</button>
+              ${canDeleteListAction ? `<button type="button" class="icon-action-btn icon-action-danger" title="Удалить" onpointerdown="event.stopPropagation()" onclick="deleteOrder('${escapeAttr(o.id)}', event)">${icon('trash-2')}</button>` : ''}
+            </div>
+          </div>
+        ` : ''}
+        ${canMark ? `
+          <button
+            class="btn-check-done ${o.workerDone ? 'done' : ''}"
+            onclick="${o.workerDone ? 'event.stopPropagation(); return false;' : `event.stopPropagation(); toggleWorkerDone('${o.id}')`}"
+            title="${o.workerDone ? 'Заказ уже отмечен выполненным' : 'Отметить выполненным'}"
+            ${o.workerDone ? 'disabled' : ''}
+          >
+            <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <polyline points="2,7 5.5,10.5 12,3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        ` : ''}
       </div>
       ${canQuickConfirm ? `
         <div onclick="event.stopPropagation()" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:10px;">
@@ -394,6 +414,160 @@ function renderOrderCard(o) {
       ` : ''}
     </div>
   `;
+}
+
+function renderOrderCardServices(order) {
+  if (currentRole !== 'owner' && currentRole !== 'manager') return '';
+  const services = String(order?.serviceType || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+  if (!services.length) return '';
+  return '<div class="order-card-services">'
+    + services.map(name => `<span class="order-service-pill">${escapeHtml(name)}</span>`).join('')
+    + '</div>';
+}
+
+function renderOrderCardCallNotes(order) {
+  if (currentRole !== 'owner' && currentRole !== 'manager') return '';
+  if (!order?.callStatus || !order.notes) return '';
+  return `<div class="order-card-note">${escapeHtml(order.notes)}</div>`;
+}
+
+function getSpecialServiceAction(order) {
+  if (!order || !isOrderFinanciallyActive(order)) return null;
+  if (currentWorkerName === 'Roma' && Number(order.tatu) > 0 && !order.tatuDone) {
+    return { type: 'tatu', label: 'Выполнить тату', title: 'Подтвердить выполнение тату' };
+  }
+  if (currentWorkerName === 'Lyosha' && Number(order.toning) > 0 && !order.toningDone && !order.toningExternal) {
+    return { type: 'toning', label: 'Выполнить тонировку', title: 'Подтвердить выполнение тонировки' };
+  }
+  return null;
+}
+
+async function confirmSpecialServiceDone(orderId, type) {
+  const order = orders.find(item => item.id === orderId);
+  if (!order) return;
+  const isTatu = type === 'tatu';
+  const label = isTatu ? 'тату' : 'тонировку';
+  if (!confirm(`Отметить ${label} выполненной по заказу ${order.id}? После этого начислится ЗП.`)) return;
+
+  try {
+    const patch = isTatu ? { tatu_done: true } : { toning_done: true };
+    const saved = await sbPatchOrderFields(order.id, patch);
+    const idx = orders.findIndex(item => item.id === order.id);
+    const updated = {
+      ...order,
+      ...saved,
+      tatuDone: isTatu ? true : (saved?.tatuDone ?? order.tatuDone),
+      tatuDoneBy: isTatu ? currentWorkerName : (saved?.tatuDoneBy ?? order.tatuDoneBy),
+      toningDone: !isTatu ? true : (saved?.toningDone ?? order.toningDone),
+      toningDoneBy: !isTatu ? currentWorkerName : (saved?.toningDoneBy ?? order.toningDoneBy),
+    };
+    if (idx !== -1) orders[idx] = updated;
+    await _upsertOrderSalaries(updated);
+    currentMonthFilter ? renderOrdersForMonth(currentMonthFilter) : renderOrders();
+    showToast('Услуга выполнена ✓');
+    if (document.getElementById('screen-profile')?.classList.contains('active')) {
+      await loadWorkerSalaries();
+      renderProfile();
+    }
+  } catch (e) {
+    showToast('Ошибка: ' + e.message, 'error');
+  }
+}
+
+function openOrderServicesModal(orderId) {
+  const order = orders.find(item => item.id === orderId);
+  if (!order || currentRole !== 'senior' || order.responsible !== currentWorkerName || order.workerDone) return;
+
+  let modal = document.getElementById('order-services-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'order-services-modal';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+
+  const selected = new Set(String(order.serviceType || '').split(',').map(s => s.trim()).filter(Boolean));
+  const groups = [...new Set(SERVICE_TYPE_OPTIONS.map(item => item.group))];
+  const servicesHtml = groups.map(group => `
+    <div class="service-group">
+      <div class="service-group-title">${escapeHtml(group)}</div>
+      <div class="service-group-options">
+        ${SERVICE_TYPE_OPTIONS.filter(item => item.group === group).map(item => `
+          <label class="checkbox">
+            <input type="checkbox" value="${escapeAttr(item.name)}" ${selected.has(item.name) ? 'checked' : ''} onchange="syncOrderServicesModalSelection(this)">
+            <span>${escapeHtml(item.name)}</span>
+          </label>
+        `).join('')}
+      </div>
+    </div>
+  `).join('');
+
+  modal.innerHTML = `
+    <div class="modal" style="max-width:520px;">
+      <div class="modal-header">
+        <div>
+          <div class="modal-title">Услуги по заказу ${escapeHtml(order.id)}</div>
+          <div style="font-size:12px;color:var(--text3);margin-top:3px;">${escapeHtml(order.car || order.client || '')}</div>
+        </div>
+        <button class="modal-close" onclick="closeOrderServicesModal()"><i data-lucide="x" style="width:16px;height:16px;"></i></button>
+      </div>
+      <div class="modal-body">
+        <div id="order-services-modal-list" class="service-checkboxes">${servicesHtml}</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeOrderServicesModal()">Закрыть</button>
+        <button class="btn-primary" id="order-services-save-btn" onclick="saveOrderServices('${escapeAttr(order.id)}')">Сохранить услуги</button>
+      </div>
+    </div>
+  `;
+  modal.classList.add('active');
+  initIcons();
+}
+
+function closeOrderServicesModal() {
+  document.getElementById('order-services-modal')?.classList.remove('active');
+}
+
+function syncOrderServicesModalSelection(changedEl) {
+  const box = document.querySelectorAll('#order-services-modal-list input[type="checkbox"]');
+  if (changedEl?.value === CUSTOM_SERVICE_TYPE_NAME && changedEl.checked) {
+    box.forEach(el => {
+      if (el !== changedEl) el.checked = false;
+    });
+  } else if (changedEl?.checked) {
+    box.forEach(el => {
+      if (el.value === CUSTOM_SERVICE_TYPE_NAME) el.checked = false;
+    });
+  }
+}
+
+async function saveOrderServices(orderId) {
+  const order = orders.find(item => item.id === orderId);
+  if (!order) return;
+  const values = [...document.querySelectorAll('#order-services-modal-list input[type="checkbox"]')]
+    .filter(el => el.checked)
+    .map(el => el.value);
+  if (!order.onlySale && !values.length) {
+    showToast('Выберите хотя бы одну услугу', 'error');
+    return;
+  }
+  const btn = document.getElementById('order-services-save-btn');
+  if (btn) btn.disabled = true;
+  try {
+    const saved = await sbPatchOrderFields(orderId, { service_type: values.join(', ') });
+    const idx = orders.findIndex(item => item.id === orderId);
+    if (idx !== -1) orders[idx] = { ...orders[idx], ...saved, serviceType: values.join(', ') };
+    closeOrderServicesModal();
+    currentMonthFilter ? renderOrdersForMonth(currentMonthFilter) : renderOrders();
+    showToast('Услуги сохранены ✓');
+  } catch (e) {
+    showToast('Ошибка: ' + e.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 function closeOrderActionMenus() {
@@ -433,6 +607,18 @@ function _isCurrentWorkerOrder(order) {
 
 function _filterSpecialistOrdersByTab(list) {
   const today = todayStr();
+  if (currentWorkerName === 'Roma' && currentWorkerTab === 'tatuActual') {
+    return list.filter(o => isOrderFinanciallyActive(o) && Number(o.tatu) > 0 && !o.tatuDone);
+  }
+  if (currentWorkerName === 'Roma' && currentWorkerTab === 'tatuDone') {
+    return list.filter(o => Number(o.tatu) > 0 && o.tatuDone);
+  }
+  if (currentWorkerName === 'Lyosha' && currentWorkerTab === 'toningActual') {
+    return list.filter(o => isOrderFinanciallyActive(o) && Number(o.toning) > 0 && !o.toningDone && !o.toningExternal);
+  }
+  if (currentWorkerName === 'Lyosha' && currentWorkerTab === 'toningDone') {
+    return list.filter(o => Number(o.toning) > 0 && o.toningDone);
+  }
   if (currentWorkerName === 'Nastya' && currentWorkerTab === 'ownWarehouse') {
     return list.filter(o => o.ownWarehouse && !o.workerDone && !o.isCancelled);
   }
@@ -1177,6 +1363,32 @@ function populateRefSelects() {
   populateOrderWorkerFilter();
 }
 
+function setServiceTypeSelection(value = '') {
+  const selected = String(value || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+  const selectedSet = new Set(selected);
+  document.querySelectorAll('#service-type-checkboxes input[type="checkbox"]').forEach(el => {
+    el.checked = selectedSet.has(el.value);
+  });
+  const hidden = document.getElementById('f-service-type');
+  if (hidden) hidden.value = selected.join(', ');
+}
+
+function updateOrderServiceTypeAccess() {
+  const section = document.getElementById('order-service-type-section');
+  if (!section) return;
+  const canEditServicesInOrderForm = currentRole === 'senior' || currentRole === 'extra';
+  section.dataset.orderModalPanel = canEditServicesInOrderForm ? 'work' : 'hidden';
+  section.style.display = canEditServicesInOrderForm
+    ? (document.querySelector('[data-order-modal-tab].active')?.dataset.orderModalTab === 'work' ? '' : 'none')
+    : 'none';
+  section.querySelectorAll('input[type="checkbox"]').forEach(input => {
+    input.disabled = !canEditServicesInOrderForm;
+  });
+}
+
 function populateOrderWorkerFilter() {
   const sel = document.getElementById('filter-worker');
   if (!sel) return;
@@ -1447,6 +1659,7 @@ function openOrderModal(id) {
   if (liveTotalEl) liveTotalEl.style.display = 'none';
 
   applyOrderFormDateTimeDefaults();
+  updateOrderServiceTypeAccess();
   updateOrderSaveButtonLabel();
   renderSupplierPayments();
   renderClientPayments(); // рендерим историю оплат (изначально)
@@ -1467,6 +1680,7 @@ function closeOrderModal() {
 
 function setOrderModalPanel(panel) {
   const nextPanel = panel || 'order';
+  updateOrderServiceTypeAccess();
   document.querySelectorAll('[data-order-modal-panel]').forEach(el => {
     el.style.display = el.dataset.orderModalPanel === nextPanel ? '' : 'none';
   });
@@ -1565,8 +1779,7 @@ function fillOrderForm(o) {
   // услуги — чекбоксы
   const svcHidden = document.getElementById('f-service-type');
   if (svcHidden) {
-    svcHidden.value = o.serviceType || '';
-    syncServiceTypes(null, false);
+    setServiceTypeSelection(o.serviceType || '');
   }
   set('f-margin-total', o.marginTotal);
   set('f-payout-dropshipper', o.dropshipperPayout);
@@ -1623,7 +1836,7 @@ function clearOrderForm() {
   if (newPostEl) newPostEl.checked = false;
   const tonExtEl = document.getElementById('f-toning-external');
   if (tonExtEl) tonExtEl.checked = false;
-  document.querySelectorAll('#service-type-checkboxes input[type="checkbox"]').forEach(el => el.checked = false);
+  setServiceTypeSelection('');
   document.querySelectorAll('#f-configuration-checkboxes input[type="checkbox"]').forEach(el => el.checked = false);
   syncConfiguration();
 }
@@ -1726,7 +1939,7 @@ function recalcTotal(mode = 'init') {
 
 function validateOrderRequiredFields(data) {
   const status = document.getElementById('f-order-status')?.value || '';
-  const serviceTypeRequired = !data.onlySale;
+  const serviceTypeRequired = !data.onlySale && currentRole !== 'owner' && currentRole !== 'manager';
   const missing = [];
 
   if (status === '') {
@@ -2282,6 +2495,11 @@ async function toggleWorkerDone(orderId) {
     return;
   }
   if (o.workerDone) return;
+  if (!o.onlySale && !String(o.serviceType || '').trim()) {
+    showToast('Сначала выберите услуги по заказу', 'error');
+    openOrderServicesModal(orderId);
+    return;
+  }
   if (!confirm(`Отметить заказ ${o.id} выполненным? После этого будет начислена зарплата.`)) return;
   o.workerDone = true;
   try {
@@ -2327,22 +2545,22 @@ async function _upsertOrderSalaries(order) {
       });
     }
 
-    // 3. Глобальные бонусы по тату/тонировке
-    (workers || []).forEach(worker => {
-      const bonus = _calcTatuBonus(worker.name, order) + _calcToningBonus(worker.name, order);
-      if (bonus > 0) {
-        affectedWorkers.add(worker.name);
-        amounts[worker.name] = (amounts[worker.name] || 0) + bonus;
-      }
-    });
-
-    // 4. Менеджер — если указан в поле manager заказа и имеет systemRole === 'manager'
+    // 3. Менеджер — если указан в поле manager заказа и имеет systemRole === 'manager'
     const managerName = order.manager || '';
     if (managerName && workers.find(x => x.name === managerName && x.systemRole === 'manager')) {
       affectedWorkers.add(managerName);
       amounts[managerName] = (amounts[managerName] || 0) + _calcManagerSalary(order);
     }
   }
+
+  // Отдельные услуги Ромы/Лёши начисляются по своим подтверждениям.
+  (workers || []).forEach(worker => {
+    const bonus = _calcTatuBonus(worker.name, order) + _calcToningBonus(worker.name, order);
+    if (bonus > 0) {
+      affectedWorkers.add(worker.name);
+      amounts[worker.name] = (amounts[worker.name] || 0) + bonus;
+    }
+  });
 
 
   // Всегда берём актуальные записи ЗП по этому заказу из БД
@@ -2354,7 +2572,22 @@ async function _upsertOrderSalaries(order) {
 
   // После первого выполнения заказа ЗП по этому order_id считается зафиксированной:
   // последующие правки сумм/полей заказа не должны менять уже начисленные записи.
-  if (order.workerDone && automaticEntriesInDb.length) {
+  const salaryFrozen = order.workerDone && automaticEntriesInDb.length;
+  if (salaryFrozen) {
+    const missingBonusWorkers = Object.keys(amounts).filter(workerName =>
+      !automaticEntriesInDb.some(entry => entry.worker_name === workerName)
+    );
+    for (const workerName of missingBonusWorkers) {
+      const amount = amounts[workerName] || 0;
+      if (amount > 0) {
+        await sbInsertWorkerSalary({ worker_name: workerName, date: order.date, amount, order_id: order.id, entry_type: 'auto' });
+        affectedWorkers.add(workerName);
+      }
+    }
+    for (const workerName of affectedWorkers) {
+      if (!_canSyncDailyBaseSalaryForWorker(workerName)) continue;
+      await _syncDailyBaseSalaryEntry(workerName, order.date);
+    }
     if (typeof workerSalaries !== 'undefined') {
       try {
         workerSalaries = await sbFetchWorkerSalaries(currentWorkerName);
@@ -2461,6 +2694,8 @@ function initOrderTabs() {
       tabsEl.style.display = 'flex';
       tabsEl.innerHTML = `
         <button class="orders-tab orders-tab-relevant active" id="tab-actual" onclick="setWorkerTab('actual')"><span class="tab-dot"></span> Актуальные</button>
+        ${currentWorkerName === 'Roma' ? '<button class="orders-tab" id="tab-tatu-actual" onclick="setWorkerTab(\'tatuActual\')">Тату актуальные</button><button class="orders-tab" id="tab-tatu-done" onclick="setWorkerTab(\'tatuDone\')">Тату выполненные</button>' : ''}
+        ${currentWorkerName === 'Lyosha' ? '<button class="orders-tab" id="tab-toning-actual" onclick="setWorkerTab(\'toningActual\')">Тонировка актуальные</button><button class="orders-tab" id="tab-toning-done" onclick="setWorkerTab(\'toningDone\')">Тонировка выполненные</button>' : ''}
         <button class="orders-tab" id="tab-today" onclick="setWorkerTab('today')">Сегодняшние</button>
         <button class="orders-tab" id="tab-done-worker" onclick="setWorkerTab('done')">Выполненные</button>
         <button class="orders-tab" id="tab-future" onclick="setWorkerTab('future')">Будущие</button>
@@ -2488,6 +2723,10 @@ function setWorkerTab(tab) {
     future: 'tab-future',
     past: 'tab-past',
     ownWarehouse: 'tab-own-warehouse-worker',
+    tatuActual: 'tab-tatu-actual',
+    tatuDone: 'tab-tatu-done',
+    toningActual: 'tab-toning-actual',
+    toningDone: 'tab-toning-done',
     all: 'tab-my-all',
   };
   const el = document.getElementById(tabMap[tab] || 'tab-my-all');

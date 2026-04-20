@@ -1108,10 +1108,10 @@ body {
 }
 
 .order-card-actions {
-  align-self: flex-start;
   justify-content: flex-end;
-  flex-shrink: 0;
-  margin-left: auto;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
 }
 
 .order-card-action-dropdown {
@@ -1242,6 +1242,76 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.order-card-services {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.order-service-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(29, 233, 182, 0.24);
+  background: rgba(29, 233, 182, 0.1);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.order-card-note {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--order-pill-border);
+  background: var(--order-pill-bg);
+  color: var(--order-pill-text);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+  white-space: pre-wrap;
+}
+
+.btn-order-services {
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(29, 233, 182, 0.28);
+  background: rgba(29, 233, 182, 0.1);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.btn-order-services:hover,
+.btn-order-services:focus-visible {
+  background: rgba(29, 233, 182, 0.18);
+  border-color: rgba(29, 233, 182, 0.46);
+  color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(29, 233, 182, 0.08);
+  outline: none;
+}
+
+.btn-order-services.selected {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #001f16;
+}
+
+.btn-order-services.selected:hover,
+.btn-order-services.selected:focus-visible {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #001f16;
+  box-shadow: 0 0 0 3px rgba(29, 233, 182, 0.14);
 }
 
 .order-meta-pill svg {

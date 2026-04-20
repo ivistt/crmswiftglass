@@ -4,6 +4,23 @@
 
 const WORKER_URL = 'https://swiftglass-crm.skifchaqwerty.workers.dev';
 
+if (typeof window !== 'undefined' && window.fetch && !window.fetch.__crmNetworkGuard) {
+  const nativeFetch = window.fetch.bind(window);
+  const guardedFetch = async (...args) => {
+    try {
+      return await nativeFetch(...args);
+    } catch (e) {
+      const msg = String(e?.message || e || '');
+      if (!navigator.onLine || e instanceof TypeError || /failed to fetch|network|load failed/i.test(msg)) {
+        throw new Error('Проблемы с сетью: проверьте интернет или подключение к базе данных');
+      }
+      throw e;
+    }
+  };
+  guardedFetch.__crmNetworkGuard = true;
+  window.fetch = guardedFetch;
+}
+
 // Session token хранится в памяти (и localStorage для автологина)
 let sessionToken = null;
 
@@ -31,6 +48,9 @@ function getFriendlyApiErrorMessage(raw, status = 0) {
   if (normalized === 'Payment method required') return 'Выберите способ оплаты';
   if (normalized === 'Invalid cash account') return 'Некорректный тип кассы';
   if (normalized === 'Invalid manual salary entry') return 'Заполните сотрудника, заказ, сумму и комментарий';
+  if (normalized === 'Salary already withdrawn') return 'Эта зарплата уже снята, редактировать нельзя';
+  if (normalized === 'Service type required') return 'Выберите услуги перед выполнением заказа';
+  if (normalized === 'Invalid special service') return 'Эту услугу нельзя подтвердить по этому заказу';
   if (normalized === 'Forbidden cash entry') return 'Нет доступа к этой кассовой записи';
   if (normalized === 'Forbidden cash worker') return 'Нет доступа к кассе этого сотрудника';
   if (normalized === 'Order is not active') return 'Заказ не в работе или отменён';
@@ -512,7 +532,11 @@ function rowToOrder(r) {
     molding:         r.molding,
     extraWork:       r.extra_work,
     tatu:            r.tatu,
+    tatuDone:        r.tatu_done || false,
+    tatuDoneBy:      r.tatu_done_by || '',
     toning:          r.toning,
+    toningDone:      r.toning_done || false,
+    toningDoneBy:    r.toning_done_by || '',
     delivery:        r.delivery       || 0,
     author:          r.author,
     selection:       r.selection, // legacy, column может отсутствовать
@@ -583,7 +607,11 @@ function orderToRow(o) {
     molding:          Number(o.molding)   || 0,
     extra_work:       Number(o.extraWork) || 0,
     tatu:             Number(o.tatu)      || 0,
+    tatu_done:        o.tatuDone || false,
+    tatu_done_by:     o.tatuDoneBy || null,
     toning:           Number(o.toning)    || 0,
+    toning_done:      o.toningDone || false,
+    toning_done_by:   o.toningDoneBy || null,
     delivery:         o.delivery          || 0,
     author:           o.author,
     payment_status:   o.paymentStatus,
@@ -801,16 +829,18 @@ function calcOrderSalary(workerName, order) {
 }
 
 function calcWorkerOrderSalary(workerName, order) {
-  if (!workerName || !order || !order.workerDone || !isOrderFinanciallyActive(order)) return 0;
+  if (!workerName || !order || !isOrderFinanciallyActive(order)) return 0;
   let total = 0;
-  if (order.responsible === workerName || order.assistant === workerName) {
-    total += calcOrderSalary(workerName, order);
-  }
-  if (order.reworkData?.responsible === workerName || order.reworkData?.assistant === workerName) {
-    total += calcReworkSalary(workerName, order.reworkData);
-  }
-  if (order.manager === workerName) {
-    total += _calcManagerSalary(order);
+  if (order.workerDone) {
+    if (order.responsible === workerName || order.assistant === workerName) {
+      total += calcOrderSalary(workerName, order);
+    }
+    if (order.reworkData?.responsible === workerName || order.reworkData?.assistant === workerName) {
+      total += calcReworkSalary(workerName, order.reworkData);
+    }
+    if (order.manager === workerName) {
+      total += _calcManagerSalary(order);
+    }
   }
   total += _calcTatuBonus(workerName, order);
   total += _calcToningBonus(workerName, order);
@@ -818,11 +848,11 @@ function calcWorkerOrderSalary(workerName, order) {
 }
 
 function getWorkerOrderSalaryBreakdown(workerName, order) {
-  if (!workerName || !order || !order.workerDone || !isOrderFinanciallyActive(order)) return [];
+  if (!workerName || !order || !isOrderFinanciallyActive(order)) return [];
   const parts = [];
   const rule = getSalaryRule(workerName);
 
-  if (order.responsible === workerName || order.assistant === workerName) {
+  if (order.workerDone && (order.responsible === workerName || order.assistant === workerName)) {
     if (rule.selectedServices) {
       if (hasCustomSalaryService(order)) {
         parts.push({ label: 'Нестандартная работа, внесите запись в кассу', amount: 0 });
@@ -844,7 +874,7 @@ function getWorkerOrderSalaryBreakdown(workerName, order) {
     if (fromMolding > 0) parts.push({ label: 'Молдинг ' + Math.round((rule.moldingPct || 0) * 100) + '%', amount: fromMolding });
   }
 
-  if (order.manager === workerName) {
+  if (order.workerDone && order.manager === workerName) {
     const managerAmount = _calcManagerSalary(order);
     if (managerAmount > 0) parts.push({ label: 'Менеджер ' + Math.round((getSalaryRule(order.manager).glassMarginPct || 0) * 100) + '% маржи стекла', amount: managerAmount });
   }
@@ -869,6 +899,7 @@ function _calcTatuBonus(workerName, order) {
   const rule = getSalaryRule(workerName);
   if (!rule.tatuBonusPct) return 0;
   
+  if (!order?.tatuDone) return 0;
   const tatu = Number(order.tatu) || 0;
   const tatuBonusMain = (tatu > 0) ? Math.round(tatu * rule.tatuBonusPct) : 0;
   
@@ -881,6 +912,7 @@ function _calcTatuBonus(workerName, order) {
 function _calcToningBonus(workerName, order) {
   const rule = getSalaryRule(workerName);
   if (!rule.toningBonusPct) return 0;
+  if (!order?.toningDone || order?.toningExternal) return 0;
   return Math.round((Number(order.toning) || 0) * rule.toningBonusPct);
 }
 

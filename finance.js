@@ -467,6 +467,74 @@ function getOwnerManualSalaryEntries(entries = allSalaries) {
   return (entries || []).filter(isOwnerManualSalaryEntry);
 }
 
+function getSalaryEditHistory(entry) {
+  if (!entry?.edit_history) return [];
+  if (Array.isArray(entry.edit_history)) return entry.edit_history;
+  try {
+    const parsed = JSON.parse(entry.edit_history);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function isSalaryEntryClosedByWithdrawal(entry, entries = allSalaries) {
+  if (!entry?.worker_name || !entry?.date) return false;
+  return (entries || []).some(row =>
+    row.worker_name === entry.worker_name &&
+    isSalaryWithdrawalEntry(row) &&
+    String(row.date || '') >= String(entry.date || '')
+  );
+}
+
+function getPendingOwnerSalaryEntries(entries = allSalaries) {
+  return (entries || [])
+    .filter(entry => entry && Number(entry.amount) !== 0)
+    .filter(entry => !isSalaryWithdrawalEntry(entry))
+    .filter(entry => !isSalaryEntryClosedByWithdrawal(entry, entries))
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+}
+
+function renderOwnerPendingSalaryPanel() {
+  const entries = getPendingOwnerSalaryEntries().slice(0, 80);
+  const html = entries.length
+    ? entries.map(entry => {
+      const amount = Number(entry.amount) || 0;
+      const typeLabel = isOwnerManualSalaryEntry(entry) ? 'Ручная' : (entry.entry_type === 'auto' || entry.order_id ? 'Авто' : 'Начисление');
+      const history = getSalaryEditHistory(entry);
+      const latestEdit = history[history.length - 1] || null;
+      const latestEditHtml = latestEdit
+        ? `<div style="font-size:11px;color:var(--text3);margin-top:4px;">Отредактировано владельцем: ${Number(latestEdit.amount_before || 0).toLocaleString('ru')} → ${Number(latestEdit.amount_after || 0).toLocaleString('ru')} ₴</div>`
+        : '';
+      return `<div style="padding:10px 0;border-bottom:1px solid var(--border);">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+          <div style="min-width:0;">
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+              <span style="font-size:13px;font-weight:800;color:var(--text);">${escapeHtml(getWorkerDisplayName(entry.worker_name))}</span>
+              <span style="font-size:10px;font-weight:900;color:var(--accent);background:rgba(29,233,182,.12);border:1px solid rgba(29,233,182,.22);border-radius:999px;padding:2px 6px;">${typeLabel}</span>
+            </div>
+            <div style="font-size:12px;color:var(--text3);margin-top:3px;">${formatDate(entry.date)} · ${escapeHtml(entry.order_id || '—')}</div>
+            ${entry.comment ? `<div style="font-size:12px;color:var(--text2);margin-top:5px;">${escapeHtml(entry.comment)}</div>` : ''}
+            ${latestEditHtml}
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+            <span style="font-size:13px;font-weight:900;color:${amount >= 0 ? 'var(--accent)' : '#ef4444'};white-space:nowrap;">${amount.toLocaleString('ru')} ₴</span>
+            <button class="icon-btn" title="Редактировать начисление" onclick="editPendingSalaryEntry('${entry.id}')" style="width:28px;height:28px;border-radius:7px;">
+              <i data-lucide="pencil" style="width:12px;height:12px;"></i>
+            </button>
+          </div>
+        </div>
+      </div>`;
+    }).join('')
+    : '<div style="font-size:12px;color:var(--text3);padding:8px 0;">Ожидающих начислений нет</div>';
+
+  return `<div class="profile-today-card" style="margin-bottom:12px;">
+    <div class="profile-today-label"><i data-lucide="clock" style="width:15px;height:15px;"></i> Ожидающие начисления</div>
+    <div style="font-size:11px;color:var(--text3);margin-top:6px;">Можно редактировать до снятия ЗП сотрудником или старшим.</div>
+    <div style="margin-top:8px;">${html}</div>
+  </div>`;
+}
+
 function renderOwnerManualSalaryPanel() {
   const workerOptions = (workers || [])
     .slice()
@@ -565,6 +633,7 @@ function renderSalaryScreen() {
     const workerNames = [...new Set(manualReports.map(s => s.worker_name))].sort();
     const anomalies = getSalaryAnomalies(manualReports);
     const manualSalaryHtml = renderOwnerManualSalaryPanel();
+    const pendingSalaryHtml = renderOwnerPendingSalaryPanel();
     const anomaliesHtml = `
       <div class="sal-nav-row" onclick="salaryNavPush({anomalies:true})" style="
         margin-bottom:10px;
@@ -628,7 +697,7 @@ function renderSalaryScreen() {
         </div>
       `;
     }).join('');
-    container.innerHTML = manualSalaryHtml + analyticsHtml + anomaliesHtml + (workersHtml || '');
+    container.innerHTML = pendingSalaryHtml + manualSalaryHtml + analyticsHtml + anomaliesHtml + (workersHtml || '');
 
   } else if (state.anomalies) {
     title.textContent = 'Аномалии ЗП';
@@ -945,6 +1014,47 @@ async function saveOwnerManualSalary() {
     showToast('Ошибка: ' + e.message, 'error');
   } finally {
     if (saveBtn) saveBtn.disabled = false;
+  }
+}
+
+async function editPendingSalaryEntry(id) {
+  if (currentRole !== 'owner') return;
+  const entry = (allSalaries || []).find(row => row.id === id);
+  if (!entry) return showToast('Запись ЗП не найдена', 'error');
+  if (isSalaryEntryClosedByWithdrawal(entry)) {
+    showToast('Эта зарплата уже снята, редактировать нельзя', 'error');
+    return;
+  }
+
+  const currentAmount = Number(entry.amount) || 0;
+  const amountRaw = prompt('Новая сумма ЗП', String(currentAmount));
+  if (amountRaw === null) return;
+  const amount = Number(String(amountRaw).replace(',', '.'));
+  if (!Number.isFinite(amount) || amount === 0) {
+    showToast('Введите сумму, можно с минусом', 'error');
+    return;
+  }
+
+  const comment = prompt('Комментарий к изменению', entry.comment || 'Отредактировано владельцем');
+  if (comment === null) return;
+  const cleanComment = String(comment || '').trim();
+  if (!cleanComment) {
+    showToast('Комментарий обязателен', 'error');
+    return;
+  }
+
+  try {
+    const updated = await sbUpdateWorkerSalary(id, {
+      amount,
+      comment: cleanComment,
+    });
+    const idx = allSalaries.findIndex(row => row.id === id);
+    if (idx !== -1) allSalaries[idx] = { ...allSalaries[idx], ...updated };
+    renderSalaryScreen();
+    renderHome();
+    showToast('Начисление обновлено ✓');
+  } catch (e) {
+    showToast('Ошибка: ' + e.message, 'error');
   }
 }
 
