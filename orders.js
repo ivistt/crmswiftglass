@@ -324,7 +324,7 @@ function renderOrderCard(o) {
   const supplierPaidInlineHtml = (Number(o.check) > 0 || Number(o.purchase) > 0)
     ? `<span class="order-meta-inline-money"><span>${(Number(o.check) || 0).toLocaleString('ru')}</span><span class="order-meta-money-separator">/</span><span>${(Number(o.purchase) || 0).toLocaleString('ru')} ₴</span></span>`
     : '';
-  const warehouseCodeInlineHtml = currentWorkerName === 'Sasha Manager' && o.warehouseCode
+  const warehouseCodeInlineHtml = (currentRole === 'owner' || currentWorkerName === 'Sasha Manager') && o.warehouseCode
     ? `<span style="margin-left:6px;color:var(--accent);font-weight:900;">${escapeHtml(o.warehouseCode)}</span>`
     : '';
   const warehousePillHtml = (o.warehouse || warehouseCodeInlineHtml || supplierPaidInlineHtml)
@@ -2460,9 +2460,6 @@ function openYear(year) {
 }
 
 function renderMonths() {
-  const search = document.getElementById('filter-month-search')?.value || '';
-  const filterVal = document.getElementById('filter-month')?.value || '';
-
   const map = {};
   for (const o of orders) {
     if (!o.date) continue;
@@ -2470,8 +2467,6 @@ function renderMonths() {
     if (window.currentYearFilter && year !== window.currentYearFilter) continue;
     
     const ym = o.date.slice(0, 7);
-    if (filterVal && ym !== filterVal) continue;
-    if (search && !orderMatchesSearch(o, search)) continue;
     if (!map[ym]) map[ym] = [];
     map[ym].push(o);
   }
