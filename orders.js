@@ -2553,14 +2553,11 @@ async function _upsertOrderSalaries(order) {
     }
   }
 
-  // Отдельные услуги Ромы/Лёши начисляются по своим подтверждениям.
-  (workers || []).forEach(worker => {
-    const bonus = _calcTatuBonus(worker.name, order) + _calcToningBonus(worker.name, order);
-    if (bonus > 0) {
-      affectedWorkers.add(worker.name);
-      amounts[worker.name] = (amounts[worker.name] || 0) + bonus;
-    }
-  });
+  const specialSalaryEntries = getSpecialServiceSalaryEntries(order);
+  for (const entry of specialSalaryEntries) {
+    await upsertSpecialServiceSalaryEntry(entry);
+    affectedWorkers.add(entry.workerName);
+  }
 
 
   // Всегда берём актуальные записи ЗП по этому заказу из БД
@@ -2574,16 +2571,6 @@ async function _upsertOrderSalaries(order) {
   // последующие правки сумм/полей заказа не должны менять уже начисленные записи.
   const salaryFrozen = order.workerDone && automaticEntriesInDb.length;
   if (salaryFrozen) {
-    const missingBonusWorkers = Object.keys(amounts).filter(workerName =>
-      !automaticEntriesInDb.some(entry => entry.worker_name === workerName)
-    );
-    for (const workerName of missingBonusWorkers) {
-      const amount = amounts[workerName] || 0;
-      if (amount > 0) {
-        await sbInsertWorkerSalary({ worker_name: workerName, date: order.date, amount, order_id: order.id, entry_type: 'auto' });
-        affectedWorkers.add(workerName);
-      }
-    }
     for (const workerName of affectedWorkers) {
       if (!_canSyncDailyBaseSalaryForWorker(workerName)) continue;
       await _syncDailyBaseSalaryEntry(workerName, order.date);
@@ -2626,6 +2613,65 @@ async function _upsertOrderSalaries(order) {
     try {
       workerSalaries = await sbFetchWorkerSalaries(currentWorkerName);
     } catch (e) { /* не критично */ }
+  }
+}
+
+function getSpecialServiceSalaryEntries(order) {
+  const entries = [];
+  const tatuAmount = _calcTatuBonus('Roma', order);
+  if (tatuAmount > 0) {
+    entries.push({
+      workerName: 'Roma',
+      date: order.date,
+      amount: tatuAmount,
+      orderId: `${order.id} · Тату`,
+      comment: `Тату по заказу ${order.id}`,
+    });
+  }
+
+  const toningAmount = _calcToningBonus('Lyosha', order);
+  if (toningAmount > 0) {
+    entries.push({
+      workerName: 'Lyosha',
+      date: order.date,
+      amount: toningAmount,
+      orderId: `${order.id} · Тонировка`,
+      comment: `Тонировка по заказу ${order.id}`,
+    });
+  }
+
+  return entries;
+}
+
+async function upsertSpecialServiceSalaryEntry(entry) {
+  if (!entry?.workerName || !entry.date || !entry.orderId) return;
+  const amount = Number(entry.amount) || 0;
+  let salaryRows = [];
+  try {
+    salaryRows = await sbFetchWorkerSalaries(entry.workerName) || [];
+  } catch (e) {
+    return;
+  }
+
+  const existing = salaryRows.find(row => row.order_id === entry.orderId && !isOwnerManualSalaryEntry(row));
+  if (amount > 0) {
+    if (!existing) {
+      await sbInsertWorkerSalary({
+        worker_name: entry.workerName,
+        date: entry.date,
+        amount,
+        order_id: entry.orderId,
+        entry_type: 'auto',
+        comment: entry.comment || '',
+      });
+    } else if (Number(existing.amount) !== amount || existing.comment !== entry.comment) {
+      await sbUpdateWorkerSalary(existing.id, {
+        amount,
+        comment: entry.comment || '',
+      });
+    }
+  } else if (existing) {
+    await sbDeleteWorkerSalary(existing.id);
   }
 }
 

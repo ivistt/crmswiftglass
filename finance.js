@@ -467,6 +467,42 @@ function getOwnerManualSalaryEntries(entries = allSalaries) {
   return (entries || []).filter(isOwnerManualSalaryEntry);
 }
 
+function getOwnerSalaryEntries(entries = allSalaries) {
+  return (entries || [])
+    .filter(entry => entry?.worker_name && entry.date && Number(entry.amount) !== 0);
+}
+
+function getSalaryEntryKindLabel(entry) {
+  if (isSalaryWithdrawalEntry(entry)) return 'Снятие';
+  if (isWorkAttendanceEntry(entry)) return 'Выход';
+  if (isOwnerManualSalaryEntry(entry)) return 'Ручная';
+  if (entry.entry_type === 'auto' || entry.order_id) return 'Авто';
+  return 'Запись';
+}
+
+function renderOwnerSalaryEntryRow(entry, { showWorker = false, showEdit = false } = {}) {
+  const amount = Number(entry.amount) || 0;
+  const history = getSalaryEditHistory(entry);
+  const canEdit = showEdit && !isSalaryWithdrawalEntry(entry) && !isSalaryEntryClosedByWithdrawal(entry);
+  return `<div style="padding:10px 0;border-bottom:1px solid var(--border);">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+      <div style="min-width:0;">
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          ${showWorker ? `<span style="font-size:13px;font-weight:800;color:var(--text);">${escapeHtml(getWorkerDisplayName(entry.worker_name))}</span>` : ''}
+          <span style="font-size:12px;font-weight:800;color:var(--text2);">${escapeHtml(entry.order_id || '—')}</span>
+          <span style="font-size:10px;font-weight:900;color:var(--accent);background:rgba(29,233,182,.12);border:1px solid rgba(29,233,182,.22);border-radius:999px;padding:2px 6px;">${getSalaryEntryKindLabel(entry)}</span>
+        </div>
+        ${entry.comment ? `<div style="font-size:12px;color:var(--text2);margin-top:5px;">${escapeHtml(entry.comment)}</div>` : ''}
+        ${history.length ? `<div style="font-size:11px;color:var(--text3);margin-top:4px;">Отредактировано владельцем: ${history.length}</div>` : ''}
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+        <span style="font-size:13px;font-weight:900;color:${amount >= 0 ? 'var(--accent)' : '#ef4444'};white-space:nowrap;">${amount.toLocaleString('ru')} ₴</span>
+        ${canEdit ? `<button class="icon-btn" title="Редактировать" onclick="editPendingSalaryEntry('${entry.id}')" style="width:28px;height:28px;border-radius:7px;"><i data-lucide="pencil" style="width:12px;height:12px;"></i></button>` : ''}
+      </div>
+    </div>
+  </div>`;
+}
+
 function getSalaryEditHistory(entry) {
   if (!entry?.edit_history) return [];
   if (Array.isArray(entry.edit_history)) return entry.edit_history;
@@ -624,13 +660,14 @@ function renderSalaryScreen() {
   const title     = document.getElementById('salary-detail-title');
   const backBtn   = document.getElementById('salary-detail-back');
   const manualReports = getManualSalaryReports();
+  const salaryEntries = getOwnerSalaryEntries();
 
   if (backBtn) backBtn.style.display = salaryNavStack.length > 0 ? 'flex' : 'none';
 
   if (!state) {
     // Уровень 1: все сотрудники
     title.textContent = 'Зарплаты сотрудников';
-    const workerNames = [...new Set(manualReports.map(s => s.worker_name))].sort();
+    const workerNames = [...new Set(salaryEntries.map(s => s.worker_name))].sort((a, b) => String(a).localeCompare(String(b), 'ru'));
     const anomalies = getSalaryAnomalies(manualReports);
     const manualSalaryHtml = renderOwnerManualSalaryPanel();
     const pendingSalaryHtml = renderOwnerPendingSalaryPanel();
@@ -677,21 +714,20 @@ function renderSalaryScreen() {
     `;
     const analyticsHtml = renderSalaryAnalyticsSection(manualReports);
     const workersHtml = workerNames.map(name => {
-      const rows = manualReports.filter(s => s.worker_name === name);
+      const rows = salaryEntries.filter(s => s.worker_name === name);
       const total = rows.reduce((sum, s) => sum + Number(s.amount), 0);
-      const autoTotal = rows.reduce((sum, s) => sum + calcDaySalary(name, s.date), 0);
-      const isOff = getSalaryDeviationPct(total, autoTotal) > 0.10;
+      const recordsCount = rows.length;
       return `
         <div class="sal-nav-row" onclick="salaryNavPush({worker:'${financeEscapeAttr(name)}'})">
           <div style="display:flex;align-items:center;gap:12px;">
             <div class="worker-avatar" style="width:40px;height:40px;font-size:14px;border-radius:12px;">${getInitials(name)}</div>
             <div>
-              <div style="font-weight:700;font-size:15px;">${name}</div>
-              <div style="font-size:12px;color:var(--text3);">Ориентир: ${autoTotal.toLocaleString('ru')} ₴</div>
+              <div style="font-weight:700;font-size:15px;">${escapeHtml(getWorkerDisplayName(name))}</div>
+              <div style="font-size:12px;color:var(--text3);">Записей: ${recordsCount}</div>
             </div>
           </div>
           <div style="display:flex;align-items:center;gap:10px;">
-            <span style="font-weight:800;font-size:16px;color:${isOff ? '#ef4444' : 'var(--yellow)'};">${total.toLocaleString('ru')} ₴</span>
+            <span style="font-weight:800;font-size:16px;color:${total >= 0 ? 'var(--accent)' : '#ef4444'};">${total.toLocaleString('ru')} ₴</span>
             <i data-lucide="chevron-right" style="width:16px;height:16px;color:var(--text3);"></i>
           </div>
         </div>
@@ -813,22 +849,20 @@ function renderSalaryScreen() {
 
   } else if (state.worker && !state.year) {
     // Уровень 2: года сотрудника
-    title.textContent = state.worker;
-    const rows = manualReports.filter(s => s.worker_name === state.worker);
+    title.textContent = getWorkerDisplayName(state.worker);
+    const rows = salaryEntries.filter(s => s.worker_name === state.worker);
     const years = [...new Set(rows.map(s => s.date.slice(0, 4)))].sort((a, b) => b - a);
     container.innerHTML = years.map(year => {
       const yearRows = rows.filter(s => s.date.startsWith(year));
       const total = yearRows.reduce((sum, s) => sum + Number(s.amount), 0);
-      const autoTotal = yearRows.reduce((sum, s) => sum + calcDaySalary(state.worker, s.date), 0);
-      const isOff = getSalaryDeviationPct(total, autoTotal) > 0.10;
       return `
         <div class="sal-nav-row" onclick="salaryNavPush({worker:'${financeEscapeAttr(state.worker)}',year:'${year}'})">
           <div>
             <div style="font-weight:700;font-size:15px;">${year}</div>
-            <div style="font-size:12px;color:var(--text3);">Ориентир: ${autoTotal.toLocaleString('ru')} ₴</div>
+            <div style="font-size:12px;color:var(--text3);">Записей: ${yearRows.length}</div>
           </div>
           <div style="display:flex;align-items:center;gap:10px;">
-            <span style="font-weight:800;font-size:16px;color:${isOff ? '#ef4444' : 'var(--yellow)'};">${total.toLocaleString('ru')} ₴</span>
+            <span style="font-weight:800;font-size:16px;color:${total >= 0 ? 'var(--accent)' : '#ef4444'};">${total.toLocaleString('ru')} ₴</span>
             <i data-lucide="chevron-right" style="width:16px;height:16px;color:var(--text3);"></i>
           </div>
         </div>
@@ -840,22 +874,20 @@ function renderSalaryScreen() {
     const MONTH_NAMES = ['Январь','Февраль','Март','Апрель','Май','Июнь',
       'Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
     title.textContent = state.year;
-    const rows = manualReports.filter(s => s.worker_name === state.worker && s.date.startsWith(state.year));
+    const rows = salaryEntries.filter(s => s.worker_name === state.worker && s.date.startsWith(state.year));
     const months = [...new Set(rows.map(s => s.date.slice(5, 7)))].sort((a, b) => b - a);
     container.innerHTML = months.map(m => {
       const ym = `${state.year}-${m}`;
       const monthRows = rows.filter(s => s.date.startsWith(ym));
       const total = monthRows.reduce((sum, s) => sum + Number(s.amount), 0);
-      const autoTotal = monthRows.reduce((sum, s) => sum + calcDaySalary(state.worker, s.date), 0);
-      const isOff = getSalaryDeviationPct(total, autoTotal) > 0.10;
       return `
         <div class="sal-nav-row" onclick="salaryNavPush({worker:'${financeEscapeAttr(state.worker)}',year:'${state.year}',month:'${m}'})">
           <div>
             <div style="font-weight:700;font-size:15px;">${MONTH_NAMES[parseInt(m)-1]}</div>
-            <div style="font-size:12px;color:var(--text3);">Ориентир: ${autoTotal.toLocaleString('ru')} ₴</div>
+            <div style="font-size:12px;color:var(--text3);">Записей: ${monthRows.length}</div>
           </div>
           <div style="display:flex;align-items:center;gap:10px;">
-            <span style="font-weight:800;font-size:16px;color:${isOff ? '#ef4444' : 'var(--yellow)'};">${total.toLocaleString('ru')} ₴</span>
+            <span style="font-weight:800;font-size:16px;color:${total >= 0 ? 'var(--accent)' : '#ef4444'};">${total.toLocaleString('ru')} ₴</span>
             <i data-lucide="chevron-right" style="width:16px;height:16px;color:var(--text3);"></i>
           </div>
         </div>
@@ -863,16 +895,15 @@ function renderSalaryScreen() {
     }).join('') || '<div style="color:var(--text3);padding:16px 0;">Нет записей</div>';
 
   } else if (state.worker && state.year && state.month) {
-    // Уровень 4: дни → заказы
+    // Уровень 4: дни → записи
     const MONTH_NAMES = ['Январь','Февраль','Март','Апрель','Май','Июнь',
       'Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
     const ym = `${state.year}-${state.month}`;
     title.textContent = `${MONTH_NAMES[parseInt(state.month)-1]} ${state.year}`;
-    const rows = manualReports
+    const rows = salaryEntries
       .filter(s => s.worker_name === state.worker && s.date.startsWith(ym))
-      .sort((a, b) => b.date.localeCompare(a.date));
+      .sort((a, b) => b.date.localeCompare(a.date) || String(b.created_at || '').localeCompare(String(a.created_at || '')));
     const total = rows.reduce((sum, s) => sum + Number(s.amount), 0);
-    const autoTotal = rows.reduce((sum, s) => sum + calcDaySalary(state.worker, s.date), 0);
 
     // Группируем по дням
     const byDay = {};
@@ -883,46 +914,25 @@ function renderSalaryScreen() {
     const sortedDays = Object.keys(byDay).sort((a, b) => b.localeCompare(a));
 
     const daysHtml = sortedDays.map(date => {
-      const entry = byDay[date][0];
-      const manualAmount = Number(entry.amount) || 0;
-      const autoAmount = calcDaySalary(state.worker, date);
-      const diffPct = getSalaryDeviationPct(manualAmount, autoAmount);
-      const isOff = diffPct > 0.10;
-      const summary = getWorkerCompletedOrdersSummary(state.worker, date);
-      const ordersHtml = summary.orders.length
-        ? '<div style="display:flex;flex-direction:column;gap:6px;margin-top:10px;">'
-          + summary.orders.map(order => `<div style="font-size:12px;color:var(--text3);">${escapeHtml(order.id)} · ${escapeHtml(order.car || '—')}</div>`).join('')
-          + '</div>'
-        : '<div style="font-size:12px;color:var(--text3);margin-top:10px;">Заказов нет</div>';
+      const dayRows = byDay[date];
+      const dayTotal = dayRows.reduce((sum, s) => sum + Number(s.amount), 0);
       return `<div style="padding:10px 0;border-bottom:1px solid var(--border);">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:8px;">
           <div>
             <div style="font-size:14px;font-weight:600;color:var(--text2);">${formatDate(date)}</div>
-            <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:6px;font-size:12px;color:var(--text3);">
-              <span>Выполнено: ${summary.count}</span>
-              <span>Сумма заказов: ${summary.totalAmount.toLocaleString('ru')} ₴</span>
-            </div>
+            <div style="margin-top:6px;font-size:12px;color:var(--text3);">Записей: ${dayRows.length}</div>
           </div>
           <div style="text-align:right;">
-            <div style="font-size:12px;color:var(--text3);">Ориентир: <span style="font-weight:700;color:var(--accent);">${autoAmount.toLocaleString('ru')} ₴</span></div>
-            <div style="font-size:14px;font-weight:800;color:${isOff ? '#ef4444' : 'var(--yellow)'};margin-top:4px;">Внесено: ${manualAmount.toLocaleString('ru')} ₴</div>
-            ${autoAmount > 0 ? `<div style="font-size:11px;color:${isOff ? '#ef4444' : 'var(--text3)'};margin-top:2px;">Отклонение: ${Math.round(diffPct * 100)}%</div>` : ''}
+            <div style="font-size:14px;font-weight:800;color:${dayTotal >= 0 ? 'var(--accent)' : '#ef4444'};margin-top:4px;">${dayTotal.toLocaleString('ru')} ₴</div>
           </div>
         </div>
-        <div style="display:flex;justify-content:flex-end;">
-          <button class="icon-btn" title="Удалить" onclick="deleteSalaryEntry('${entry.id}', '${ym}')"
-            style="width:24px;height:24px;border-radius:6px;">
-            <i data-lucide="trash-2" style="width:10px;height:10px;"></i>
-          </button>
-        </div>
-        ${ordersHtml}
+        <div style="padding-left:10px;">${dayRows.map(entry => renderOwnerSalaryEntryRow(entry, { showEdit: true })).join('')}</div>
       </div>`;
     }).join('');
 
     container.innerHTML = `
       <div style="font-size:13px;color:var(--text3);margin-bottom:12px;">
-        Ориентир за месяц: <span style="font-weight:800;color:var(--accent);font-size:15px;">${autoTotal.toLocaleString('ru')} ₴</span>
-        <span style="margin-left:10px;">Внесено: <span style="font-weight:800;color:${getSalaryDeviationPct(total, autoTotal) > 0.10 ? '#ef4444' : 'var(--yellow)'};font-size:15px;">${total.toLocaleString('ru')} ₴</span></span>
+        Итого за месяц: <span style="font-weight:800;color:${total >= 0 ? 'var(--accent)' : '#ef4444'};font-size:15px;">${total.toLocaleString('ru')} ₴</span>
       </div>
       ${daysHtml || '<div style="color:var(--text3);padding:16px 0;">Нет записей</div>'}
     `;
