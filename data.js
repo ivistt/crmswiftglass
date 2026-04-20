@@ -30,6 +30,7 @@ function getFriendlyApiErrorMessage(raw, status = 0) {
   if (normalized === 'Comment required') return 'Комментарий обязателен';
   if (normalized === 'Payment method required') return 'Выберите способ оплаты';
   if (normalized === 'Invalid cash account') return 'Некорректный тип кассы';
+  if (normalized === 'Invalid manual salary entry') return 'Заполните сотрудника, заказ, сумму и комментарий';
   if (normalized === 'Forbidden cash entry') return 'Нет доступа к этой кассовой записи';
   if (normalized === 'Forbidden cash worker') return 'Нет доступа к кассе этого сотрудника';
   if (normalized === 'Order is not active') return 'Заказ не в работе или отменён';
@@ -277,10 +278,11 @@ async function sbInsertWorkerSalary(entry) {
 }
 
 async function sbUpdateWorkerSalary(id, amount) {
+  const body = (amount && typeof amount === 'object') ? amount : { amount };
   const res = await fetch(`${WORKER_URL}/api/salaries/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     headers: getHeaders(),
-    body: JSON.stringify({ amount }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) await throwApiError(res);
   const rows = await res.json();
@@ -956,6 +958,10 @@ function getOrderCardStateClass(order) {
 
 function isManualSalaryReportEntry(entry) {
   return !!entry && entry.order_id === MANUAL_SALARY_REPORT_ORDER_ID && Number(entry.amount) > 0;
+}
+
+function isOwnerManualSalaryEntry(entry) {
+  return !!entry && entry.entry_type === 'manual';
 }
 
 function isSalaryWithdrawalEntry(entry) {

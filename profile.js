@@ -79,7 +79,7 @@ function renderProfile() {
     const relevantSalaryEntries = workerSalaries.filter(isRelevantSalaryEntry);
     const today = getLocalDateString();
     const accTotal = getSalaryAccumulatedForWithdraw(currentWorkerName, workerSalaries);
-    const todayAmount = getSalaryAccrualForDate(relevantSalaryEntries, today);
+    const todayAmount = getSalaryAccrualForDateWithExpectedBase(currentWorkerName, relevantSalaryEntries, today);
     const salaryHistoryHtml = buildWorkerSalaryHistory(currentWorkerName, relevantSalaryEntries);
     el.innerHTML = ''
       + '<div class="profile-header">'
@@ -107,11 +107,11 @@ function renderProfile() {
   const workedAssistants = getSeniorWorkedAssistants();
   const relevantSalaryEntries = workerSalaries.filter(isRelevantSalaryEntry);
   const accTotal = getSalaryAccumulatedForWithdraw(currentWorkerName, workerSalaries);
-  const todayAmount = getSalaryAccrualForDate(relevantSalaryEntries, today);
+  const todayAmount = getSalaryAccrualForDateWithExpectedBase(currentWorkerName, relevantSalaryEntries, today);
   const todaySummary = getWorkerCompletedOrdersSummary(currentWorkerName, today);
   const salaryHistoryHtml = buildWorkerSalaryHistory(currentWorkerName, relevantSalaryEntries);
   const assistantRelevantEntries = assistantWorkerSalaries.filter(isRelevantSalaryEntry);
-  const assistantTodayAmount = selectedAssistant ? getSalaryAccrualForDate(assistantRelevantEntries, today) : 0;
+  const assistantTodayAmount = selectedAssistant ? getSalaryAccrualForDateWithExpectedBase(selectedAssistant.name, assistantRelevantEntries, today) : 0;
   const assistantAccTotal = selectedAssistant ? getSalaryAccumulatedForWithdraw(selectedAssistant.name, assistantWorkerSalaries) : 0;
   const assistantTodaySummary = selectedAssistant
     ? getWorkerCompletedOrdersSummary(selectedAssistant.name, today)
@@ -205,6 +205,28 @@ function getSalaryAccrualForDate(entries, date) {
     .reduce((sum, entry) => sum + Number(entry.amount), 0);
 }
 
+function getSalaryBaseEntryId() {
+  return (typeof _dailyBaseOrderId === 'function') ? _dailyBaseOrderId() : 'Ставка за день';
+}
+
+function hasSalaryBaseEntry(entries, date) {
+  const baseOrderId = getSalaryBaseEntryId();
+  return (entries || []).some(entry => entry.date === date && entry.order_id === baseOrderId);
+}
+
+function getSalaryAccrualForDateWithExpectedBase(workerName, entries, date) {
+  const relevantEntries = (entries || []).filter(isRelevantSalaryEntry);
+  let total = getSalaryAccrualForDate(relevantEntries, date);
+  if (typeof calcDailyBaseSalary !== 'function') return total;
+
+  const expectedBase = Number(calcDailyBaseSalary(workerName, date)) || 0;
+  if (expectedBase && !hasSalaryBaseEntry(relevantEntries, date)) {
+    total += expectedBase;
+  }
+
+  return total;
+}
+
 function getSalaryAccumulatedForWithdraw(workerName, entries) {
   const relevantEntries = (entries || []).filter(isRelevantSalaryEntry);
   let total = relevantEntries.reduce((sum, s) => sum + Number(s.amount), 0);
@@ -217,8 +239,7 @@ function getSalaryAccumulatedForWithdraw(workerName, entries) {
   dates.forEach(date => {
     const expectedBase = Number(calcDailyBaseSalary(workerName, date)) || 0;
     if (!expectedBase) return;
-    const hasBaseEntry = relevantEntries.some(entry => entry.date === date && entry.order_id === 'Ставка за день');
-    if (!hasBaseEntry) total += expectedBase;
+    if (!hasSalaryBaseEntry(relevantEntries, date)) total += expectedBase;
   });
 
   return total;
@@ -398,7 +419,10 @@ function renderSalaryOrdersList(orderItems) {
       return '<div style="padding:8px 0;border-bottom:1px solid var(--border);">'
         + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;font-size:12px;color:var(--text2);">'
         + '<div style="min-width:0;">'
-        + '<div style="font-weight:800;color:var(--text);">' + escapeHtml(item.id) + ' · ' + escapeHtml(item.car || '—') + '</div>'
+        + '<div style="font-weight:800;color:var(--text);display:flex;align-items:center;gap:6px;flex-wrap:wrap;">'
+        + '<span>' + escapeHtml(item.id) + ' · ' + escapeHtml(item.car || '—') + '</span>'
+        + '<span style="font-size:10px;font-weight:900;color:var(--accent);background:rgba(29,233,182,.12);border:1px solid rgba(29,233,182,.22);border-radius:999px;padding:2px 6px;">Авто</span>'
+        + '</div>'
         + breakdownHtml
         + '</div>'
         + '<span style="font-weight:800;color:var(--accent);white-space:nowrap;">' + (Number(item.amount) || 0).toLocaleString('ru') + ' ₴</span>'
@@ -449,7 +473,7 @@ function buildWorkerSalaryHistory(workerName, entries) {
         const accruals = dateEntries.filter(entry => !isSalaryWithdrawalEntry(entry));
         const summary = getWorkerCompletedOrdersSummary(workerName, date);
         const orderIds = new Set((summary.orders || []).map(order => order.id));
-        const otherAccruals = accruals.filter(entry => !orderIds.has(entry.order_id));
+        const otherAccruals = accruals.filter(entry => isOwnerManualSalaryEntry(entry) || !orderIds.has(entry.order_id));
         const accrualAmount = accruals.reduce((sum, entry) => sum + Number(entry.amount), 0);
         const withdrawalsAmount = withdrawals.reduce((sum, entry) => sum + Number(entry.amount), 0);
         const totalForDay = accrualAmount + withdrawalsAmount;
@@ -457,10 +481,16 @@ function buildWorkerSalaryHistory(workerName, entries) {
         const ordersHtml = renderSalaryOrdersList(summary.orders);
         const accrualsHtml = otherAccruals.length
           ? '<div style="margin-top:10px;display:flex;flex-direction:column;gap:6px;">'
-            + otherAccruals.map(entry => '<div style="display:flex;justify-content:space-between;gap:12px;font-size:12px;color:var(--text2);">'
-              + '<span>' + escapeHtml(entry.order_id === WORK_ATTENDANCE_ORDER_ID ? 'Выход в работу' : (entry.order_id === MANUAL_SALARY_REPORT_ORDER_ID ? 'Дневная ЗП' : `Заказ ${entry.order_id || '—'}`)) + '</span>'
-              + '<span style="font-weight:800;color:var(--accent);white-space:nowrap;">' + Number(entry.amount).toLocaleString('ru') + ' ₴</span>'
-              + '</div>').join('')
+            + otherAccruals.map(entry => {
+              const isManual = isOwnerManualSalaryEntry(entry);
+              const label = entry.order_id === WORK_ATTENDANCE_ORDER_ID
+                ? 'Выход в работу'
+                : (entry.order_id === MANUAL_SALARY_REPORT_ORDER_ID ? 'Дневная ЗП' : `${isManual ? 'Ручная запись' : 'Заказ'} ${entry.order_id || '—'}`);
+              return '<div style="display:flex;justify-content:space-between;gap:12px;font-size:12px;color:var(--text2);">'
+                + '<span>' + escapeHtml(label) + (isManual && entry.comment ? '<div style="font-size:11px;color:var(--text3);margin-top:2px;">' + escapeHtml(entry.comment) + '</div>' : '') + '</span>'
+                + '<span style="font-weight:800;color:' + (Number(entry.amount) >= 0 ? 'var(--accent)' : '#ef4444') + ';white-space:nowrap;">' + Number(entry.amount).toLocaleString('ru') + ' ₴</span>'
+                + '</div>';
+            }).join('')
             + '</div>'
           : '';
         const withdrawalsHtml = withdrawals.length

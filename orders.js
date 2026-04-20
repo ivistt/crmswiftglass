@@ -1726,6 +1726,7 @@ function recalcTotal(mode = 'init') {
 
 function validateOrderRequiredFields(data) {
   const status = document.getElementById('f-order-status')?.value || '';
+  const serviceTypeRequired = !data.onlySale;
   const missing = [];
 
   if (status === '') {
@@ -1737,7 +1738,7 @@ function validateOrderRequiredFields(data) {
     if (!data.manager) missing.push('менеджер');
     if (!data.phone) missing.push('номер телефона');
     if (!data.car) missing.push('автомобиль');
-    if (!data.serviceType) missing.push('тип услуги');
+    if (serviceTypeRequired && !data.serviceType) missing.push('тип услуги');
   }
 
   if (status === 'inWork') {
@@ -1746,7 +1747,7 @@ function validateOrderRequiredFields(data) {
     if (!data.phone) missing.push('номер телефона');
     if (!data.car) missing.push('автомобиль');
     if (!data.manager) missing.push('менеджер');
-    if (!data.serviceType) missing.push('тип услуги');
+    if (serviceTypeRequired && !data.serviceType) missing.push('тип услуги');
   }
 
   if (status === 'ownWarehouse') {
@@ -2349,10 +2350,11 @@ async function _upsertOrderSalaries(order) {
   try {
     existingInDb = await sbFetchSalariesByOrder(order.id) || [];
   } catch (e) { /* если упало — продолжаем с пустым массивом */ }
+  const automaticEntriesInDb = existingInDb.filter(entry => !isOwnerManualSalaryEntry(entry));
 
   // После первого выполнения заказа ЗП по этому order_id считается зафиксированной:
   // последующие правки сумм/полей заказа не должны менять уже начисленные записи.
-  if (order.workerDone && existingInDb.length) {
+  if (order.workerDone && automaticEntriesInDb.length) {
     if (typeof workerSalaries !== 'undefined') {
       try {
         workerSalaries = await sbFetchWorkerSalaries(currentWorkerName);
@@ -2361,16 +2363,16 @@ async function _upsertOrderSalaries(order) {
     return;
   }
 
-  const workerNamesToProcess = new Set([...Object.keys(amounts), ...existingInDb.map(s => s.worker_name)]);
-  existingInDb.forEach(s => affectedWorkers.add(s.worker_name));
+  const workerNamesToProcess = new Set([...Object.keys(amounts), ...automaticEntriesInDb.map(s => s.worker_name)]);
+  automaticEntriesInDb.forEach(s => affectedWorkers.add(s.worker_name));
 
   for (const workerName of workerNamesToProcess) {
     const amount = amounts[workerName] || 0;
-    const existingEntry = existingInDb.find(s => s.worker_name === workerName);
+    const existingEntry = automaticEntriesInDb.find(s => s.worker_name === workerName);
 
     if (amount > 0) {
       if (!existingEntry) {
-        await sbInsertWorkerSalary({ worker_name: workerName, date: order.date, amount, order_id: order.id });
+        await sbInsertWorkerSalary({ worker_name: workerName, date: order.date, amount, order_id: order.id, entry_type: 'auto' });
       } else if (existingEntry.amount !== String(amount)) {
         await sbUpdateWorkerSalary(existingEntry.id, amount);
       }

@@ -461,9 +461,86 @@ function renderSalaryRowsCompact(ym) {
 
 // Стек навигации: 'workers' | { anomalies: true } | { worker: name } | { worker, year } | { worker, year, month } | { periodMonth } | { periodMonth, periodDay }
 let salaryNavStack = [];
+let editingManualSalaryId = '';
 
-function openSalaryDetail() {
+function getOwnerManualSalaryEntries(entries = allSalaries) {
+  return (entries || []).filter(isOwnerManualSalaryEntry);
+}
+
+function renderOwnerManualSalaryPanel() {
+  const workerOptions = (workers || [])
+    .slice()
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ru'))
+    .map(worker => `<option value="${financeEscapeAttr(worker.name)}">${escapeHtml(getWorkerDisplayName(worker.name))}</option>`)
+    .join('');
+  const orderOptions = (orders || [])
+    .slice()
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || String(b.id || '').localeCompare(String(a.id || '')))
+    .map(order => {
+      const label = `${order.id} · ${order.car || order.client || '—'}${order.date ? ' · ' + formatDate(order.date) : ''}`;
+      return `<option value="${financeEscapeAttr(order.id)}">${escapeHtml(label)}</option>`;
+    })
+    .join('');
+  const entries = getOwnerManualSalaryEntries()
+    .slice()
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+  const entriesHtml = entries.length
+    ? entries.map(entry => {
+      const amount = Number(entry.amount) || 0;
+      return `<div style="padding:10px 0;border-bottom:1px solid var(--border);">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+          <div style="min-width:0;">
+            <div style="font-size:13px;font-weight:800;color:var(--text);">${escapeHtml(getWorkerDisplayName(entry.worker_name))}</div>
+            <div style="font-size:12px;color:var(--text3);margin-top:3px;">${formatDate(entry.date)} · Заказ ${escapeHtml(entry.order_id || '—')}</div>
+            <div style="font-size:12px;color:var(--text2);margin-top:5px;">${escapeHtml(entry.comment || '')}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+            <span style="font-size:13px;font-weight:900;color:${amount >= 0 ? 'var(--accent)' : '#ef4444'};white-space:nowrap;">${amount.toLocaleString('ru')} ₴</span>
+            <button class="icon-btn" title="Редактировать" onclick="startEditManualSalary('${entry.id}')" style="width:28px;height:28px;border-radius:7px;">
+              <i data-lucide="pencil" style="width:12px;height:12px;"></i>
+            </button>
+          </div>
+        </div>
+      </div>`;
+    }).join('')
+    : '<div style="font-size:12px;color:var(--text3);padding:8px 0;">Ручных записей пока нет</div>';
+
+  return `<div class="profile-today-card" style="margin-bottom:12px;">
+    <div class="profile-today-label"><i data-lucide="plus-circle" style="width:15px;height:15px;"></i> Ручная запись ЗП</div>
+    <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;margin-top:12px;">
+      <div class="form-group">
+        <label class="form-label">Сотрудник</label>
+        <select class="form-select" id="manual-salary-worker">${workerOptions}</select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Дата</label>
+        <input class="form-input" type="date" id="manual-salary-date" value="${getLocalDateString()}">
+      </div>
+    </div>
+    <div class="form-group" style="margin-top:10px;">
+      <label class="form-label">Заказ</label>
+      <select class="form-select" id="manual-salary-order">${orderOptions}</select>
+    </div>
+    <div class="form-group" style="margin-top:10px;">
+      <label class="form-label">Сумма (+ или -)</label>
+      <input class="form-input" type="number" id="manual-salary-amount" placeholder="например 500 или -300">
+    </div>
+    <div class="form-group" style="margin-top:10px;">
+      <label class="form-label">Комментарий</label>
+      <textarea class="form-input" id="manual-salary-comment" rows="2" placeholder="За что начисление или списание"></textarea>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:12px;">
+      <button class="btn-primary" id="manual-salary-save-btn" onclick="saveOwnerManualSalary()">Добавить запись</button>
+      <button class="btn-secondary" id="manual-salary-cancel-btn" onclick="cancelEditManualSalary()" style="display:none;">Отмена</button>
+    </div>
+    <div style="margin-top:16px;font-size:12px;font-weight:800;color:var(--text3);letter-spacing:0.04em;">РУЧНЫЕ ЗАПИСИ</div>
+    <div style="margin-top:6px;">${entriesHtml}</div>
+  </div>`;
+}
+
+async function openSalaryDetail() {
   salaryNavStack = [];
+  if (currentRole === 'owner') await loadAllSalaries();
   renderSalaryScreen();
   document.getElementById('salary-detail-modal').classList.add('active');
   initIcons();
@@ -487,10 +564,7 @@ function renderSalaryScreen() {
     title.textContent = 'Зарплаты сотрудников';
     const workerNames = [...new Set(manualReports.map(s => s.worker_name))].sort();
     const anomalies = getSalaryAnomalies(manualReports);
-    if (!workerNames.length && !anomalies.length) {
-      container.innerHTML = `<div class="empty-state"><div class="empty-state-icon">${icon('coins')}</div><h3>Данных нет</h3></div>`;
-      return;
-    }
+    const manualSalaryHtml = renderOwnerManualSalaryPanel();
     const anomaliesHtml = `
       <div class="sal-nav-row" onclick="salaryNavPush({anomalies:true})" style="
         margin-bottom:10px;
@@ -554,7 +628,7 @@ function renderSalaryScreen() {
         </div>
       `;
     }).join('');
-    container.innerHTML = analyticsHtml + anomaliesHtml + workersHtml;
+    container.innerHTML = manualSalaryHtml + analyticsHtml + anomaliesHtml + (workersHtml || '');
 
   } else if (state.anomalies) {
     title.textContent = 'Аномалии ЗП';
@@ -798,6 +872,82 @@ function salaryNavBack() {
   renderSalaryScreen();
 }
 
+function fillManualSalaryForm(entry) {
+  const set = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) el.value = value ?? '';
+  };
+  set('manual-salary-worker', entry?.worker_name || '');
+  set('manual-salary-date', entry?.date || getLocalDateString());
+  set('manual-salary-order', entry?.order_id || '');
+  set('manual-salary-amount', entry?.amount ?? '');
+  set('manual-salary-comment', entry?.comment || '');
+  const saveBtn = document.getElementById('manual-salary-save-btn');
+  const cancelBtn = document.getElementById('manual-salary-cancel-btn');
+  if (saveBtn) saveBtn.textContent = editingManualSalaryId ? 'Сохранить запись' : 'Добавить запись';
+  if (cancelBtn) cancelBtn.style.display = editingManualSalaryId ? '' : 'none';
+}
+
+function startEditManualSalary(id) {
+  const entry = getOwnerManualSalaryEntries().find(row => row.id === id);
+  if (!entry) return;
+  editingManualSalaryId = id;
+  fillManualSalaryForm(entry);
+  document.getElementById('manual-salary-worker')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function cancelEditManualSalary() {
+  editingManualSalaryId = '';
+  fillManualSalaryForm(null);
+}
+
+async function saveOwnerManualSalary() {
+  if (currentRole !== 'owner') return;
+  const workerName = document.getElementById('manual-salary-worker')?.value || '';
+  const date = document.getElementById('manual-salary-date')?.value || getLocalDateString();
+  const orderId = document.getElementById('manual-salary-order')?.value || '';
+  const amount = Number(document.getElementById('manual-salary-amount')?.value);
+  const comment = (document.getElementById('manual-salary-comment')?.value || '').trim();
+
+  if (!workerName) return showToast('Выберите сотрудника', 'error');
+  if (!orderId) return showToast('Выберите заказ', 'error');
+  if (!Number.isFinite(amount) || amount === 0) return showToast('Введите сумму, можно с минусом', 'error');
+  if (!comment) return showToast('Комментарий обязателен', 'error');
+
+  const saveBtn = document.getElementById('manual-salary-save-btn');
+  if (saveBtn) saveBtn.disabled = true;
+
+  const payload = {
+    worker_name: workerName,
+    date,
+    amount,
+    order_id: orderId,
+    entry_type: 'manual',
+    comment,
+    created_by: currentWorkerName || 'owner',
+  };
+
+  try {
+    const saved = editingManualSalaryId
+      ? await sbUpdateWorkerSalary(editingManualSalaryId, payload)
+      : await sbInsertWorkerSalary(payload);
+    if (editingManualSalaryId) {
+      const idx = allSalaries.findIndex(row => row.id === editingManualSalaryId);
+      if (idx !== -1) allSalaries[idx] = { ...allSalaries[idx], ...saved };
+    } else if (saved) {
+      allSalaries.unshift(saved);
+    }
+    editingManualSalaryId = '';
+    renderSalaryScreen();
+    renderHome();
+    showToast('Ручная запись ЗП сохранена ✓');
+  } catch (e) {
+    showToast('Ошибка: ' + e.message, 'error');
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
+  }
+}
+
 function startEditSalary(id, currentAmount) {
   document.getElementById('sal-display-' + id).style.display = 'none';
   document.getElementById('sal-edit-btn-' + id).style.display = 'none';
@@ -936,6 +1086,9 @@ function buildBackupPayload(freshProblems) {
                             id: s.id, worker_name: s.worker_name,
                             date: s.date, amount: Number(s.amount),
                             order_id: s.order_id || null,
+                            entry_type: s.entry_type || null,
+                            comment: s.comment || null,
+                            created_by: s.created_by || null,
                           })),
     worker_problems:      (freshProblems || []).map(p => ({
                             id: p.id, worker_name: p.worker_name,
@@ -1149,6 +1302,7 @@ async function exportAllJSON() {
     const salaryRows = allSalaries.map(s => ({
       id: s.id, worker_name: s.worker_name,
       date: s.date, amount: Number(s.amount), order_id: s.order_id || null,
+      entry_type: s.entry_type || null, comment: s.comment || null, created_by: s.created_by || null,
     }));
 
     const backup = {
@@ -1278,6 +1432,7 @@ async function exportAllCSV() {
       const salRows = allSalaries.map(s => ({
         id: s.id, worker_name: s.worker_name,
         date: s.date, amount: s.amount, order_id: s.order_id || '',
+        entry_type: s.entry_type || '', comment: s.comment || '', created_by: s.created_by || '',
       }));
       downloadCsv(`worker_salaries_${date}.csv`, makeCsv(salRows));
       await new Promise(r => setTimeout(r, 400));
