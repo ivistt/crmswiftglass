@@ -1698,6 +1698,7 @@ function validateOrderRequiredFields(data) {
     if (!data.manager) missing.push('менеджер');
     if (!data.phone) missing.push('номер телефона');
     if (!data.car) missing.push('автомобиль');
+    if (!data.serviceType) missing.push('тип услуги');
   }
 
   if (status === 'inWork') {
@@ -1706,6 +1707,7 @@ function validateOrderRequiredFields(data) {
     if (!data.phone) missing.push('номер телефона');
     if (!data.car) missing.push('автомобиль');
     if (!data.manager) missing.push('менеджер');
+    if (!data.serviceType) missing.push('тип услуги');
   }
 
   if (status === 'ownWarehouse') {
