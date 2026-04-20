@@ -1899,6 +1899,9 @@ input[type="datetime-local"] {
   background: var(--surface3);
 }
 .form-textarea { resize: vertical; min-height: 72px; }
+#order-modal textarea.form-input {
+  resize: none;
+}
 .form-input[readonly] {
   background: var(--surface);
   color: var(--text3);

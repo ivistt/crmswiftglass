@@ -304,7 +304,7 @@ function goBackFromOrdersList() {
     return;
   }
 
-  openOrdersScreen();
+  goHome();
 }
 
 // ---------- РЕНДЕР КАРТОЧКИ ЗАКАЗА ----------
@@ -1745,11 +1745,8 @@ function openOrderModal(id) {
   const tonExtEl = document.getElementById('f-toning-external');
   if (tonExtEl) tonExtEl.addEventListener('change', () => { recalcFullMargins(); recalcTotal(); });
 
-  // Разворачиваем финансовый блок при открытии
   const finBody = document.getElementById('finance-section-body');
-  const finChevron = document.getElementById('finance-chevron');
   if (finBody) finBody.style.display = 'block';
-  if (finChevron) finChevron.style.transform = 'rotate(180deg)';
 
   // Прячем live-total пока нет данных
   const liveTotalEl = document.getElementById('modal-live-total');
@@ -1921,7 +1918,7 @@ function fillOrderForm(o) {
 
 function clearOrderForm() {
   const ids = [
-    'f-date','f-time','f-responsible','f-client','f-phone','f-address','f-vin','f-car','f-code',
+    'f-date','f-time','f-responsible','f-client','f-phone','f-address','f-vin','f-extra-note','f-car','f-code',
     'f-glass-manufacturer','f-notes','f-mount','f-service-type','f-molding',
     'f-extra-work','f-tatu','f-toning','f-delivery','f-warehouse','f-warehouse-code','f-configuration',
     'f-payment-status','f-check','f-supplier-left','f-debt','f-client-left','f-debt-date','f-total',
@@ -1971,16 +1968,6 @@ function setPriceFieldsLocked(locked) {
       el.removeAttribute('disabled');
     }
   });
-}
-
-// Collapse финансового блока
-function toggleFinanceSection() {
-  const body = document.getElementById('finance-section-body');
-  const chevron = document.getElementById('finance-chevron');
-  if (!body) return;
-  const isOpen = body.style.display !== 'none';
-  body.style.display = isOpen ? 'none' : 'block';
-  if (chevron) chevron.style.transform = isOpen ? '' : 'rotate(180deg)';
 }
 
 // Автопересчёт маржи и всех выплат

@@ -731,6 +731,10 @@
             <textarea class="form-input" id="f-vin" placeholder="17 символов" maxlength="17" autocomplete="off" rows="2"></textarea>
           </div>
           <div class="form-group">
+            <label class="form-label">Доп заметка</label>
+            <textarea class="form-input" id="f-extra-note" placeholder="Временная заметка, не сохраняется" rows="2"></textarea>
+          </div>
+          <div class="form-group">
             <label class="form-label">🚗 Автомобиль</label>
             <div class="ac-wrap" id="ac-car-wrap">
               <input class="form-input" type="text" id="f-car" placeholder="Марка, модель"
@@ -858,15 +862,11 @@
         </div>
       </div>
 
-      <!-- ── СЕКЦИЯ 5: ФИНАНСЫ (свёрнута по умолчанию) ── -->
-      <div class="form-section form-section--collapsible" id="finance-section" data-order-modal-panel="finance">
-        <div class="form-section-title form-section-title--finance form-section-title--toggle"
-             onclick="toggleFinanceSection()">
-          <span style="display:flex;align-items:center;gap:6px;">
-            <i data-lucide="trending-up" style="width:13px;height:13px;"></i>
-            Финансы
-          </span>
-          <i data-lucide="chevron-down" id="finance-chevron" style="width:14px;height:14px;transition:transform 0.2s; transform: rotate(180deg);"></i>
+      <!-- ── СЕКЦИЯ 5: ФИНАНСЫ ── -->
+      <div class="form-section" id="finance-section" data-order-modal-panel="finance">
+        <div class="form-section-title form-section-title--finance">
+          <i data-lucide="trending-up" style="width:13px;height:13px;"></i>
+          Финансы
         </div>
         <div class="form-section-body" id="finance-section-body" style="display:block;">
           <div class="form-grid" style="margin-top:14px;">

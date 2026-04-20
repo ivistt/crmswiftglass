@@ -1789,10 +1789,15 @@ function renderOwnerCashScreen() {
 function openOrdersScreen() {
   window.currentYearFilter = null;
   currentMonthFilter = null;
+  const titleEl = document.querySelector('#screen-orders .page-title');
+  if (titleEl) {
+    titleEl.innerHTML = `${icon('clipboard-list')} Записи`;
+  }
   initOrderTabs();
-  if (typeof renderYears === 'function') renderYears();
-  setupYearsActions();
-  showScreen('years');
+  setupOrderActions();
+  renderOrders();
+  showScreen('orders');
+  setActiveNav('orders');
 }
 
 function setupYearsActions() {
@@ -1826,13 +1831,10 @@ function goBackFromOrder() {
   if (currentMonthFilter) {
     renderOrdersForMonth(currentMonthFilter);
     showScreen('orders');
-  } else if (currentRole !== 'owner' && currentRole !== 'manager') {
+  } else {
     setupOrderActions();
     renderOrders();
     showScreen('orders');
-  } else {
-    renderMonths();
-    showScreen('months');
   }
 }
 
