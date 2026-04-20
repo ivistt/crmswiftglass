@@ -246,7 +246,6 @@ function getSalaryAccumulatedForWithdraw(workerName, entries) {
 }
 
 function renderWorkerSalarySection({ title, accumulated, todayAmount, todaySummary, withdrawAction, withdrawDisabled, showWithdraw = true, attendanceHtml = '' }) {
-  const safeSummary = todaySummary || { count: 0, orders: [] };
   return ''
     + '<div class="profile-today-card" style="margin-top:12px;">'
     + '<div class="profile-today-label"><i data-lucide="wallet-cards" style="width:15px;height:15px;"></i> ' + escapeHtml(title) + '</div>'
@@ -261,14 +260,9 @@ function renderWorkerSalarySection({ title, accumulated, todayAmount, todaySumma
     + '<div style="padding:14px;background:var(--surface2);border-radius:12px;border:1px solid var(--border);">'
     + '<div style="font-size:11px;font-weight:800;color:var(--text3);letter-spacing:0.05em;">ЗА СЕГОДНЯ</div>'
     + '<div style="font-size:28px;font-weight:900;color:var(--accent);margin-top:8px;">' + todayAmount.toLocaleString('ru') + ' ₴</div>'
-    + '<div style="font-size:11px;color:var(--text3);margin-top:6px;">Выполнено заказов: ' + safeSummary.count + '</div>'
     + '</div>'
     + '</div>'
     + (attendanceHtml ? '<div style="margin-top:12px;">' + attendanceHtml + '</div>' : '')
-    + '<div style="margin-top:16px;">'
-    + '<div style="font-size:12px;font-weight:800;color:var(--text3);letter-spacing:0.04em;margin-bottom:8px;">ЗАКАЗЫ ЗА СЕГОДНЯ</div>'
-    + renderSalaryOrdersList(safeSummary.orders)
-    + '</div>'
     + '</div>';
 }
 
@@ -332,7 +326,6 @@ function renderAssistantSalarySection(assistantWorkers, assistantWorker, todayRe
     `<option value="${escapeHtml(worker.name)}" ${assistantWorker?.name === worker.name ? 'selected' : ''}>${escapeHtml(getWorkerDisplayName(worker.name))}</option>`
   ).join('');
   const hasSelectedAssistant = !!assistantWorker?.name;
-  const safeSummary = todaySummary || { count: 0, orders: [] };
 
   return ''
     + '<div class="profile-today-card" style="margin-top:12px;background:rgba(29,233,182,.06);border-color:rgba(29,233,182,.2);">'
@@ -351,12 +344,7 @@ function renderAssistantSalarySection(assistantWorkers, assistantWorker, todayRe
     + '<div style="padding:14px;background:var(--surface2);border-radius:12px;border:1px solid var(--border);">'
     + '<div style="font-size:11px;font-weight:800;color:var(--text3);letter-spacing:0.05em;">ЗА СЕГОДНЯ</div>'
     + '<div style="font-size:28px;font-weight:900;color:var(--accent);margin-top:8px;">' + todayAmount.toLocaleString('ru') + ' ₴</div>'
-    + '<div style="font-size:11px;color:var(--text3);margin-top:6px;">Выполнено заказов: ' + safeSummary.count + '</div>'
     + '</div>'
-    + '</div>'
-    + '<div style="margin-top:16px;">'
-    + '<div style="font-size:12px;font-weight:800;color:var(--text3);letter-spacing:0.04em;margin-bottom:8px;">ЗАКАЗЫ ЗА СЕГОДНЯ</div>'
-    + renderSalaryOrdersList(safeSummary.orders)
     + '</div>'
     + '</div>';
 }

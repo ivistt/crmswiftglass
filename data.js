@@ -356,6 +356,14 @@ async function sbUpdateCashEntry(id, updates) {
   return rows[0];
 }
 
+async function sbDeleteCashEntry(id) {
+  const res = await fetch(`${WORKER_URL}/api/cash/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers: getHeaders(),
+  });
+  if (!res.ok) await throwApiError(res);
+}
+
 // ── REF DATA ─────────────────────────────────────────────────
 
 async function sbFetchRef(table) {
@@ -1122,8 +1130,8 @@ function canManageDropshippers() { return currentRole === 'owner' || currentWork
 function canViewDashboard() { return currentRole === 'owner' || canManageDropshippers(); }
 function canViewOwnerCash() { return currentRole === 'owner'; }
 function canViewOwnerPayments() { return currentRole === 'owner'; }
-function canViewOwnerToday() { return currentRole === 'owner'; }
-function canViewCalendar() { return currentRole === 'owner'; }
+function canViewOwnerToday() { return currentRole === 'owner' || currentWorkerName === 'Sasha Manager'; }
+function canViewCalendar() { return currentRole === 'owner' || currentWorkerName === 'Sasha Manager'; }
 function canMarkWorkerDone() { return currentRole === 'senior' || currentRole === 'extra'; }
 
 function getClients() {

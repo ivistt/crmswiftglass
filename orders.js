@@ -380,7 +380,7 @@ function renderOrderCard(o) {
               <button class="icon-action-btn" title="Скопировать данные" onclick="event.stopPropagation(); closeOrderActionMenus(); copyOrderSummary('${o.id}')">${icon('clipboard-list')}</button>
               <button class="icon-action-btn" title="Создать дубликат" onclick="event.stopPropagation(); closeOrderActionMenus(); duplicateOrder('${o.id}')">${icon('plus')}</button>
               <button class="icon-action-btn" title="Редактировать" onclick="event.stopPropagation(); closeOrderActionMenus(); openOrderModal('${o.id}')">${icon('pencil')}</button>
-              ${canDeleteListAction ? `<button type="button" class="icon-action-btn icon-action-danger" title="Удалить" onpointerdown="event.stopPropagation()" onclick="deleteOrder('${escapeAttr(o.id)}', event)">${icon('trash-2')}</button>` : ''}
+              ${canDeleteListAction ? `<button type="button" class="icon-action-btn icon-action-danger" title="Полностью удалить заказ" onpointerdown="event.stopPropagation()" onclick="deleteOrder('${escapeAttr(o.id)}', event)">${icon('trash-2')}</button>` : ''}
             </div>
           </div>
         ` : ''}
@@ -694,10 +694,46 @@ function _renderOrdersListWithLoadMore(container, list, signature) {
     ` : '');
 }
 
+function normalizeOrderSearchText(value) {
+  return String(value ?? '')
+    .toLowerCase()
+    .replace(/ё/g, 'е')
+    .trim();
+}
+
+function collectOrderSearchValues(value, values = [], depth = 0) {
+  if (value == null || depth > 4) return values;
+  if (Array.isArray(value)) {
+    value.forEach(item => collectOrderSearchValues(item, values, depth + 1));
+    return values;
+  }
+  if (typeof value === 'object') {
+    Object.values(value).forEach(item => collectOrderSearchValues(item, values, depth + 1));
+    return values;
+  }
+  values.push(String(value));
+  return values;
+}
+
+function orderMatchesSearch(order, query) {
+  const normalizedQuery = normalizeOrderSearchText(query);
+  if (!normalizedQuery) return true;
+
+  const haystack = normalizeOrderSearchText(collectOrderSearchValues(order).join(' '));
+  const haystackDigits = haystack.replace(/\D/g, '');
+  const tokens = normalizedQuery.split(/\s+/).filter(Boolean);
+
+  return tokens.every(token => {
+    if (haystack.includes(token)) return true;
+    const tokenDigits = token.replace(/\D/g, '');
+    return !!tokenDigits && haystackDigits.includes(tokenDigits);
+  });
+}
+
 // ---------- РЕНДЕР СПИСКА ----------
 function renderOrders() {
   populateOrderWorkerFilter();
-  const search = (document.getElementById('filter-search')?.value || '').toLowerCase();
+  const search = document.getElementById('filter-search')?.value || '';
   const dateF  = document.getElementById('filter-date')?.value || '';
   const statF  = document.getElementById('filter-status')?.value || '';
   const workerF = document.getElementById('filter-worker')?.value || '';
@@ -725,12 +761,7 @@ function renderOrders() {
     list = _filterSpecialistOrdersByTab(list);
   }
 
-  if (search) list = list.filter(o =>
-    (o.client  || '').toLowerCase().includes(search) ||
-    (o.car     || '').toLowerCase().includes(search) ||
-    (o.phone   || '').toLowerCase().includes(search) ||
-    (o.id      || '').toLowerCase().includes(search)
-  );
+  if (search) list = list.filter(o => orderMatchesSearch(o, search));
   if (dateF) list = list.filter(o => o.date === dateF);
   if (statF) list = list.filter(o => getEffectivePaymentStatus(o) === statF);
   if (workerF) list = list.filter(o => o.responsible === workerF || o.assistant === workerF || o.manager === workerF);
@@ -768,6 +799,7 @@ function renderOrders() {
 function _isCallOrderVisibleInCurrentContext(o) {
   if (!o?.callStatus || o.ownWarehouse || o.workerDone || o.isCancelled) return false;
   if (currentRole !== 'manager') return true;
+  if (currentWorkerName === 'Sasha Manager') return true;
   if (o.manager !== currentWorkerName) return false;
   if (!o.date) return true;
   return o.date <= tomorrowStr();
@@ -819,7 +851,7 @@ function openOrderDetail(id) {
       <button class="icon-action-btn" title="Скопировать данные" onclick="copyOrderSummary('${o.id}')">${icon('clipboard-list')}</button>
       ${canEdit ? `<button class="icon-action-btn" title="Создать дубликат" onclick="duplicateOrder('${o.id}')">${icon('plus')}</button>` : ''}
       ${canEdit   ? `<button class="icon-action-btn" title="Редактировать" onclick="openOrderModal('${o.id}')">${icon('pencil')}</button>` : ''}
-      ${canDelete ? `<button class="icon-action-btn icon-action-danger" title="Удалить" onclick="deleteOrder('${escapeAttr(o.id)}', event)">${icon('trash-2')}</button>` : ''}
+        ${canDelete ? `<button class="icon-action-btn icon-action-danger" title="Полностью удалить заказ" onclick="deleteOrder('${escapeAttr(o.id)}', event)">${icon('trash-2')}</button>` : ''}
     `;
   }
 
@@ -965,7 +997,7 @@ async function deleteOrder(id, event) {
   event?.stopPropagation?.();
   closeOrderActionMenus();
   if (deletingOrderIds.has(id)) return;
-  if (!confirm('Удалить этот заказ? Это действие нельзя отменить.')) return;
+  if (!confirm('Полностью удалить этот заказ из базы? Это действие нельзя отменить.')) return;
   deletingOrderIds.add(id);
   try {
     await sbDeleteOrder(id);
@@ -1804,6 +1836,16 @@ function fillOrderForm(o) {
     else statusEl.value = '';
   }
   const asEl = document.getElementById('f-assistant');
+  if (asEl) {
+    const assistantValue = o.assistant || '';
+    if (assistantValue && !Array.from(asEl.options).some(opt => opt.value === assistantValue)) {
+      const option = document.createElement('option');
+      option.value = assistantValue;
+      option.textContent = getWorkerDisplayName(assistantValue);
+      asEl.appendChild(option);
+    }
+    asEl.value = assistantValue;
+  }
   // перерисовать чекбоксы комплектации
   const confArr = (o.configuration || '').split(',');
   document.querySelectorAll('#f-configuration-checkboxes input[type="checkbox"]').forEach(el => {
@@ -2353,7 +2395,7 @@ function openYear(year) {
 }
 
 function renderMonths() {
-  const search = (document.getElementById('filter-month-search')?.value || '').toLowerCase();
+  const search = document.getElementById('filter-month-search')?.value || '';
   const filterVal = document.getElementById('filter-month')?.value || '';
 
   const map = {};
@@ -2364,13 +2406,7 @@ function renderMonths() {
     
     const ym = o.date.slice(0, 7);
     if (filterVal && ym !== filterVal) continue;
-    if (search) {
-      const haystack = [o.client, o.phone, o.car, o.id, o.responsible, o.code,
-        o.equipment, o.notes, o.author,
-        o.paymentStatus, o.paymentMethod, o.glass, o.mount, o.molding,
-        o.extraWork, o.tatu, o.toning].map(v => String(v||'')).join(' ').toLowerCase();
-      if (!haystack.includes(search)) continue;
-    }
+    if (search && !orderMatchesSearch(o, search)) continue;
     if (!map[ym]) map[ym] = [];
     map[ym].push(o);
   }
@@ -2423,7 +2459,7 @@ function openMonthOrders(ym) {
 
 function renderOrdersForMonth(ym) {
   populateOrderWorkerFilter();
-  const search = (document.getElementById('filter-search')?.value || '').toLowerCase();
+  const search = document.getElementById('filter-search')?.value || '';
   const dateF  = document.getElementById('filter-date')?.value || '';
   const statF  = document.getElementById('filter-status')?.value || '';
   const workerF = document.getElementById('filter-worker')?.value || '';
@@ -2451,12 +2487,7 @@ function renderOrdersForMonth(ym) {
     list = _filterSpecialistOrdersByTab(list);
   }
 
-  if (search) list = list.filter(o =>
-    (o.client  || '').toLowerCase().includes(search) ||
-    (o.car     || '').toLowerCase().includes(search) ||
-    (o.phone   || '').toLowerCase().includes(search) ||
-    (o.id      || '').toLowerCase().includes(search)
-  );
+  if (search) list = list.filter(o => orderMatchesSearch(o, search));
   if (dateF) list = list.filter(o => o.date === dateF);
   if (statF) list = list.filter(o => getEffectivePaymentStatus(o) === statF);
   if (workerF) list = list.filter(o => o.responsible === workerF || o.assistant === workerF || o.manager === workerF);

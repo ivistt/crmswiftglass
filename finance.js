@@ -393,7 +393,7 @@ function renderFinanceMonth(ym, monthOrders) {
         <!-- Зарплаты сотрудников (из профилей) -->
         <div class="fin-section-title" style="margin-top:16px;display:flex;align-items:center;justify-content:space-between;">
           <span>${icon('coins')} Зарплаты сотрудников</span>
-          <button class="fin-add-salary-btn" onclick="openSalaryDetail()">
+          <button class="fin-add-salary-btn" onclick="openOwnerSalaryScreen()">
             <i data-lucide="external-link" style="width:12px;height:12px;"></i> Подробнее
           </button>
         </div>
@@ -462,6 +462,7 @@ function renderSalaryRowsCompact(ym) {
 // Стек навигации: 'workers' | { anomalies: true } | { worker: name } | { worker, year } | { worker, year, month } | { periodMonth } | { periodMonth, periodDay }
 let salaryNavStack = [];
 let editingManualSalaryId = '';
+let ownerSalarySelectedWorker = '';
 
 function getOwnerManualSalaryEntries(entries = allSalaries) {
   return (entries || []).filter(isOwnerManualSalaryEntry);
@@ -470,6 +471,29 @@ function getOwnerManualSalaryEntries(entries = allSalaries) {
 function getOwnerSalaryEntries(entries = allSalaries) {
   return (entries || [])
     .filter(entry => entry?.worker_name && entry.date && Number(entry.amount) !== 0);
+}
+
+function getOwnerSalaryWorkerNames(entries = getOwnerSalaryEntries()) {
+  const names = new Set();
+  (workers || []).forEach(worker => {
+    if (worker?.name) names.add(worker.name);
+  });
+  (entries || []).forEach(entry => {
+    if (entry?.worker_name) names.add(entry.worker_name);
+  });
+  return Array.from(names).sort((a, b) => String(a).localeCompare(String(b), 'ru'));
+}
+
+function getOwnerSalaryBalance(workerName, entries = getOwnerSalaryEntries()) {
+  return (entries || [])
+    .filter(entry => entry.worker_name === workerName)
+    .reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
+}
+
+function setOwnerSalarySelectedWorker(workerName) {
+  ownerSalarySelectedWorker = ownerSalarySelectedWorker === workerName ? '' : workerName;
+  salaryNavStack = [];
+  renderOwnerSalaryScreen();
 }
 
 function getSalaryEntryKindLabel(entry) {
@@ -484,6 +508,7 @@ function renderOwnerSalaryEntryRow(entry, { showWorker = false, showEdit = false
   const amount = Number(entry.amount) || 0;
   const history = getSalaryEditHistory(entry);
   const canEdit = showEdit && !isSalaryWithdrawalEntry(entry) && !isSalaryEntryClosedByWithdrawal(entry);
+  const canDelete = showEdit && currentRole === 'owner';
   return `<div style="padding:10px 0;border-bottom:1px solid var(--border);">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
       <div style="min-width:0;">
@@ -498,9 +523,238 @@ function renderOwnerSalaryEntryRow(entry, { showWorker = false, showEdit = false
       <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
         <span style="font-size:13px;font-weight:900;color:${amount >= 0 ? 'var(--accent)' : '#ef4444'};white-space:nowrap;">${amount.toLocaleString('ru')} ₴</span>
         ${canEdit ? `<button class="icon-btn" title="Редактировать" onclick="editPendingSalaryEntry('${entry.id}')" style="width:28px;height:28px;border-radius:7px;"><i data-lucide="pencil" style="width:12px;height:12px;"></i></button>` : ''}
+        ${canDelete ? `<button class="icon-btn icon-action-danger" title="Удалить" onclick="deleteSalaryEntry('${entry.id}')" style="width:28px;height:28px;border-radius:7px;"><i data-lucide="trash-2" style="width:12px;height:12px;"></i></button>` : ''}
       </div>
     </div>
   </div>`;
+}
+
+function renderOwnerSalaryOverview(entries = getOwnerSalaryEntries()) {
+  const workerNames = getOwnerSalaryWorkerNames(entries);
+  const rows = workerNames.map(name => ({
+    workerName: name,
+    balance: getOwnerSalaryBalance(name, entries),
+    recordsCount: entries.filter(entry => entry.worker_name === name).length,
+  }));
+  const total = rows.reduce((sum, row) => sum + row.balance, 0);
+
+  return `
+    <div class="fin-month-card" style="margin-bottom:12px;">
+      <div style="padding:14px 16px;border-bottom:1px solid var(--border);">
+        <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">
+          <div>
+            <div class="fin-month-name">Текущая ЗП</div>
+            <div class="fin-month-sub">Баланс считает начисления, ручные записи и снятия</div>
+          </div>
+          <div style="font-size:22px;font-weight:900;color:${total >= 0 ? 'var(--accent)' : '#ef4444'};white-space:nowrap;">${total.toLocaleString('ru')} ₴</div>
+        </div>
+      </div>
+      <div style="padding:12px 16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;">
+        ${rows.length ? rows.map(row => `
+          <div class="owner-cash-worker-row ${ownerSalarySelectedWorker === row.workerName ? 'active' : ''}" onclick="setOwnerSalarySelectedWorker('${financeEscapeAttr(row.workerName)}')">
+            <div>
+              <div class="owner-cash-worker-name">${escapeHtml(getWorkerDisplayName(row.workerName) || row.workerName)}</div>
+              <div style="font-size:11px;color:var(--text3);margin-top:3px;">${row.recordsCount} зап.</div>
+            </div>
+            <div class="owner-cash-worker-balance" style="color:${row.balance >= 0 ? 'var(--accent)' : '#ef4444'};">${row.balance.toLocaleString('ru')} ₴</div>
+          </div>
+        `).join('') : `
+          <div style="font-size:13px;color:var(--text3);">Сотрудники не найдены</div>
+        `}
+      </div>
+    </div>
+  `;
+}
+
+function renderOwnerEmployeeSalaryHistory(workerName, entries = getOwnerSalaryEntries()) {
+  const rows = (entries || [])
+    .filter(entry => entry.worker_name === workerName)
+    .slice()
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || String(b.created_at || '').localeCompare(String(a.created_at || '')));
+  const total = rows.reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
+  const workerKey = String(workerName || '').replace(/[^a-zA-Z0-9_-]+/g, '-');
+
+  if (!rows.length) {
+    return `
+      <div class="fin-month-card owner-cash-history-card">
+        <div class="owner-cash-history-title">
+          <div>
+            <div class="fin-month-name">${escapeHtml(getWorkerDisplayName(workerName) || workerName)}</div>
+            <div class="fin-month-sub">История ЗП сотрудника</div>
+          </div>
+        </div>
+        <div class="empty-state" style="padding:24px 12px;">
+          <div class="empty-state-icon">${icon('receipt')}</div>
+          <h3>Начислений нет</h3>
+          <p>У этого сотрудника пока нет записей ЗП</p>
+        </div>
+      </div>
+    `;
+  }
+
+  const tree = {};
+  for (const entry of rows) {
+    const date = entry.date || 'Без даты';
+    const year = date === 'Без даты' ? 'Без даты' : date.slice(0, 4);
+    const month = date === 'Без даты' ? 'Без даты' : date.slice(0, 7);
+    if (!tree[year]) tree[year] = { total: 0, months: {} };
+    tree[year].total += Number(entry.amount) || 0;
+    if (!tree[year].months[month]) tree[year].months[month] = { total: 0, days: {} };
+    tree[year].months[month].total += Number(entry.amount) || 0;
+    if (!tree[year].months[month].days[date]) tree[year].months[month].days[date] = { total: 0, entries: [] };
+    tree[year].months[month].days[date].total += Number(entry.amount) || 0;
+    tree[year].months[month].days[date].entries.push(entry);
+  }
+
+  const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+  const yearsHtml = Object.keys(tree).sort((a, b) => b.localeCompare(a)).map(year => {
+    const yearData = tree[year];
+    const yearKey = `owner-salary-worker-${workerKey}-year-${year}`;
+    const monthsHtml = Object.keys(yearData.months).sort((a, b) => b.localeCompare(a)).map(monthKey => {
+      const monthData = yearData.months[monthKey];
+      const monthToggleKey = `${yearKey}-month-${monthKey}`;
+      const monthName = monthKey === 'Без даты' ? 'Без даты' : `${monthNames[Number(monthKey.slice(5, 7)) - 1] || monthKey} ${monthKey.slice(0, 4)}`;
+      const daysHtml = Object.keys(monthData.days).sort((a, b) => b.localeCompare(a)).map(day => {
+        const dayData = monthData.days[day];
+        const dayKey = `${monthToggleKey}-day-${day}`;
+        return `
+          <div style="border-bottom:1px solid var(--border);">
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;cursor:pointer;" onclick="toggleProfileMonth('${dayKey}')">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <i data-lucide="chevron-right" style="width:13px;height:13px;color:var(--text3);transition:transform 0.2s;" id="pchevron-${dayKey}"></i>
+                <div style="font-size:13px;color:var(--text2);font-weight:600;">${day === 'Без даты' ? day : formatDate(day)}</div>
+                <div style="font-size:11px;color:var(--text3);">${dayData.entries.length} зап.</div>
+              </div>
+              <div style="font-size:13px;font-weight:800;color:${dayData.total >= 0 ? 'var(--accent)' : '#ef4444'};">${dayData.total.toLocaleString('ru')} ₴</div>
+            </div>
+            <div id="profile-month-body-${dayKey}" style="display:none;padding:0 12px 10px 28px;">
+              ${dayData.entries.map(entry => renderOwnerSalaryEntryRow(entry, { showEdit: true })).join('')}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      return `
+        <div style="border-bottom:1px solid var(--border);">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;cursor:pointer;" onclick="toggleProfileMonth('${monthToggleKey}')">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <i data-lucide="chevron-right" style="width:14px;height:14px;color:var(--text3);transition:transform 0.2s;" id="pchevron-${monthToggleKey}"></i>
+              <div style="font-size:14px;font-weight:700;color:var(--text2);">${monthName}</div>
+              <div style="font-size:11px;color:var(--text3);">${Object.keys(monthData.days).length} дн.</div>
+            </div>
+            <div style="font-size:14px;font-weight:800;color:${monthData.total >= 0 ? 'var(--accent)' : '#ef4444'};">${monthData.total.toLocaleString('ru')} ₴</div>
+          </div>
+          <div id="profile-month-body-${monthToggleKey}" style="display:none;background:var(--surface2);border-radius:0 0 8px 8px;">
+            ${daysHtml}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    return `
+      <div style="border-bottom:1px solid var(--border);">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px;cursor:pointer;" onclick="toggleProfileMonth('${yearKey}')">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <i data-lucide="chevron-right" style="width:14px;height:14px;color:var(--text3);transition:transform 0.2s;" id="pchevron-${yearKey}"></i>
+            <div style="font-size:14px;font-weight:800;color:var(--text);">${year}</div>
+            <div style="font-size:11px;color:var(--text3);">${Object.keys(yearData.months).length} мес.</div>
+          </div>
+          <div style="font-size:14px;font-weight:900;color:${yearData.total >= 0 ? 'var(--accent)' : '#ef4444'};">${yearData.total.toLocaleString('ru')} ₴</div>
+        </div>
+        <div id="profile-month-body-${yearKey}" style="display:none;">
+          ${monthsHtml}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  return `
+    <div class="fin-month-card owner-cash-history-card">
+      <div class="owner-cash-history-title">
+        <div>
+          <div class="fin-month-name">${escapeHtml(getWorkerDisplayName(workerName) || workerName)}</div>
+          <div class="fin-month-sub">История ЗП сотрудника</div>
+        </div>
+        <div style="font-size:18px;font-weight:900;color:${total >= 0 ? 'var(--accent)' : '#ef4444'};white-space:nowrap;">${total.toLocaleString('ru')} ₴</div>
+      </div>
+      <div style="border-top:1px solid var(--border);">
+        ${yearsHtml}
+      </div>
+    </div>
+  `;
+}
+
+function renderOwnerSalaryScreen() {
+  const container = document.getElementById('owner-salary-content');
+  if (!container) return;
+
+  const manualReports = getManualSalaryReports();
+  const salaryEntries = getOwnerSalaryEntries();
+  const anomalies = getSalaryAnomalies(manualReports);
+  const salaryOverviewHtml = renderOwnerSalaryOverview(salaryEntries);
+  const selectedWorkerHistoryHtml = ownerSalarySelectedWorker
+    ? renderOwnerEmployeeSalaryHistory(ownerSalarySelectedWorker, salaryEntries)
+    : '';
+  const pendingSalaryHtml = renderOwnerPendingSalaryPanel();
+  const manualSalaryHtml = renderOwnerManualSalaryPanel();
+  const analyticsHtml = renderSalaryAnalyticsSection(manualReports);
+  const anomaliesHtml = `
+    <div class="sal-nav-row" style="
+      margin-bottom:10px;
+      padding:16px 18px;
+      border:1px solid ${anomalies.length ? 'rgba(239,68,68,0.24)' : 'var(--border)'};
+      background:${anomalies.length ? 'linear-gradient(180deg, rgba(239,68,68,0.10), rgba(239,68,68,0.04))' : 'var(--surface2)'};
+      box-shadow:${anomalies.length ? 'inset 0 1px 0 rgba(255,255,255,0.03)' : 'none'};
+    ">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <div class="worker-avatar" style="
+          width:40px;
+          height:40px;
+          font-size:14px;
+          border-radius:12px;
+          background:${anomalies.length ? 'rgba(239,68,68,0.18)' : 'var(--surface3)'};
+          color:${anomalies.length ? '#ff5f5f' : 'var(--text3)'};
+          border:${anomalies.length ? '1px solid rgba(239,68,68,0.22)' : '1px solid var(--border)'};
+        ">!</div>
+        <div>
+          <div style="font-weight:700;font-size:15px;">Аномалии</div>
+          <div style="font-size:12px;color:${anomalies.length ? 'rgba(255,255,255,0.72)' : 'var(--text3)'};">${anomalies.length ? `${anomalies.length} несостыковок` : 'Несостыковок нет'}</div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span style="
+          min-width:34px;
+          height:34px;
+          display:inline-flex;
+          align-items:center;
+          justify-content:center;
+          padding:0 10px;
+          border-radius:999px;
+          background:${anomalies.length ? 'rgba(239,68,68,0.16)' : 'var(--surface3)'};
+          color:${anomalies.length ? '#ff5f5f' : 'var(--accent)'};
+          font-weight:800;
+          font-size:15px;
+        ">${anomalies.length}</span>
+        <i data-lucide="chevron-right" style="width:16px;height:16px;color:${anomalies.length ? 'rgba(255,255,255,0.55)' : 'var(--text3)'};"></i>
+      </div>
+    </div>
+  `;
+
+  container.innerHTML = salaryOverviewHtml
+    + selectedWorkerHistoryHtml
+    + pendingSalaryHtml
+    + manualSalaryHtml
+    + analyticsHtml
+    + anomaliesHtml;
+  initIcons();
+}
+
+function rerenderOwnerSalaryViews() {
+  if (document.getElementById('screen-owner-salary')?.classList.contains('active')) {
+    renderOwnerSalaryScreen();
+    return;
+  }
+  renderSalaryScreen();
 }
 
 function getSalaryEditHistory(entry) {
@@ -558,6 +812,9 @@ function renderOwnerPendingSalaryPanel() {
             <button class="icon-btn" title="Редактировать начисление" onclick="editPendingSalaryEntry('${entry.id}')" style="width:28px;height:28px;border-radius:7px;">
               <i data-lucide="pencil" style="width:12px;height:12px;"></i>
             </button>
+            <button class="icon-btn icon-action-danger" title="Удалить начисление" onclick="deleteSalaryEntry('${entry.id}')" style="width:28px;height:28px;border-radius:7px;">
+              <i data-lucide="trash-2" style="width:12px;height:12px;"></i>
+            </button>
           </div>
         </div>
       </div>`;
@@ -603,6 +860,9 @@ function renderOwnerManualSalaryPanel() {
             <button class="icon-btn" title="Редактировать" onclick="startEditManualSalary('${entry.id}')" style="width:28px;height:28px;border-radius:7px;">
               <i data-lucide="pencil" style="width:12px;height:12px;"></i>
             </button>
+            <button class="icon-btn icon-action-danger" title="Удалить" onclick="deleteSalaryEntry('${entry.id}')" style="width:28px;height:28px;border-radius:7px;">
+              <i data-lucide="trash-2" style="width:12px;height:12px;"></i>
+            </button>
           </div>
         </div>
       </div>`;
@@ -643,6 +903,10 @@ function renderOwnerManualSalaryPanel() {
 }
 
 async function openSalaryDetail() {
+  if (currentRole === 'owner' && typeof openOwnerSalaryScreen === 'function') {
+    await openOwnerSalaryScreen();
+    return;
+  }
   salaryNavStack = [];
   if (currentRole === 'owner') await loadAllSalaries();
   renderSalaryScreen();
@@ -665,10 +929,12 @@ function renderSalaryScreen() {
   if (backBtn) backBtn.style.display = salaryNavStack.length > 0 ? 'flex' : 'none';
 
   if (!state) {
-    // Уровень 1: все сотрудники
     title.textContent = 'Зарплаты сотрудников';
-    const workerNames = [...new Set(salaryEntries.map(s => s.worker_name))].sort((a, b) => String(a).localeCompare(String(b), 'ru'));
     const anomalies = getSalaryAnomalies(manualReports);
+    const salaryOverviewHtml = renderOwnerSalaryOverview(salaryEntries);
+    const selectedWorkerHistoryHtml = ownerSalarySelectedWorker
+      ? renderOwnerEmployeeSalaryHistory(ownerSalarySelectedWorker, salaryEntries)
+      : '';
     const manualSalaryHtml = renderOwnerManualSalaryPanel();
     const pendingSalaryHtml = renderOwnerPendingSalaryPanel();
     const anomaliesHtml = `
@@ -713,27 +979,12 @@ function renderSalaryScreen() {
       </div>
     `;
     const analyticsHtml = renderSalaryAnalyticsSection(manualReports);
-    const workersHtml = workerNames.map(name => {
-      const rows = salaryEntries.filter(s => s.worker_name === name);
-      const total = rows.reduce((sum, s) => sum + Number(s.amount), 0);
-      const recordsCount = rows.length;
-      return `
-        <div class="sal-nav-row" onclick="salaryNavPush({worker:'${financeEscapeAttr(name)}'})">
-          <div style="display:flex;align-items:center;gap:12px;">
-            <div class="worker-avatar" style="width:40px;height:40px;font-size:14px;border-radius:12px;">${getInitials(name)}</div>
-            <div>
-              <div style="font-weight:700;font-size:15px;">${escapeHtml(getWorkerDisplayName(name))}</div>
-              <div style="font-size:12px;color:var(--text3);">Записей: ${recordsCount}</div>
-            </div>
-          </div>
-          <div style="display:flex;align-items:center;gap:10px;">
-            <span style="font-weight:800;font-size:16px;color:${total >= 0 ? 'var(--accent)' : '#ef4444'};">${total.toLocaleString('ru')} ₴</span>
-            <i data-lucide="chevron-right" style="width:16px;height:16px;color:var(--text3);"></i>
-          </div>
-        </div>
-      `;
-    }).join('');
-    container.innerHTML = pendingSalaryHtml + manualSalaryHtml + analyticsHtml + anomaliesHtml + (workersHtml || '');
+    container.innerHTML = salaryOverviewHtml
+      + selectedWorkerHistoryHtml
+      + pendingSalaryHtml
+      + manualSalaryHtml
+      + analyticsHtml
+      + anomaliesHtml;
 
   } else if (state.anomalies) {
     title.textContent = 'Аномалии ЗП';
@@ -1017,7 +1268,7 @@ async function saveOwnerManualSalary() {
       allSalaries.unshift(saved);
     }
     editingManualSalaryId = '';
-    renderSalaryScreen();
+    rerenderOwnerSalaryViews();
     renderHome();
     showToast('Ручная запись ЗП сохранена ✓');
   } catch (e) {
@@ -1060,7 +1311,7 @@ async function editPendingSalaryEntry(id) {
     });
     const idx = allSalaries.findIndex(row => row.id === id);
     if (idx !== -1) allSalaries[idx] = { ...allSalaries[idx], ...updated };
-    renderSalaryScreen();
+    rerenderOwnerSalaryViews();
     renderHome();
     showToast('Начисление обновлено ✓');
   } catch (e) {
@@ -1147,7 +1398,7 @@ async function deleteSalaryEntry(id, ym) {
     const salEl = document.getElementById('fin-salaries-' + ym);
     if (salEl) { salEl.innerHTML = renderSalaryRowsCompact(ym); initIcons(); }
     // Если открыт детальный экран — перерисовываем его тоже
-    renderSalaryScreen();
+    rerenderOwnerSalaryViews();
     showToast('Удалено');
   } catch(e) {
     showToast('Ошибка: ' + e.message, 'error');

@@ -747,6 +747,15 @@ body {
   margin-top: 3px;
 }
 
+.calendar-day-total {
+  margin-top: 12px;
+  font-size: 15px;
+  line-height: 1.2;
+  font-weight: 900;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
 .calendar-modal-orders {
   display: flex;
   flex-direction: column;

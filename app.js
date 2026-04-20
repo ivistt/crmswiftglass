@@ -160,6 +160,13 @@ async function openOwnerCashScreen() {
   showScreen('owner-cash');
 }
 
+async function openOwnerSalaryScreen() {
+  if (!canViewFinance()) return;
+  if (typeof loadAllSalaries === 'function') await loadAllSalaries();
+  if (typeof renderOwnerSalaryScreen === 'function') renderOwnerSalaryScreen();
+  showScreen('owner-salary');
+}
+
 async function openOwnerPaymentsScreen() {
   if (!canViewOwnerPayments()) return;
   try { window.allCashLog = await sbFetchAllCashLog(); } catch(e) { window.allCashLog = window.allCashLog || []; }
@@ -285,16 +292,14 @@ function renderCalendarScreen() {
     const date = new Date(year, month, day);
     const key = calendarDateKey(date);
     const dayOrders = byDate[key] || [];
-    const preview = dayOrders.slice(0, 3).map(order => `
-      <div class="calendar-order-preview">${escapeHtml(order.time || '—')} · ${escapeHtml(getWorkerDisplayPair(order.responsible, order.assistant) || '—')}</div>
-    `).join('');
+    const dayTotal = dayOrders.reduce((sum, order) => sum + getOrderClientTotalAmount(order), 0);
     daysHtml += `
       <div class="calendar-day ${key === todayKey ? 'today' : ''} ${dayOrders.length ? 'has-orders' : ''}" onclick="openCalendarDayModal('${key}')">
         <div class="calendar-day-top">
           <span class="calendar-day-number">${day}</span>
           ${dayOrders.length ? `<span class="calendar-day-count">${dayOrders.length}</span>` : ''}
         </div>
-        ${preview}
+        ${dayOrders.length ? `<div class="calendar-day-total">${dayTotal.toLocaleString('ru')} ₴</div>` : ''}
       </div>
     `;
   }
@@ -304,7 +309,7 @@ function renderCalendarScreen() {
       <button class="btn-secondary calendar-nav-btn" onclick="setCalendarMonth(-1)">${icon('chevron-right')}</button>
       <div>
         <div class="calendar-title">${formatCalendarMonthTitle(firstDay)}</div>
-        <div class="calendar-subtitle">${plannerOrders.length} заказов в планерке</div>
+        <div class="calendar-subtitle">${plannerOrders.length} заказов · ${plannerOrders.reduce((sum, order) => sum + getOrderClientTotalAmount(order), 0).toLocaleString('ru')} ₴</div>
       </div>
       <button class="btn-secondary calendar-nav-btn" onclick="setCalendarMonth(1)">${icon('chevron-right')}</button>
     </div>
@@ -536,7 +541,7 @@ function renderHome() {
     </div>
   `;
 
-  if (currentRole === 'owner') {
+  if (canViewOwnerToday()) {
     const today = getLocalDateString();
     const todayOrders = orders.filter(o => isOrderFinanciallyActive(o) && o.date === today);
     const todayTotal = todayOrders.reduce((sum, o) => sum + getOrderClientTotalAmount(o), 0);
@@ -550,9 +555,12 @@ function renderHome() {
         <div class="home-card-count" style="font-size:22px; color: var(--accent);">${todayTotal.toLocaleString('ru')} ₴</div>
       </div>
     `;
+  }
 
+  if (canViewCalendar()) {
     const monthKey = getLocalDateString().slice(0, 7);
     const monthPlannerOrders = getCalendarPlannerOrders().filter(o => String(o.date || '').startsWith(monthKey));
+    const monthPlannerTotal = monthPlannerOrders.reduce((sum, o) => sum + getOrderClientTotalAmount(o), 0);
     container.innerHTML += `
       <div class="home-card" onclick="openCalendarScreen()">
         <div class="home-card-icon-wrap home-card-icon-dim">
@@ -560,10 +568,12 @@ function renderHome() {
         </div>
         <h3>Календарь</h3>
         <p>Планерка по дням</p>
-        <div class="home-card-count" style="font-size:22px; color: var(--accent);">${monthPlannerOrders.length}</div>
+        <div class="home-card-count" style="font-size:22px; color: var(--accent);">${monthPlannerTotal.toLocaleString('ru')} ₴</div>
       </div>
     `;
+  }
 
+  if (currentRole === 'owner') {
     const totalCash = getOwnerCurrentCashTotal();
     container.innerHTML += `
       <div class="home-card" onclick="openOwnerCashScreen()">
@@ -678,7 +688,7 @@ function renderHome() {
       .reduce((sum, s) => sum + Number(s.amount), 0);
     const anomaliesCount = (typeof getSalaryAnomalies === 'function') ? getSalaryAnomalies().length : 0;
     container.innerHTML += `
-      <div class="home-card" onclick="openSalaryDetail()">
+      <div class="home-card" onclick="openOwnerSalaryScreen()">
         <div class="home-card-icon-wrap home-card-icon-dim">
           <i data-lucide="wallet-cards" style="width:22px;height:22px;"></i>
         </div>
@@ -882,6 +892,22 @@ async function saveOwnerCashEntry() {
   }
 }
 
+async function deleteOwnerCashEntry(id) {
+  if (currentRole !== 'owner' || !id) return;
+  if (!confirm('Удалить эту запись кассы? Это действие нельзя отменить.')) return;
+  try {
+    await sbDeleteCashEntry(id);
+    if (Array.isArray(window.allCashLog)) {
+      window.allCashLog = window.allCashLog.filter(entry => String(entry.id) !== String(id));
+    }
+    renderOwnerCashScreen();
+    renderHome();
+    showToast('Запись кассы удалена');
+  } catch (e) {
+    showToast('Ошибка удаления кассы: ' + e.message, 'error');
+  }
+}
+
 function renderOwnerEmployeeCashHistory(workerName, logs) {
   const rows = (logs || [])
     .filter(entry => entry.worker_name === workerName)
@@ -947,6 +973,7 @@ function renderOwnerEmployeeCashHistory(workerName, logs) {
               <div style="display:flex;align-items:center;gap:8px;">
                 <div class="owner-cash-entry-amount" style="color:${amount >= 0 ? 'var(--accent)' : '#ef4444'};">${amount.toLocaleString('ru')} ₴</div>
                 <button class="icon-btn" title="Редактировать" onclick="event.stopPropagation(); openOwnerCashEntryModal('${escapeAttr(entry.id)}')">${icon('pencil')}</button>
+                <button class="icon-btn icon-action-danger" title="Удалить" onclick="event.stopPropagation(); deleteOwnerCashEntry('${escapeAttr(entry.id)}')">${icon('trash-2')}</button>
               </div>
             </div>
           `;
