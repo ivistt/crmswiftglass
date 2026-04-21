@@ -276,12 +276,12 @@ async function confirmSeniorOrderAmounts(orderId) {
   }
 
   try {
-    const result = await sbSaveOrderWithCash(updatedOrder, {
-      isNew: false,
-      cashEntries,
-      rollbackOrder: order,
+    const saved = await sbPatchOrderFields(orderId, {
+      debt: totalClientPaid,
+      check_sum: totalSupplierPaid,
+      client_payments: nextClientPayments,
+      supplier_payments: nextSupplierPayments,
     });
-    const saved = result.order;
     const mergedOrder = { ...updatedOrder, ...saved, clientPayments: nextClientPayments, supplierPayments: nextSupplierPayments };
     const idx = orders.findIndex(x => x.id === orderId);
     if (idx !== -1) orders[idx] = mergedOrder;
@@ -289,7 +289,13 @@ async function confirmSeniorOrderAmounts(orderId) {
     if (checkEl) checkEl.value = '';
     if (debtEl) debtEl.value = '';
 
-    for (const cashEntry of (result.cashEntries || [])) {
+    for (const rawCashEntry of cashEntries) {
+      const cashEntry = await sbInsertCashEntry({
+        worker_name: rawCashEntry.worker_name,
+        amount: rawCashEntry.amount,
+        comment: rawCashEntry.comment,
+        cash_account: 'cash',
+      });
       const targetWorker = cashEntry?.worker_name;
       if (typeof workerCashLog !== 'undefined' && targetWorker === currentWorkerName) {
         workerCashLog.unshift(cashEntry);
