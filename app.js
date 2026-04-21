@@ -1104,7 +1104,7 @@ function renderOwnerEmployeeCurrencyCashHistory(workerName, logs) {
                 <div class="owner-cash-entry-meta">${time ? escapeHtml(time) : '—'}${meta ? ' · ' + escapeHtml(meta) : ''}</div>
               </div>
               <div style="display:flex;align-items:center;gap:8px;">
-                <div class="owner-cash-entry-amount" style="color:var(--accent);">+${Number(parsed?.usdAmount || 0).toLocaleString('ru')} $</div>
+                <div class="owner-cash-entry-amount" style="color:${Number(parsed?.usdAmount || 0) >= 0 ? 'var(--accent)' : '#ef4444'};">${Number(parsed?.usdAmount || 0) >= 0 ? '+' : ''}${Number(parsed?.usdAmount || 0).toLocaleString('ru')} $</div>
                 <button class="icon-btn icon-action-danger" title="Удалить" onclick="event.stopPropagation(); deleteOwnerCashEntry('${escapeAttr(entry.id)}')">${icon('trash-2')}</button>
               </div>
             </div>
@@ -1119,7 +1119,7 @@ function renderOwnerEmployeeCurrencyCashHistory(workerName, logs) {
                 <div style="font-size:13px;color:var(--text2);font-weight:600;">${day === 'Без даты' ? day : formatDate(day)}</div>
                 <div style="font-size:11px;color:var(--text3);">${dayData.entries.length} зап.</div>
               </div>
-              <div style="font-size:13px;font-weight:800;color:var(--accent);">+${dayData.total.toLocaleString('ru')} $</div>
+              <div style="font-size:13px;font-weight:800;color:${dayData.total >= 0 ? 'var(--accent)' : '#ef4444'};">${dayData.total >= 0 ? '+' : ''}${dayData.total.toLocaleString('ru')} $</div>
             </div>
             <div id="profile-month-body-${dayKey}" style="display:none;padding:0 12px 10px 28px;">
               ${entriesHtml}
@@ -1136,7 +1136,7 @@ function renderOwnerEmployeeCurrencyCashHistory(workerName, logs) {
               <div style="font-size:14px;font-weight:700;color:var(--text2);">${monthName}</div>
               <div style="font-size:11px;color:var(--text3);">${Object.keys(monthData.days).length} дн.</div>
             </div>
-            <div style="font-size:14px;font-weight:800;color:var(--accent);">+${monthData.total.toLocaleString('ru')} $</div>
+            <div style="font-size:14px;font-weight:800;color:${monthData.total >= 0 ? 'var(--accent)' : '#ef4444'};">${monthData.total >= 0 ? '+' : ''}${monthData.total.toLocaleString('ru')} $</div>
           </div>
           <div id="profile-month-body-${monthToggleKey}" style="display:none;background:var(--surface2);border-radius:0 0 8px 8px;">
             ${daysHtml}
@@ -1153,7 +1153,7 @@ function renderOwnerEmployeeCurrencyCashHistory(workerName, logs) {
             <div style="font-size:14px;font-weight:800;color:var(--text);">${year}</div>
             <div style="font-size:11px;color:var(--text3);">${Object.keys(yearData.months).length} мес.</div>
           </div>
-          <div style="font-size:14px;font-weight:900;color:var(--accent);">+${yearData.total.toLocaleString('ru')} $</div>
+          <div style="font-size:14px;font-weight:900;color:${yearData.total >= 0 ? 'var(--accent)' : '#ef4444'};">${yearData.total >= 0 ? '+' : ''}${yearData.total.toLocaleString('ru')} $</div>
         </div>
         <div id="profile-month-body-${yearKey}" style="display:none;">
           ${monthsHtml}
@@ -1169,7 +1169,7 @@ function renderOwnerEmployeeCurrencyCashHistory(workerName, logs) {
           <div class="fin-month-name">${escapeHtml(workerName)}</div>
           <div class="fin-month-sub">История валютной кассы</div>
         </div>
-        <div style="font-size:18px;font-weight:900;color:var(--accent);white-space:nowrap;">+${total.toLocaleString('ru')} $</div>
+        <div style="font-size:18px;font-weight:900;color:${total >= 0 ? 'var(--accent)' : '#ef4444'};white-space:nowrap;">${total >= 0 ? '+' : ''}${total.toLocaleString('ru')} $</div>
       </div>
       <div>${yearsHtml}</div>
     </div>
@@ -1840,14 +1840,14 @@ function renderOwnerCashScreen() {
             <div class="fin-month-name">Касса (валютная)</div>
             <div class="fin-month-sub">Баланс в долларах после обмена из гривневой кассы</div>
           </div>
-          <div style="font-size:22px;font-weight:900;color:var(--accent);white-space:nowrap;">${currentCurrencyTotal.toLocaleString('ru')} $</div>
+          <div style="font-size:22px;font-weight:900;color:${currentCurrencyTotal >= 0 ? 'var(--accent)' : '#ef4444'};white-space:nowrap;">${currentCurrencyTotal.toLocaleString('ru')} $</div>
         </div>
       </div>
       <div style="padding:12px 16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;">
         ${currentCurrencyRows.length ? currentCurrencyRows.map(row => `
           <div class="owner-cash-worker-row ${ownerCashSelectedWorker === row.workerName ? 'active' : ''}" onclick="setOwnerCashSelectedWorker('${escapeAttr(row.workerName)}')">
             <div class="owner-cash-worker-name">${escapeHtml(row.workerName)}</div>
-            <div class="owner-cash-worker-balance" style="color:var(--accent);">${row.balance.toLocaleString('ru')} $</div>
+            <div class="owner-cash-worker-balance" style="color:${row.balance >= 0 ? 'var(--accent)' : '#ef4444'};">${row.balance.toLocaleString('ru')} $</div>
           </div>
         `).join('') : `
           <div style="font-size:13px;color:var(--text3);">Валютных обменов пока нет</div>

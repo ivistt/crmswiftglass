@@ -63,13 +63,23 @@ const STATIC_MANAGER_OPTIONS = [
 ];
 const SERVICE_TYPE_BY_NAME = Object.fromEntries(SERVICE_TYPE_OPTIONS.map(item => [item.name, item]));
 
+function getCurrentWorkerSystemRole() {
+  const worker = (workers || []).find(item => item.name === currentWorkerName);
+  return worker?.systemRole || currentRole || '';
+}
+
+function currentUserCanActAsSenior() {
+  const role = getCurrentWorkerSystemRole();
+  return role === 'senior' || role === 'extra';
+}
+
 function canMarkWorkerDone() {
   // Галочка доступна только специалисту (senior) для своих заказов
-  return currentRole === 'senior';
+  return currentUserCanActAsSenior();
 }
 
 function canQuickConfirmOrderAmounts(order) {
-  return currentRole === 'senior'
+  return currentUserCanActAsSenior()
     && order?.responsible === currentWorkerName
     && isOrderFinanciallyActive(order)
     && !order?.workerDone;

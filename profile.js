@@ -192,7 +192,12 @@ function renderCashScreen() {
     + '<div><div style="font-size:20px;font-weight:800;">' + getWorkerDisplayName(currentWorkerName) + '</div>'
     + '<div style="font-size:13px;color:var(--text3);margin-top:2px;">Касса</div></div>'
     + '</div>'
-    + renderCashSection(regularCashLog, balance, today, { title: 'Касса (наличка)', account: 'cash', buttonText: '+ Запись' })
+    + renderCashSection(regularCashLog, balance, today, {
+      title: 'Касса (наличка)',
+      account: 'cash',
+      buttonText: '+ Запись',
+      extraButtonsHtml: '<button class="btn-secondary" style="font-size:12px;padding:6px 10px;" onclick="openCashEntryModal(\'currency-back\')">Из $</button>'
+    })
     + renderCurrencyCashSection(currencyCashLog, currencyBalance, today)
     + (currentWorkerName === FOP_CASH_WORKER_NAME
       ? renderCashSection(confirmedFopCashLog, fopBalance, today, { title: 'Касса БАБЕНКО', account: 'fop', buttonText: '+ БАБЕНКО', pendingEntries: pendingFopCashLog })
@@ -725,6 +730,7 @@ function renderCashSection(log, balance, today, options = {}) {
     + '</div>'
     + '<div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">'
     + (options.hideAddButton ? '' : '<button class="btn-secondary" style="font-size:12px;padding:6px 10px;" onclick="openCashEntryModal(\'' + account + '\')">' + escapeHtml(buttonText) + '</button>')
+    + (options.extraButtonsHtml || '')
     + '</div>'
     + '</div>'
 
@@ -854,6 +860,8 @@ function renderCurrencyCashSection(log, balance, today) {
   const todayLog = (log || []).filter(e => _cashEntryDate(e) === today);
   const archiveLog = (log || []).filter(e => _cashEntryDate(e) !== today);
   const todayBalance = calcCurrencyCashBalance(todayLog);
+  const balanceColor = balance >= 0 ? 'var(--accent)' : '#ef4444';
+  const todayColor = todayBalance >= 0 ? 'var(--accent)' : '#ef4444';
   const todayRowsHtml = todayLog.length
     ? todayLog.map(e => _currencyCashEntryRow(e)).join('')
     : '<div style="text-align:center;color:var(--text3);font-size:13px;padding:10px 0;">Сегодня обменов не было</div>';
@@ -862,7 +870,7 @@ function renderCurrencyCashSection(log, balance, today) {
     + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">'
     + '<div>'
     + '<div class="profile-today-label"><i data-lucide="badge-dollar-sign" style="width:15px;height:15px;"></i> Касса (валютная)</div>'
-    + '<div style="font-size:28px;font-weight:800;color:var(--accent);margin-top:4px;">' + balance.toLocaleString('ru') + ' $</div>'
+    + '<div style="font-size:28px;font-weight:800;color:' + balanceColor + ';margin-top:4px;">' + balance.toLocaleString('ru') + ' $</div>'
     + '<div style="font-size:11px;color:var(--text3);">общий баланс в валюте</div>'
     + '</div>'
     + '<div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">'
@@ -872,7 +880,7 @@ function renderCurrencyCashSection(log, balance, today) {
     + '<div style="margin-bottom:16px;">'
     + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">'
     + '<div style="font-size:12px;font-weight:700;color:var(--text3);letter-spacing:0.04em;">' + icon('calendar') + ' СЕГОДНЯ</div>'
-    + '<div style="font-size:15px;font-weight:800;color:var(--accent);">+' + todayBalance.toLocaleString('ru') + ' $</div>'
+    + '<div style="font-size:15px;font-weight:800;color:' + todayColor + ';">' + (todayBalance >= 0 ? '+' : '') + todayBalance.toLocaleString('ru') + ' $</div>'
     + '</div>'
     + '<div style="background:var(--surface2);border-radius:10px;padding:0 12px;">'
     + todayRowsHtml
@@ -890,17 +898,20 @@ function _currencyCashEntryRow(entry) {
   if (!parsed) return '';
   const dt = new Date(entry.created_at);
   const time = dt.toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' });
-  const title = parsed.note ? 'Обмен в валютную кассу · ' + parsed.note : 'Обмен в валютную кассу';
+  const titleBase = parsed.usdAmount > 0 ? 'Обмен в валютную кассу' : 'Возврат из валютной кассы';
+  const title = parsed.note ? titleBase + ' · ' + parsed.note : titleBase;
   const meta = [
     parsed.rate ? 'курс ' + parsed.rate.toLocaleString('ru') : '',
-    parsed.uahAmount ? 'списано ' + parsed.uahAmount.toLocaleString('ru') + ' ₴' : '',
+    parsed.uahAmount ? (parsed.usdAmount > 0 ? 'списано ' : 'получено ') + parsed.uahAmount.toLocaleString('ru') + ' ₴' : '',
   ].filter(Boolean).join(' · ');
+  const amountColor = parsed.usdAmount >= 0 ? 'var(--accent)' : '#ef4444';
+  const amountSign = parsed.usdAmount >= 0 ? '+' : '';
   return '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);">'
     + '<div>'
     + '<div style="font-size:13px;color:var(--text2);">' + escapeHtml(title) + '</div>'
     + '<div style="font-size:11px;color:var(--text3);margin-top:2px;">' + time + (meta ? ' · ' + escapeHtml(meta) : '') + '</div>'
     + '</div>'
-    + '<div style="font-size:15px;font-weight:800;color:var(--accent);white-space:nowrap;margin-left:12px;">+' + parsed.usdAmount.toLocaleString('ru') + ' $</div>'
+    + '<div style="font-size:15px;font-weight:800;color:' + amountColor + ';white-space:nowrap;margin-left:12px;">' + amountSign + parsed.usdAmount.toLocaleString('ru') + ' $</div>'
     + '</div>';
 }
 
@@ -945,7 +956,7 @@ function _buildCurrencyCashArchive(log) {
           + '<div style="font-size:13px;color:var(--text2);font-weight:600;">' + dd + '.' + dm + '.' + dy + '</div>'
           + '<div style="font-size:11px;color:var(--text3);">' + entries.length + ' зап.</div>'
           + '</div>'
-          + '<div style="font-size:13px;font-weight:800;color:var(--accent);">+' + daySum.toLocaleString('ru') + ' $</div>'
+          + '<div style="font-size:13px;font-weight:800;color:' + (daySum >= 0 ? 'var(--accent)' : '#ef4444') + ';">' + (daySum >= 0 ? '+' : '') + daySum.toLocaleString('ru') + ' $</div>'
           + '</div>'
           + '<div id="profile-month-body-' + dayKey + '" style="display:none;padding:0 12px 4px 28px;">'
           + entries.map(item => _currencyCashEntryRow(item)).join('')
@@ -960,7 +971,7 @@ function _buildCurrencyCashArchive(log) {
         + '<div style="font-size:14px;font-weight:700;color:var(--text2);">' + (MONTH_NAMES[parseInt(month, 10) - 1] || ym) + '</div>'
         + '<div style="font-size:11px;color:var(--text3);">' + Object.keys(tree[year][ym]).length + ' дн.</div>'
         + '</div>'
-        + '<div style="font-size:14px;font-weight:800;color:var(--accent);">+' + monthSum.toLocaleString('ru') + ' $</div>'
+        + '<div style="font-size:14px;font-weight:800;color:' + (monthSum >= 0 ? 'var(--accent)' : '#ef4444') + ';">' + (monthSum >= 0 ? '+' : '') + monthSum.toLocaleString('ru') + ' $</div>'
         + '</div>'
         + '<div id="profile-month-body-' + monthKey + '" style="display:none;padding-left:12px;background:var(--surface2);border-radius:0 0 8px 8px;">'
         + daysHtml
@@ -975,7 +986,7 @@ function _buildCurrencyCashArchive(log) {
       + '<div><div class="fin-month-name">' + year + ' год</div>'
       + '<div class="fin-month-sub">' + Object.keys(tree[year]).length + ' мес.</div>'
       + '</div></div>'
-      + '<div style="font-size:18px;font-weight:800;color:var(--accent);">+' + yearSum.toLocaleString('ru') + ' $</div>'
+      + '<div style="font-size:18px;font-weight:800;color:' + (yearSum >= 0 ? 'var(--accent)' : '#ef4444') + ';">' + (yearSum >= 0 ? '+' : '') + yearSum.toLocaleString('ru') + ' $</div>'
       + '</div>'
       + '<div id="profile-month-body-' + yearKey + '" style="display:none;padding:0 0 8px;">'
       + monthsHtml
@@ -1095,7 +1106,7 @@ function _buildCashArchive(log) {
 function openCashEntryModal(account = 'cash') {
   window._cashAccount = account === 'fop'
     ? 'fop'
-    : (account === 'card' ? 'card' : (account === 'currency' ? 'currency' : 'cash'));
+    : (account === 'card' ? 'card' : (account === 'currency' ? 'currency' : (account === 'currency-back' ? 'currency-back' : 'cash')));
   let modal = document.getElementById('cash-entry-modal');
   if (!modal) {
     modal = document.createElement('div');
@@ -1104,11 +1115,11 @@ function openCashEntryModal(account = 'cash') {
     document.body.appendChild(modal);
   }
 
-  if (window._cashAccount === 'currency') {
+  if (window._cashAccount === 'currency' || window._cashAccount === 'currency-back') {
     modal.innerHTML = `
       <div class="modal" style="max-width:420px;">
         <div class="modal-header">
-          <div class="modal-title">${icon('badge-dollar-sign')} Обмен в валютную кассу</div>
+          <div class="modal-title">${icon('badge-dollar-sign')} ${window._cashAccount === 'currency-back' ? 'Возврат из валютной кассы' : 'Обмен в валютную кассу'}</div>
           <button class="modal-close" onclick="closeCashEntryModal()">
             <i data-lucide="x" style="width:16px;height:16px;"></i>
           </button>
@@ -1125,10 +1136,12 @@ function openCashEntryModal(account = 'cash') {
             </div>
             <div class="form-group">
               <label class="form-label">Комментарий</label>
-              <input class="form-input" type="text" id="cash-comment-input" placeholder="Напр. обмен в кассе">
+              <input class="form-input" type="text" id="cash-comment-input" placeholder="${window._cashAccount === 'currency-back' ? 'Напр. сдал валюту в кассу' : 'Напр. обмен в кассе'}">
             </div>
             <div style="font-size:12px;color:var(--text3);padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--surface2);">
-              Сумма спишется из гривневой кассы и появится в валютной после сохранения
+              ${window._cashAccount === 'currency-back'
+                ? 'Сумма спишется из валютной кассы и появится в гривневой после сохранения'
+                : 'Сумма спишется из гривневой кассы и появится в валютной после сохранения'}
             </div>
           </div>
         </div>
@@ -1233,7 +1246,7 @@ async function saveCashEntry() {
 
   try {
     let entry;
-    if (window._cashAccount === 'currency') {
+    if (window._cashAccount === 'currency' || window._cashAccount === 'currency-back') {
       const parseDecimalInput = (value) => {
         const normalized = String(value || '').replace(',', '.').trim();
         return Number(normalized);
@@ -1252,15 +1265,23 @@ async function saveCashEntry() {
         return;
       }
       const uahAmount = Math.round(rate * usdAmount * 100) / 100;
-      const currentCashBalance = calcCashBalance((workerCashLog || []).filter(item => !isFopCashEntry(item)));
-      if (uahAmount > currentCashBalance) {
-        showToast('Недостаточно гривны в кассе', 'error');
-        return;
+      if (window._cashAccount === 'currency-back') {
+        const currentCurrencyBalance = calcCurrencyCashBalance((workerCashLog || []).filter(item => !isFopCashEntry(item)).filter(isCurrencyCashEntry));
+        if (usdAmount > currentCurrencyBalance) {
+          showToast('Недостаточно валюты в кассе', 'error');
+          return;
+        }
+      } else {
+        const currentCashBalance = calcCashBalance((workerCashLog || []).filter(item => !isFopCashEntry(item)));
+        if (uahAmount > currentCashBalance) {
+          showToast('Недостаточно гривны в кассе', 'error');
+          return;
+        }
       }
       entry = await sbInsertCashEntry({
         worker_name: currentWorkerName,
-        amount: -uahAmount,
-        comment: buildCurrencyCashComment({ usdAmount, rate, uahAmount, note }),
+        amount: window._cashAccount === 'currency-back' ? uahAmount : -uahAmount,
+        comment: buildCurrencyCashComment({ usdAmount: window._cashAccount === 'currency-back' ? -usdAmount : usdAmount, rate, uahAmount, note }),
         cash_account: 'cash',
         fop_confirmed: false,
         fop_date: null,
@@ -1295,7 +1316,11 @@ async function saveCashEntry() {
     closeCashEntryModal();
     if (document.getElementById('screen-profile')?.classList.contains('active')) renderProfile();
     renderCashScreen();
-    showToast(window._cashAccount === 'currency' ? 'Обмен в валютную кассу сохранен ✓' : 'Записано в кассу ✓');
+    showToast(
+      window._cashAccount === 'currency'
+        ? 'Обмен в валютную кассу сохранен ✓'
+        : (window._cashAccount === 'currency-back' ? 'Возврат из валютной кассы сохранен ✓' : 'Записано в кассу ✓')
+    );
   } catch (e) {
     showToast('Ошибка: ' + e.message, 'error');
   } finally {

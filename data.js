@@ -404,18 +404,19 @@ function isCurrencyCashEntry(entry) {
 function getCashEntryDisplayComment(entry) {
   const parsed = parseCurrencyCashEntry(entry);
   if (!parsed) return String(entry?.comment || '—');
+  const base = parsed.usdAmount > 0 ? 'Обмен в валютную кассу' : 'Возврат из валютной кассы';
   return parsed.note
-    ? `Обмен в валютную кассу · ${parsed.note}`
-    : 'Обмен в валютную кассу';
+    ? `${base} · ${parsed.note}`
+    : base;
 }
 
 function getCashEntryDisplayMeta(entry) {
   const parsed = parseCurrencyCashEntry(entry);
   if (!parsed) return '';
   const parts = [];
-  if (parsed.usdAmount) parts.push(`${parsed.usdAmount.toLocaleString('ru')} $`);
+  if (parsed.usdAmount) parts.push(`${Math.abs(parsed.usdAmount).toLocaleString('ru')} $`);
   if (parsed.rate) parts.push(`курс ${parsed.rate.toLocaleString('ru')}`);
-  if (parsed.uahAmount) parts.push(`списано ${parsed.uahAmount.toLocaleString('ru')} ₴`);
+  if (parsed.uahAmount) parts.push(`${parsed.usdAmount > 0 ? 'списано' : 'получено'} ${parsed.uahAmount.toLocaleString('ru')} ₴`);
   return parts.join(' · ');
 }
 
