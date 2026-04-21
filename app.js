@@ -752,6 +752,14 @@ function getOwnerCashBalanceLogs() {
   return getOwnerCashLogs('confirmed');
 }
 
+function getOwnerCurrencyCashLogs() {
+  const seniorNames = getOwnerCashSeniorNames();
+  return [...(window.allCashLog || [])]
+    .filter(entry => entry?.manual_payment !== true)
+    .filter(entry => seniorNames.includes(entry.worker_name))
+    .filter(isCurrencyCashEntry);
+}
+
 function getOwnerCurrentCashTotal() {
   return getOwnerCashBalanceLogs().reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
 }
@@ -962,17 +970,19 @@ function renderOwnerEmployeeCashHistory(workerName, logs) {
         const dayKey = `${monthToggleKey}-day-${day}`;
         const entriesHtml = dayData.entries.map(entry => {
           const amount = Number(entry.amount) || 0;
-          const comment = entry.comment || 'Без комментария';
+          const comment = getCashEntryDisplayComment(entry) || 'Без комментария';
+          const extraMeta = getCashEntryDisplayMeta(entry);
           const time = getOwnerCashEntryTime(entry);
+          const isCurrency = isCurrencyCashEntry(entry);
           return `
             <div class="owner-cash-entry-row">
               <div class="owner-cash-entry-main">
                 <div class="owner-cash-entry-comment">${escapeHtml(comment)}</div>
-                <div class="owner-cash-entry-meta">${time ? escapeHtml(time) : '—'} ${renderOwnerCashEntryConfirmBadge(entry)}</div>
+                <div class="owner-cash-entry-meta">${time ? escapeHtml(time) : '—'}${extraMeta ? ' · ' + escapeHtml(extraMeta) : ''} ${renderOwnerCashEntryConfirmBadge(entry)}</div>
               </div>
               <div style="display:flex;align-items:center;gap:8px;">
                 <div class="owner-cash-entry-amount" style="color:${amount >= 0 ? 'var(--accent)' : '#ef4444'};">${amount.toLocaleString('ru')} ₴</div>
-                <button class="icon-btn" title="Редактировать" onclick="event.stopPropagation(); openOwnerCashEntryModal('${escapeAttr(entry.id)}')">${icon('pencil')}</button>
+                ${isCurrency ? '' : `<button class="icon-btn" title="Редактировать" onclick="event.stopPropagation(); openOwnerCashEntryModal('${escapeAttr(entry.id)}')">${icon('pencil')}</button>`}
                 <button class="icon-btn icon-action-danger" title="Удалить" onclick="event.stopPropagation(); deleteOwnerCashEntry('${escapeAttr(entry.id)}')">${icon('trash-2')}</button>
               </div>
             </div>
@@ -1038,6 +1048,128 @@ function renderOwnerEmployeeCashHistory(workerName, logs) {
           <div class="fin-month-sub">История кассы сотрудника</div>
         </div>
         <div style="font-size:18px;font-weight:900;color:${total >= 0 ? 'var(--accent)' : '#ef4444'};white-space:nowrap;">${total.toLocaleString('ru')} ₴</div>
+      </div>
+      <div>${yearsHtml}</div>
+    </div>
+  `;
+}
+
+function renderOwnerEmployeeCurrencyCashHistory(workerName, logs) {
+  const rows = (logs || [])
+    .filter(entry => entry.worker_name === workerName)
+    .slice()
+    .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+
+  if (!rows.length) return '';
+
+  const total = calcCurrencyCashBalance(rows);
+  const workerKey = getOwnerCashSafeKey(workerName + '-currency');
+  const tree = {};
+
+  for (const entry of rows) {
+    const parsed = parseCurrencyCashEntry(entry);
+    if (!parsed) continue;
+    const date = _ownerCashEntryDate(entry) || 'Без даты';
+    const year = date === 'Без даты' ? 'Без даты' : date.slice(0, 4);
+    const month = date === 'Без даты' ? 'Без даты' : date.slice(0, 7);
+    if (!tree[year]) tree[year] = { total: 0, months: {} };
+    tree[year].total += parsed.usdAmount;
+    if (!tree[year].months[month]) tree[year].months[month] = { total: 0, days: {} };
+    tree[year].months[month].total += parsed.usdAmount;
+    if (!tree[year].months[month].days[date]) tree[year].months[month].days[date] = { total: 0, entries: [] };
+    tree[year].months[month].days[date].total += parsed.usdAmount;
+    tree[year].months[month].days[date].entries.push(entry);
+  }
+
+  const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+  const yearsHtml = Object.keys(tree).sort((a, b) => b.localeCompare(a)).map(year => {
+    const yearData = tree[year];
+    const yearKey = `owner-currency-worker-${workerKey}-year-${year}`;
+    const monthsHtml = Object.keys(yearData.months).sort((a, b) => b.localeCompare(a)).map(monthKey => {
+      const monthData = yearData.months[monthKey];
+      const monthToggleKey = `${yearKey}-month-${monthKey}`;
+      const monthName = monthKey === 'Без даты' ? 'Без даты' : `${monthNames[Number(monthKey.slice(5, 7)) - 1] || monthKey} ${monthKey.slice(0, 4)}`;
+      const daysHtml = Object.keys(monthData.days).sort((a, b) => b.localeCompare(a)).map(day => {
+        const dayData = monthData.days[day];
+        const dayKey = `${monthToggleKey}-day-${day}`;
+        const entriesHtml = dayData.entries.map(entry => {
+          const parsed = parseCurrencyCashEntry(entry);
+          const time = getOwnerCashEntryTime(entry);
+          const title = getCashEntryDisplayComment(entry) || 'Обмен в валютную кассу';
+          const meta = getCashEntryDisplayMeta(entry);
+          return `
+            <div class="owner-cash-entry-row">
+              <div class="owner-cash-entry-main">
+                <div class="owner-cash-entry-comment">${escapeHtml(title)}</div>
+                <div class="owner-cash-entry-meta">${time ? escapeHtml(time) : '—'}${meta ? ' · ' + escapeHtml(meta) : ''}</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <div class="owner-cash-entry-amount" style="color:var(--accent);">+${Number(parsed?.usdAmount || 0).toLocaleString('ru')} $</div>
+                <button class="icon-btn icon-action-danger" title="Удалить" onclick="event.stopPropagation(); deleteOwnerCashEntry('${escapeAttr(entry.id)}')">${icon('trash-2')}</button>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        return `
+          <div style="border-bottom:1px solid var(--border);">
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;cursor:pointer;" onclick="toggleProfileMonth('${dayKey}')">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <i data-lucide="chevron-right" style="width:13px;height:13px;color:var(--text3);transition:transform 0.2s;" id="pchevron-${dayKey}"></i>
+                <div style="font-size:13px;color:var(--text2);font-weight:600;">${day === 'Без даты' ? day : formatDate(day)}</div>
+                <div style="font-size:11px;color:var(--text3);">${dayData.entries.length} зап.</div>
+              </div>
+              <div style="font-size:13px;font-weight:800;color:var(--accent);">+${dayData.total.toLocaleString('ru')} $</div>
+            </div>
+            <div id="profile-month-body-${dayKey}" style="display:none;padding:0 12px 10px 28px;">
+              ${entriesHtml}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      return `
+        <div style="border-bottom:1px solid var(--border);">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;cursor:pointer;" onclick="toggleProfileMonth('${monthToggleKey}')">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <i data-lucide="chevron-right" style="width:14px;height:14px;color:var(--text3);transition:transform 0.2s;" id="pchevron-${monthToggleKey}"></i>
+              <div style="font-size:14px;font-weight:700;color:var(--text2);">${monthName}</div>
+              <div style="font-size:11px;color:var(--text3);">${Object.keys(monthData.days).length} дн.</div>
+            </div>
+            <div style="font-size:14px;font-weight:800;color:var(--accent);">+${monthData.total.toLocaleString('ru')} $</div>
+          </div>
+          <div id="profile-month-body-${monthToggleKey}" style="display:none;background:var(--surface2);border-radius:0 0 8px 8px;">
+            ${daysHtml}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    return `
+      <div style="border-bottom:1px solid var(--border);">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px;cursor:pointer;" onclick="toggleProfileMonth('${yearKey}')">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <i data-lucide="chevron-right" style="width:14px;height:14px;color:var(--text3);transition:transform 0.2s;" id="pchevron-${yearKey}"></i>
+            <div style="font-size:14px;font-weight:800;color:var(--text);">${year}</div>
+            <div style="font-size:11px;color:var(--text3);">${Object.keys(yearData.months).length} мес.</div>
+          </div>
+          <div style="font-size:14px;font-weight:900;color:var(--accent);">+${yearData.total.toLocaleString('ru')} $</div>
+        </div>
+        <div id="profile-month-body-${yearKey}" style="display:none;">
+          ${monthsHtml}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  return `
+    <div class="fin-month-card owner-cash-history-card">
+      <div class="owner-cash-history-title">
+        <div>
+          <div class="fin-month-name">${escapeHtml(workerName)}</div>
+          <div class="fin-month-sub">История валютной кассы</div>
+        </div>
+        <div style="font-size:18px;font-weight:900;color:var(--accent);white-space:nowrap;">+${total.toLocaleString('ru')} $</div>
       </div>
       <div>${yearsHtml}</div>
     </div>
@@ -1632,6 +1764,8 @@ function renderOwnerCashScreen() {
     .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
   const balanceLogs = getOwnerCashBalanceLogs()
     .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+  const currencyLogs = getOwnerCurrencyCashLogs()
+    .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
 
   const balances = {};
   const snapshotsByDay = {};
@@ -1644,13 +1778,25 @@ function renderOwnerCashScreen() {
     snapshotsByDay[day][workerName] = balances[workerName];
   }
 
+  const currencyBalances = {};
+  for (const entry of currencyLogs) {
+    const parsed = parseCurrencyCashEntry(entry);
+    if (!parsed) continue;
+    currencyBalances[entry.worker_name] = (currencyBalances[entry.worker_name] || 0) + parsed.usdAmount;
+  }
+
   const currentCashRows = seniorNames.map(name => ({
     workerName: name,
     balance: Number(balances[name] || 0),
   }));
+  const currentCurrencyRows = seniorNames.map(name => ({
+    workerName: name,
+    balance: Number(currencyBalances[name] || 0),
+  }));
   const currentCashTotal = currentCashRows.reduce((sum, row) => sum + row.balance, 0);
+  const currentCurrencyTotal = currentCurrencyRows.reduce((sum, row) => sum + row.balance, 0);
   const selectedWorkerHistoryHtml = ownerCashSelectedWorker
-    ? renderOwnerEmployeeCashHistory(ownerCashSelectedWorker, logs)
+    ? (renderOwnerEmployeeCashHistory(ownerCashSelectedWorker, logs) + renderOwnerEmployeeCurrencyCashHistory(ownerCashSelectedWorker, currencyLogs))
     : '';
   const filtersHtml = `
     <div class="owner-cash-confirm-filters">
@@ -1686,9 +1832,32 @@ function renderOwnerCashScreen() {
       </div>
     </div>
   `;
+  const currentCurrencyHtml = `
+    <div class="fin-month-card" style="margin-bottom:12px;">
+      <div style="padding:14px 16px;border-bottom:1px solid var(--border);">
+        <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">
+          <div>
+            <div class="fin-month-name">Касса (валютная)</div>
+            <div class="fin-month-sub">Баланс в долларах после обмена из гривневой кассы</div>
+          </div>
+          <div style="font-size:22px;font-weight:900;color:var(--accent);white-space:nowrap;">${currentCurrencyTotal.toLocaleString('ru')} $</div>
+        </div>
+      </div>
+      <div style="padding:12px 16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;">
+        ${currentCurrencyRows.length ? currentCurrencyRows.map(row => `
+          <div class="owner-cash-worker-row ${ownerCashSelectedWorker === row.workerName ? 'active' : ''}" onclick="setOwnerCashSelectedWorker('${escapeAttr(row.workerName)}')">
+            <div class="owner-cash-worker-name">${escapeHtml(row.workerName)}</div>
+            <div class="owner-cash-worker-balance" style="color:var(--accent);">${row.balance.toLocaleString('ru')} $</div>
+          </div>
+        `).join('') : `
+          <div style="font-size:13px;color:var(--text3);">Валютных обменов пока нет</div>
+        `}
+      </div>
+    </div>
+  `;
 
   if (!logs.length) {
-    container.innerHTML = currentCashHtml + selectedWorkerHistoryHtml + `
+    container.innerHTML = currentCashHtml + currentCurrencyHtml + selectedWorkerHistoryHtml + `
       <div class="empty-state">
         <div class="empty-state-icon">${icon('banknote')}</div>
         <h3>Записей кассы нет</h3>
@@ -1711,7 +1880,7 @@ function renderOwnerCashScreen() {
   const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
   const years = Object.keys(tree).sort((a, b) => b.localeCompare(a));
 
-  container.innerHTML = currentCashHtml + selectedWorkerHistoryHtml + years.map(year => {
+  container.innerHTML = currentCashHtml + currentCurrencyHtml + selectedWorkerHistoryHtml + years.map(year => {
     const yearKey = `owner-cash-year-${year}`;
     const monthsHtml = Object.keys(tree[year]).sort((a, b) => b.localeCompare(a)).map(monthKey => {
       const monthToggleKey = `owner-cash-month-${monthKey}`;

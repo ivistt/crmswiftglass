@@ -364,6 +364,76 @@ async function sbDeleteCashEntry(id) {
   if (!res.ok) await throwApiError(res);
 }
 
+const FX_USD_CASH_PREFIX = 'FXUSD|';
+
+function buildCurrencyCashComment({ usdAmount, rate, uahAmount, note = '' }) {
+  return [
+    FX_USD_CASH_PREFIX + 'usd=' + String(Number(usdAmount) || 0),
+    'rate=' + String(Number(rate) || 0),
+    'uah=' + String(Number(uahAmount) || 0),
+    'note=' + encodeURIComponent(String(note || '').trim()),
+  ].join('|');
+}
+
+function parseCurrencyCashEntry(entry) {
+  const raw = String(entry?.comment || '');
+  if (!raw.startsWith(FX_USD_CASH_PREFIX)) return null;
+  const parts = raw.split('|');
+  const data = {};
+  for (const part of parts) {
+    const idx = part.indexOf('=');
+    if (idx === -1) continue;
+    const key = part.slice(0, idx);
+    const value = part.slice(idx + 1);
+    data[key] = value;
+  }
+  const usdAmount = Number(data.usd) || 0;
+  if (!usdAmount) return null;
+  return {
+    usdAmount,
+    rate: Number(data.rate) || 0,
+    uahAmount: Number(data.uah) || Math.abs(Number(entry?.amount) || 0),
+    note: decodeURIComponent(String(data.note || '')),
+  };
+}
+
+function isCurrencyCashEntry(entry) {
+  return !!parseCurrencyCashEntry(entry);
+}
+
+function getCashEntryDisplayComment(entry) {
+  const parsed = parseCurrencyCashEntry(entry);
+  if (!parsed) return String(entry?.comment || '—');
+  return parsed.note
+    ? `Обмен в валютную кассу · ${parsed.note}`
+    : 'Обмен в валютную кассу';
+}
+
+function getCashEntryDisplayMeta(entry) {
+  const parsed = parseCurrencyCashEntry(entry);
+  if (!parsed) return '';
+  const parts = [];
+  if (parsed.usdAmount) parts.push(`${parsed.usdAmount.toLocaleString('ru')} $`);
+  if (parsed.rate) parts.push(`курс ${parsed.rate.toLocaleString('ru')}`);
+  if (parsed.uahAmount) parts.push(`списано ${parsed.uahAmount.toLocaleString('ru')} ₴`);
+  return parts.join(' · ');
+}
+
+function getCashEntrySearchText(entry) {
+  return [
+    String(entry?.comment || ''),
+    getCashEntryDisplayComment(entry),
+    getCashEntryDisplayMeta(entry),
+  ].join(' ');
+}
+
+function calcCurrencyCashBalance(entries) {
+  return (entries || []).reduce((sum, entry) => {
+    const parsed = parseCurrencyCashEntry(entry);
+    return sum + (parsed?.usdAmount || 0);
+  }, 0);
+}
+
 // ── REF DATA ─────────────────────────────────────────────────
 
 async function sbFetchRef(table) {

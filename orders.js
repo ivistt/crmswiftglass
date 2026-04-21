@@ -434,7 +434,9 @@ function renderOrderCardServices(order) {
 
 function renderOrderCardCallNotes(order) {
   if (currentRole !== 'owner' && currentRole !== 'manager') return '';
-  if (!order?.callStatus || !order.notes) return '';
+  if (!order?.notes) return '';
+  if (currentRole === 'manager') return `<div class="order-card-note">${escapeHtml(order.notes)}</div>`;
+  if (!order?.callStatus) return '';
   return `<div class="order-card-note">${escapeHtml(order.notes)}</div>`;
 }
 
@@ -1098,7 +1100,7 @@ function copyOrderSummary(id) {
   const fmt = value => `${Number(value).toLocaleString('ru')} ₴`;
   const services = [
     ['Монтаж', o.mount],
-    ['Молдинг', o.molding],
+    ['Молдинг (под вопросом)', o.molding],
     ['Доп. работы', o.extraWork],
     ['Тату', o.tatu],
     ['Тонировка', o.toning],
@@ -2574,8 +2576,7 @@ async function toggleWorkerDone(orderId) {
   }
   if (o.workerDone) return;
   if (!o.onlySale && !String(o.serviceType || '').trim()) {
-    showToast('Сначала выберите услуги по заказу', 'error');
-    openOrderServicesModal(orderId);
+    alert('Услуги не выбраны, ЗП не начислится');
     return;
   }
   if (!confirm(`Отметить заказ ${o.id} выполненным? После этого будет начислена зарплата.`)) return;

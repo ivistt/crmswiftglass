@@ -178,10 +178,12 @@ function renderCashScreen() {
 
   const today = getLocalDateString();
   const regularCashLog = (workerCashLog || []).filter(entry => !isFopCashEntry(entry));
+  const currencyCashLog = regularCashLog.filter(isCurrencyCashEntry);
   const fopCashLog = (workerCashLog || []).filter(isFopCashEntry);
   const confirmedFopCashLog = fopCashLog.filter(entry => entry.fop_confirmed === true);
   const pendingFopCashLog = fopCashLog.filter(entry => entry.fop_confirmed !== true);
   const balance = calcCashBalance(regularCashLog);
+  const currencyBalance = calcCurrencyCashBalance(currencyCashLog);
   const fopBalance = calcCashBalance(confirmedFopCashLog);
 
   el.innerHTML = ''
@@ -191,6 +193,7 @@ function renderCashScreen() {
     + '<div style="font-size:13px;color:var(--text3);margin-top:2px;">Касса</div></div>'
     + '</div>'
     + renderCashSection(regularCashLog, balance, today, { title: 'Касса (наличка)', account: 'cash', buttonText: '+ Запись' })
+    + renderCurrencyCashSection(currencyCashLog, currencyBalance, today)
     + (currentWorkerName === FOP_CASH_WORKER_NAME
       ? renderCashSection(confirmedFopCashLog, fopBalance, today, { title: 'Касса БАБЕНКО', account: 'fop', buttonText: '+ БАБЕНКО', pendingEntries: pendingFopCashLog })
       : '')
@@ -816,7 +819,7 @@ function _filterCashLogByComment(log, query) {
   if (!normalized) return log || [];
   const words = normalized.split(/\s+/).filter(Boolean);
   return (log || []).filter(e => {
-    const comment = String(e.comment || '').toLowerCase();
+    const comment = String(getCashEntrySearchText(e) || '').toLowerCase();
     return words.every(word => comment.includes(word));
   });
 }
@@ -834,15 +837,151 @@ function _cashEntryRow(e) {
   const color = amt >= 0 ? 'var(--accent)' : '#ef4444';
   const dt    = new Date(e.created_at);
   const time  = dt.toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' });
+  const displayComment = getCashEntryDisplayComment(e);
+  const displayMeta = getCashEntryDisplayMeta(e);
   return '<div style="display:flex;justify-content:space-between;align-items:center;'
     + 'padding:10px 0;border-bottom:1px solid var(--border);">'
     + '<div>'
-    + '<div style="font-size:13px;color:var(--text2);">' + escapeHtml(e.comment || '—') + '</div>'
-    + '<div style="font-size:11px;color:var(--text3);margin-top:2px;">' + time + '</div>'
+    + '<div style="font-size:13px;color:var(--text2);">' + escapeHtml(displayComment || '—') + '</div>'
+    + '<div style="font-size:11px;color:var(--text3);margin-top:2px;">' + time + (displayMeta ? ' · ' + escapeHtml(displayMeta) : '') + '</div>'
     + '</div>'
     + '<div style="font-size:15px;font-weight:800;color:' + color + ';white-space:nowrap;margin-left:12px;">'
     + sign + amt.toLocaleString('ru') + ' \u20B4</div>'
     + '</div>';
+}
+
+function renderCurrencyCashSection(log, balance, today) {
+  const todayLog = (log || []).filter(e => _cashEntryDate(e) === today);
+  const archiveLog = (log || []).filter(e => _cashEntryDate(e) !== today);
+  const todayBalance = calcCurrencyCashBalance(todayLog);
+  const todayRowsHtml = todayLog.length
+    ? todayLog.map(e => _currencyCashEntryRow(e)).join('')
+    : '<div style="text-align:center;color:var(--text3);font-size:13px;padding:10px 0;">Сегодня обменов не было</div>';
+
+  return '<div class="profile-today-card" style="margin-top:12px;">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">'
+    + '<div>'
+    + '<div class="profile-today-label"><i data-lucide="badge-dollar-sign" style="width:15px;height:15px;"></i> Касса (валютная)</div>'
+    + '<div style="font-size:28px;font-weight:800;color:var(--accent);margin-top:4px;">' + balance.toLocaleString('ru') + ' $</div>'
+    + '<div style="font-size:11px;color:var(--text3);">общий баланс в валюте</div>'
+    + '</div>'
+    + '<div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">'
+    + '<button class="btn-secondary" style="font-size:12px;padding:6px 10px;" onclick="openCashEntryModal(\'currency\')">+ Обмен</button>'
+    + '</div>'
+    + '</div>'
+    + '<div style="margin-bottom:16px;">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">'
+    + '<div style="font-size:12px;font-weight:700;color:var(--text3);letter-spacing:0.04em;">' + icon('calendar') + ' СЕГОДНЯ</div>'
+    + '<div style="font-size:15px;font-weight:800;color:var(--accent);">+' + todayBalance.toLocaleString('ru') + ' $</div>'
+    + '</div>'
+    + '<div style="background:var(--surface2);border-radius:10px;padding:0 12px;">'
+    + todayRowsHtml
+    + '</div>'
+    + '</div>'
+    + '<div>'
+    + '<div style="font-size:12px;font-weight:700;color:var(--text3);letter-spacing:0.04em;margin-bottom:8px;">🗂 АРХИВ</div>'
+    + (archiveLog.length ? _buildCurrencyCashArchive(archiveLog) : '<div style="text-align:center;color:var(--text3);font-size:13px;padding:10px 0;">Обменов пока нет</div>')
+    + '</div>'
+    + '</div>';
+}
+
+function _currencyCashEntryRow(entry) {
+  const parsed = parseCurrencyCashEntry(entry);
+  if (!parsed) return '';
+  const dt = new Date(entry.created_at);
+  const time = dt.toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' });
+  const title = parsed.note ? 'Обмен в валютную кассу · ' + parsed.note : 'Обмен в валютную кассу';
+  const meta = [
+    parsed.rate ? 'курс ' + parsed.rate.toLocaleString('ru') : '',
+    parsed.uahAmount ? 'списано ' + parsed.uahAmount.toLocaleString('ru') + ' ₴' : '',
+  ].filter(Boolean).join(' · ');
+  return '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);">'
+    + '<div>'
+    + '<div style="font-size:13px;color:var(--text2);">' + escapeHtml(title) + '</div>'
+    + '<div style="font-size:11px;color:var(--text3);margin-top:2px;">' + time + (meta ? ' · ' + escapeHtml(meta) : '') + '</div>'
+    + '</div>'
+    + '<div style="font-size:15px;font-weight:800;color:var(--accent);white-space:nowrap;margin-left:12px;">+' + parsed.usdAmount.toLocaleString('ru') + ' $</div>'
+    + '</div>';
+}
+
+function _buildCurrencyCashArchive(log) {
+  if (!log.length) return '';
+  const MONTH_NAMES = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+  const tree = {};
+
+  for (const entry of log) {
+    const parsed = parseCurrencyCashEntry(entry);
+    if (!parsed) continue;
+    const d = _cashEntryDate(entry);
+    if (!d) continue;
+    const year = d.slice(0, 4);
+    const month = d.slice(0, 7);
+    const day = d;
+    if (!tree[year]) tree[year] = {};
+    if (!tree[year][month]) tree[year][month] = {};
+    if (!tree[year][month][day]) tree[year][month][day] = [];
+    tree[year][month][day].push(entry);
+  }
+
+  const years = Object.keys(tree).sort((a, b) => b.localeCompare(a));
+  return years.map(year => {
+    const yearEntries = Object.values(tree[year]).flatMap(month => Object.values(month).flat());
+    const yearSum = calcCurrencyCashBalance(yearEntries);
+    const yearKey = 'currency-cash-year-' + year;
+    const monthsHtml = Object.keys(tree[year]).sort((a, b) => b.localeCompare(a)).map(ym => {
+      const monthEntries = Object.values(tree[year][ym]).flat();
+      const monthSum = calcCurrencyCashBalance(monthEntries);
+      const monthKey = 'currency-cash-month-' + ym;
+      const [, month] = ym.split('-');
+      const daysHtml = Object.keys(tree[year][ym]).sort((a, b) => b.localeCompare(a)).map(day => {
+        const entries = tree[year][ym][day];
+        const daySum = calcCurrencyCashBalance(entries);
+        const dayKey = 'currency-cash-day-' + day;
+        const [dy, dm, dd] = day.split('-');
+        return '<div style="border-bottom:1px solid var(--border);">'
+          + '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;cursor:pointer;" onclick="toggleProfileMonth(\'' + dayKey + '\')">'
+          + '<div style="display:flex;align-items:center;gap:8px;">'
+          + '<i data-lucide="chevron-right" style="width:13px;height:13px;color:var(--text3);transition:transform 0.2s;" id="pchevron-' + dayKey + '"></i>'
+          + '<div style="font-size:13px;color:var(--text2);font-weight:600;">' + dd + '.' + dm + '.' + dy + '</div>'
+          + '<div style="font-size:11px;color:var(--text3);">' + entries.length + ' зап.</div>'
+          + '</div>'
+          + '<div style="font-size:13px;font-weight:800;color:var(--accent);">+' + daySum.toLocaleString('ru') + ' $</div>'
+          + '</div>'
+          + '<div id="profile-month-body-' + dayKey + '" style="display:none;padding:0 12px 4px 28px;">'
+          + entries.map(item => _currencyCashEntryRow(item)).join('')
+          + '</div>'
+          + '</div>';
+      }).join('');
+
+      return '<div style="border-bottom:1px solid var(--border);">'
+        + '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;cursor:pointer;" onclick="toggleProfileMonth(\'' + monthKey + '\')">'
+        + '<div style="display:flex;align-items:center;gap:8px;">'
+        + '<i data-lucide="chevron-right" style="width:14px;height:14px;color:var(--text3);transition:transform 0.2s;" id="pchevron-' + monthKey + '"></i>'
+        + '<div style="font-size:14px;font-weight:700;color:var(--text2);">' + (MONTH_NAMES[parseInt(month, 10) - 1] || ym) + '</div>'
+        + '<div style="font-size:11px;color:var(--text3);">' + Object.keys(tree[year][ym]).length + ' дн.</div>'
+        + '</div>'
+        + '<div style="font-size:14px;font-weight:800;color:var(--accent);">+' + monthSum.toLocaleString('ru') + ' $</div>'
+        + '</div>'
+        + '<div id="profile-month-body-' + monthKey + '" style="display:none;padding-left:12px;background:var(--surface2);border-radius:0 0 8px 8px;">'
+        + daysHtml
+        + '</div>'
+        + '</div>';
+    }).join('');
+
+    return '<div class="fin-month-card" style="margin-bottom:8px;">'
+      + '<div class="fin-month-header" onclick="toggleProfileMonth(\'' + yearKey + '\')">'
+      + '<div style="display:flex;align-items:center;gap:10px;">'
+      + '<i data-lucide="chevron-down" style="width:16px;height:16px;color:var(--text3);transition:transform 0.2s;" id="pchevron-' + yearKey + '"></i>'
+      + '<div><div class="fin-month-name">' + year + ' год</div>'
+      + '<div class="fin-month-sub">' + Object.keys(tree[year]).length + ' мес.</div>'
+      + '</div></div>'
+      + '<div style="font-size:18px;font-weight:800;color:var(--accent);">+' + yearSum.toLocaleString('ru') + ' $</div>'
+      + '</div>'
+      + '<div id="profile-month-body-' + yearKey + '" style="display:none;padding:0 0 8px;">'
+      + monthsHtml
+      + '</div>'
+      + '</div>';
+  }).join('');
 }
 
 // Строит архив: год → месяц → день (все сворачиваемые)
@@ -954,12 +1093,55 @@ function _buildCashArchive(log) {
 // ── МОДАЛ ДОБАВЛЕНИЯ ЗАПИСИ В КАССУ ─────────────────────────
 
 function openCashEntryModal(account = 'cash') {
-  window._cashAccount = account === 'fop' ? 'fop' : 'cash';
+  window._cashAccount = account === 'fop'
+    ? 'fop'
+    : (account === 'card' ? 'card' : (account === 'currency' ? 'currency' : 'cash'));
   let modal = document.getElementById('cash-entry-modal');
   if (!modal) {
     modal = document.createElement('div');
     modal.id = 'cash-entry-modal';
     modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+
+  if (window._cashAccount === 'currency') {
+    modal.innerHTML = `
+      <div class="modal" style="max-width:420px;">
+        <div class="modal-header">
+          <div class="modal-title">${icon('badge-dollar-sign')} Обмен в валютную кассу</div>
+          <button class="modal-close" onclick="closeCashEntryModal()">
+            <i data-lucide="x" style="width:16px;height:16px;"></i>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="form-grid col-1">
+            <div class="form-group">
+              <label class="form-label">Курс обмена</label>
+              <input class="form-input" type="text" inputmode="decimal" id="cash-rate-input" placeholder="Например 41.5">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Сумма в валюте ($)</label>
+              <input class="form-input" type="text" inputmode="decimal" id="cash-usd-amount-input" placeholder="Например 100">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Комментарий</label>
+              <input class="form-input" type="text" id="cash-comment-input" placeholder="Напр. обмен в кассе">
+            </div>
+            <div style="font-size:12px;color:var(--text3);padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--surface2);">
+              Сумма спишется из гривневой кассы и появится в валютной после сохранения
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" onclick="closeCashEntryModal()">Отмена</button>
+          <button class="btn-primary" id="cash-entry-save-btn" style="display:flex;align-items:center;gap:6px;" onclick="saveCashEntry()">
+            <i data-lucide="save" style="width:14px;height:14px;"></i>
+            Сохранить
+          </button>
+        </div>
+      </div>
+    `;
+  } else {
     modal.innerHTML = `
       <div class="modal" style="max-width:400px;">
         <div class="modal-header">
@@ -1001,24 +1183,25 @@ function openCashEntryModal(account = 'cash') {
         </div>
       </div>
     `;
-    document.body.appendChild(modal);
-  }
-
-  document.getElementById('cash-amount-input').value = '';
-  document.getElementById('cash-comment-input').value = '';
-  const titleEl = modal.querySelector('.modal-title');
-  if (titleEl) {
-    const titleByAccount = window._cashAccount === 'fop'
-      ? ' Запись в кассу БАБЕНКО'
-      : (window._cashAccount === 'card' ? ' Запись на карту Саши' : ' Запись в кассу');
-    titleEl.innerHTML = icon('banknote') + titleByAccount;
+    document.getElementById('cash-amount-input').value = '';
+    document.getElementById('cash-comment-input').value = '';
+    const titleEl = modal.querySelector('.modal-title');
+    if (titleEl) {
+      const titleByAccount = window._cashAccount === 'fop'
+        ? ' Запись в кассу БАБЕНКО'
+        : (window._cashAccount === 'card' ? ' Запись на карту Саши' : ' Запись в кассу');
+      titleEl.innerHTML = icon('banknote') + titleByAccount;
+    }
   }
   window._cashSign = 1;
   _updateCashSignButtons();
 
   modal.classList.add('active');
   initIcons();
-  setTimeout(() => document.getElementById('cash-amount-input').focus(), 100);
+  setTimeout(() => {
+    const targetId = window._cashAccount === 'currency' ? 'cash-rate-input' : 'cash-amount-input';
+    document.getElementById(targetId)?.focus();
+  }, 100);
 }
 
 function closeCashEntryModal() {
@@ -1045,39 +1228,74 @@ function _updateCashSignButtons() {
 }
 
 async function saveCashEntry() {
-  const rawAmt  = Number(document.getElementById('cash-amount-input')?.value);
-  const comment = document.getElementById('cash-comment-input')?.value.trim();
-  const sign    = window._cashSign || 1;
-
-  if (!rawAmt || rawAmt <= 0) {
-    showToast('Введите сумму', 'error');
-    return;
-  }
-
-  const amount = rawAmt * sign;
   const btn = document.getElementById('cash-entry-save-btn');
-  if (!comment) {
-    showToast('Введите комментарий', 'error');
-    document.getElementById('cash-comment-input')?.focus();
-    return;
-  }
   if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
 
   try {
-    const entry = await sbInsertCashEntry({
-      worker_name: currentWorkerName,
-      amount,
-      comment,
-      cash_account: window._cashAccount === 'fop' ? 'fop' : (window._cashAccount === 'card' ? 'card' : 'cash'),
-      fop_confirmed: false,
-      fop_date: (window._cashAccount === 'fop' || window._cashAccount === 'card') ? getLocalDateString() : null,
-    });
+    let entry;
+    if (window._cashAccount === 'currency') {
+      const parseDecimalInput = (value) => {
+        const normalized = String(value || '').replace(',', '.').trim();
+        return Number(normalized);
+      };
+      const rate = parseDecimalInput(document.getElementById('cash-rate-input')?.value);
+      const usdAmount = parseDecimalInput(document.getElementById('cash-usd-amount-input')?.value);
+      const note = document.getElementById('cash-comment-input')?.value.trim() || '';
+      if (!rate || rate <= 0) {
+        showToast('Введите курс обмена', 'error');
+        document.getElementById('cash-rate-input')?.focus();
+        return;
+      }
+      if (!usdAmount || usdAmount <= 0) {
+        showToast('Введите сумму в валюте', 'error');
+        document.getElementById('cash-usd-amount-input')?.focus();
+        return;
+      }
+      const uahAmount = Math.round(rate * usdAmount * 100) / 100;
+      const currentCashBalance = calcCashBalance((workerCashLog || []).filter(item => !isFopCashEntry(item)));
+      if (uahAmount > currentCashBalance) {
+        showToast('Недостаточно гривны в кассе', 'error');
+        return;
+      }
+      entry = await sbInsertCashEntry({
+        worker_name: currentWorkerName,
+        amount: -uahAmount,
+        comment: buildCurrencyCashComment({ usdAmount, rate, uahAmount, note }),
+        cash_account: 'cash',
+        fop_confirmed: false,
+        fop_date: null,
+      });
+    } else {
+      const rawAmt = Number(document.getElementById('cash-amount-input')?.value);
+      const comment = document.getElementById('cash-comment-input')?.value.trim();
+      const sign = window._cashSign || 1;
+
+      if (!rawAmt || rawAmt <= 0) {
+        showToast('Введите сумму', 'error');
+        return;
+      }
+      if (!comment) {
+        showToast('Введите комментарий', 'error');
+        document.getElementById('cash-comment-input')?.focus();
+        return;
+      }
+
+      const amount = rawAmt * sign;
+      entry = await sbInsertCashEntry({
+        worker_name: currentWorkerName,
+        amount,
+        comment,
+        cash_account: window._cashAccount === 'fop' ? 'fop' : (window._cashAccount === 'card' ? 'card' : 'cash'),
+        fop_confirmed: false,
+        fop_date: (window._cashAccount === 'fop' || window._cashAccount === 'card') ? getLocalDateString() : null,
+      });
+    }
     workerCashLog.unshift(entry);
     if (Array.isArray(window.allCashLog) && entry) window.allCashLog.unshift(entry);
     closeCashEntryModal();
     if (document.getElementById('screen-profile')?.classList.contains('active')) renderProfile();
     renderCashScreen();
-    showToast('Записано в кассу ✓');
+    showToast(window._cashAccount === 'currency' ? 'Обмен в валютную кассу сохранен ✓' : 'Записано в кассу ✓');
   } catch (e) {
     showToast('Ошибка: ' + e.message, 'error');
   } finally {
