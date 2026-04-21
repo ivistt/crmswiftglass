@@ -874,6 +874,7 @@ function renderCurrencyCashSection(log, balance, today) {
     + '<div style="font-size:11px;color:var(--text3);">общий баланс в валюте</div>'
     + '</div>'
     + '<div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">'
+    + '<button class="btn-secondary" style="font-size:12px;padding:6px 10px;" onclick="openCashEntryModal(\'currency-entry\')">+ Запись</button>'
     + '<button class="btn-secondary" style="font-size:12px;padding:6px 10px;" onclick="openCashEntryModal(\'currency\')">+ Обмен</button>'
     + '</div>'
     + '</div>'
@@ -1106,7 +1107,7 @@ function _buildCashArchive(log) {
 function openCashEntryModal(account = 'cash') {
   window._cashAccount = account === 'fop'
     ? 'fop'
-    : (account === 'card' ? 'card' : (account === 'currency' ? 'currency' : (account === 'currency-back' ? 'currency-back' : 'cash')));
+    : (account === 'card' ? 'card' : (account === 'currency' ? 'currency' : (account === 'currency-back' ? 'currency-back' : (account === 'currency-entry' ? 'currency-entry' : 'cash'))));
   let modal = document.getElementById('cash-entry-modal');
   if (!modal) {
     modal = document.createElement('div');
@@ -1148,6 +1149,48 @@ function openCashEntryModal(account = 'cash') {
         <div class="modal-footer">
           <button class="btn-secondary" onclick="closeCashEntryModal()">Отмена</button>
           <button class="btn-primary" id="cash-entry-save-btn" style="display:flex;align-items:center;gap:6px;" onclick="saveCashEntry()">
+            <i data-lucide="save" style="width:14px;height:14px;"></i>
+            Сохранить
+          </button>
+        </div>
+      </div>
+    `;
+  } else if (window._cashAccount === 'currency-entry') {
+    modal.innerHTML = `
+      <div class="modal" style="max-width:420px;">
+        <div class="modal-header">
+          <div class="modal-title">${icon('badge-dollar-sign')} Запись в валютную кассу</div>
+          <button class="modal-close" onclick="closeCashEntryModal()">
+            <i data-lucide="x" style="width:16px;height:16px;"></i>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="form-grid col-1">
+            <div class="form-group">
+              <label class="form-label">Сумма ($)</label>
+              <div style="display:flex;gap:8px;">
+                <button class="btn-secondary" id="cash-sign-plus"
+                  style="font-size:18px;font-weight:800;padding:8px 16px;"
+                  onclick="setCashSign(1)">+</button>
+                <button class="btn-secondary" id="cash-sign-minus"
+                  style="font-size:18px;font-weight:800;padding:8px 16px;"
+                  onclick="setCashSign(-1)">−</button>
+                <input class="form-input" type="text" inputmode="decimal" id="cash-usd-amount-input"
+                  placeholder="100" style="flex:1;">
+              </div>
+              <div style="font-size:11px;color:var(--text3);margin-top:4px;">+ приход &nbsp;·&nbsp; − расход</div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Комментарий</label>
+              <input class="form-input" type="text" id="cash-comment-input"
+                placeholder="Напр. клиент дал наличные в $" required>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" onclick="closeCashEntryModal()">Отмена</button>
+          <button class="btn-primary" id="cash-entry-save-btn"
+            style="display:flex;align-items:center;gap:6px;" onclick="saveCashEntry()">
             <i data-lucide="save" style="width:14px;height:14px;"></i>
             Сохранить
           </button>
@@ -1212,7 +1255,9 @@ function openCashEntryModal(account = 'cash') {
   modal.classList.add('active');
   initIcons();
   setTimeout(() => {
-    const targetId = window._cashAccount === 'currency' ? 'cash-rate-input' : 'cash-amount-input';
+    const targetId = (window._cashAccount === 'currency' || window._cashAccount === 'currency-back')
+      ? 'cash-rate-input'
+      : (window._cashAccount === 'currency-entry' ? 'cash-usd-amount-input' : 'cash-amount-input');
     document.getElementById(targetId)?.focus();
   }, 100);
 }
@@ -1286,6 +1331,38 @@ async function saveCashEntry() {
         fop_confirmed: false,
         fop_date: null,
       });
+    } else if (window._cashAccount === 'currency-entry') {
+      const parseDecimalInput = (value) => {
+        const normalized = String(value || '').replace(',', '.').trim();
+        return Number(normalized);
+      };
+      const usdAmount = parseDecimalInput(document.getElementById('cash-usd-amount-input')?.value);
+      const note = document.getElementById('cash-comment-input')?.value.trim() || '';
+      const sign = window._cashSign || 1;
+      if (!usdAmount || usdAmount <= 0) {
+        showToast('Введите сумму в валюте', 'error');
+        document.getElementById('cash-usd-amount-input')?.focus();
+        return;
+      }
+      if (!note) {
+        showToast('Введите комментарий', 'error');
+        document.getElementById('cash-comment-input')?.focus();
+        return;
+      }
+      const signedUsdAmount = usdAmount * sign;
+      const currentCurrencyBalance = calcCurrencyCashBalance((workerCashLog || []).filter(item => !isFopCashEntry(item)).filter(isCurrencyCashEntry));
+      if (signedUsdAmount < 0 && Math.abs(signedUsdAmount) > currentCurrencyBalance) {
+        showToast('Недостаточно валюты в кассе', 'error');
+        return;
+      }
+      entry = await sbInsertCashEntry({
+        worker_name: currentWorkerName,
+        amount: 0,
+        comment: buildCurrencyCashComment({ usdAmount: signedUsdAmount, rate: 0, uahAmount: 0, note }),
+        cash_account: 'cash',
+        fop_confirmed: false,
+        fop_date: null,
+      });
     } else {
       const rawAmt = Number(document.getElementById('cash-amount-input')?.value);
       const comment = document.getElementById('cash-comment-input')?.value.trim();
@@ -1319,7 +1396,9 @@ async function saveCashEntry() {
     showToast(
       window._cashAccount === 'currency'
         ? 'Обмен в валютную кассу сохранен ✓'
-        : (window._cashAccount === 'currency-back' ? 'Возврат из валютной кассы сохранен ✓' : 'Записано в кассу ✓')
+        : (window._cashAccount === 'currency-back'
+          ? 'Возврат из валютной кассы сохранен ✓'
+          : (window._cashAccount === 'currency-entry' ? 'Запись в валютную кассу сохранена ✓' : 'Записано в кассу ✓'))
     );
   } catch (e) {
     showToast('Ошибка: ' + e.message, 'error');

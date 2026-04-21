@@ -404,7 +404,9 @@ function isCurrencyCashEntry(entry) {
 function getCashEntryDisplayComment(entry) {
   const parsed = parseCurrencyCashEntry(entry);
   if (!parsed) return String(entry?.comment || '—');
-  const base = parsed.usdAmount > 0 ? 'Обмен в валютную кассу' : 'Возврат из валютной кассы';
+  const base = parsed.uahAmount > 0
+    ? (parsed.usdAmount > 0 ? 'Обмен в валютную кассу' : 'Возврат из валютной кассы')
+    : (parsed.usdAmount > 0 ? 'Запись в валютную кассу' : 'Списание из валютной кассы');
   return parsed.note
     ? `${base} · ${parsed.note}`
     : base;
