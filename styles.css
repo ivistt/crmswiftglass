@@ -2656,7 +2656,7 @@ input[type="datetime-local"] {
   background: var(--accent);
   color: #000;
 }
-.service-checkboxes label.checkbox input {
+.service-checkboxes label.checkbox input[type="checkbox"] {
   display: none;
 }
 

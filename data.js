@@ -863,14 +863,51 @@ function _getCompletedOrdersForWorkerDate(workerName, date) {
   );
 }
 
-function _salarySelectedServiceItems(order) {
-  const raw = String(order?.serviceType || '');
+function parseOrderServiceSelections(serviceTypeValue) {
+  const raw = String(serviceTypeValue || '').trim();
   if (!raw) return [];
-  const byName = (typeof SERVICE_TYPE_BY_NAME !== 'undefined') ? SERVICE_TYPE_BY_NAME : {};
-  return raw.split(',')
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed
+        .map(item => {
+          if (typeof item === 'string') {
+            const name = item.trim();
+            return name ? { name, qty: 1 } : null;
+          }
+          const name = String(item?.name || '').trim();
+          const qty = Math.max(1, Number(item?.qty) || 1);
+          return name ? { name, qty } : null;
+        })
+        .filter(Boolean);
+    }
+  } catch (e) {
+    // старый формат ниже
+  }
+  return raw
+    .split(',')
     .map(s => s.trim())
     .filter(Boolean)
-    .map(name => byName[name] || { name, rate: 0, salaryCategory: 'custom' });
+    .map(name => ({ name, qty: 1 }));
+}
+
+function stringifyOrderServiceSelections(items) {
+  const normalized = (items || [])
+    .map(item => ({
+      name: String(item?.name || '').trim(),
+      qty: Math.max(1, Number(item?.qty) || 1),
+    }))
+    .filter(item => item.name);
+  return normalized.length ? JSON.stringify(normalized) : '';
+}
+
+function _salarySelectedServiceItems(order) {
+  const byName = (typeof SERVICE_TYPE_BY_NAME !== 'undefined') ? SERVICE_TYPE_BY_NAME : {};
+  return parseOrderServiceSelections(order?.serviceType)
+    .flatMap(item => {
+      const service = byName[item.name] || { name: item.name, rate: 0, salaryCategory: 'custom' };
+      return Array.from({ length: Math.max(1, Number(item.qty) || 1) }, () => service);
+    });
 }
 
 function hasCustomSalaryService(order) {
@@ -936,11 +973,20 @@ function getWorkerOrderSalaryBreakdown(workerName, order) {
         parts.push({ label: 'Нестандартная работа, внесите запись в кассу', amount: 0 });
       }
       const adjustments = rule.serviceAdjustments || {};
+      const groupedServices = {};
       _salarySelectedServiceItems(order).forEach(item => {
         if (item.salaryCategory === 'custom') return;
         const adjustment = Number(adjustments[item.salaryCategory]) || 0;
         const amount = Math.max(0, (Number(item.rate) || 0) + adjustment);
-        if (amount > 0) parts.push({ label: item.name, amount });
+        if (amount <= 0) return;
+        if (!groupedServices[item.name]) {
+          groupedServices[item.name] = { qty: 0, amount: 0 };
+        }
+        groupedServices[item.name].qty += 1;
+        groupedServices[item.name].amount += amount;
+      });
+      Object.entries(groupedServices).forEach(([name, item]) => {
+        parts.push({ label: item.qty > 1 ? `${name} ×${item.qty}` : name, amount: item.amount });
       });
     }
 

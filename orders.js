@@ -99,6 +99,56 @@ function getGlassManufacturerCopyText(name) {
     : `Производитель стекла: ${name}`;
 }
 
+function getOrderServiceSelections(value) {
+  if (typeof parseOrderServiceSelections === 'function') {
+    return parseOrderServiceSelections(value);
+  }
+  const raw = String(value || '').trim();
+  if (!raw) return [];
+  return raw.split(',').map(s => s.trim()).filter(Boolean).map(name => ({ name, qty: 1 }));
+}
+
+function getOrderServiceSelectionMap(value) {
+  const map = new Map();
+  getOrderServiceSelections(value).forEach(item => {
+    map.set(item.name, Math.max(1, Number(item.qty) || 1));
+  });
+  return map;
+}
+
+function serializeOrderServiceSelections(items) {
+  if (typeof stringifyOrderServiceSelections === 'function') {
+    return stringifyOrderServiceSelections(items);
+  }
+  return (items || []).map(item => item.name).join(', ');
+}
+
+function formatOrderServiceLabel(name, qty = 1) {
+  const safeQty = Math.max(1, Number(qty) || 1);
+  return safeQty > 1 ? `${name} ×${safeQty}` : name;
+}
+
+function formatOrderServiceTypeText(value) {
+  return getOrderServiceSelections(value)
+    .map(item => formatOrderServiceLabel(item.name, item.qty))
+    .join(', ');
+}
+
+function getOrderServicesModalQtyInput(name) {
+  return [...document.querySelectorAll('#order-services-modal-list [data-service-qty]')]
+    .find(el => el.getAttribute('data-service-qty') === name) || null;
+}
+
+function getOrderServicesModalCheckbox(name) {
+  return [...document.querySelectorAll('#order-services-modal-list input[type="checkbox"]')]
+    .find(el => el.value === name) || null;
+}
+
+function getOrderFormServiceQtyInput(name) {
+  return [...document.querySelectorAll('#service-type-checkboxes [data-form-service-qty]')]
+    .find(el => el.getAttribute('data-form-service-qty') === name) || null;
+}
+
 function calcClientPaymentStatus(totalPaid, totalAmount) {
   const paid = Number(totalPaid) || 0;
   const total = Number(totalAmount) || 0;
@@ -422,13 +472,10 @@ function renderOrderCard(o) {
 
 function renderOrderCardServices(order) {
   if (currentRole !== 'owner' && currentRole !== 'manager') return '';
-  const services = String(order?.serviceType || '')
-    .split(',')
-    .map(s => s.trim())
-    .filter(Boolean);
+  const services = getOrderServiceSelections(order?.serviceType);
   if (!services.length) return '';
   return '<div class="order-card-services">'
-    + services.map(name => `<span class="order-service-pill">${escapeHtml(name)}</span>`).join('')
+    + services.map(item => `<span class="order-service-pill">${escapeHtml(formatOrderServiceLabel(item.name, item.qty))}</span>`).join('')
     + '</div>';
 }
 
@@ -495,16 +542,33 @@ function openOrderServicesModal(orderId) {
     document.body.appendChild(modal);
   }
 
-  const selected = new Set(String(order.serviceType || '').split(',').map(s => s.trim()).filter(Boolean));
+  const selectedMap = getOrderServiceSelectionMap(order.serviceType);
   const groups = [...new Set(SERVICE_TYPE_OPTIONS.map(item => item.group))];
   const servicesHtml = groups.map(group => `
     <div class="service-group">
       <div class="service-group-title">${escapeHtml(group)}</div>
       <div class="service-group-options">
         ${SERVICE_TYPE_OPTIONS.filter(item => item.group === group).map(item => `
-          <label class="checkbox">
-            <input type="checkbox" value="${escapeAttr(item.name)}" ${selected.has(item.name) ? 'checked' : ''} onchange="syncOrderServicesModalSelection(this)">
-            <span>${escapeHtml(item.name)}</span>
+          <label class="checkbox" style="justify-content:space-between;align-items:center;gap:10px;">
+            <span style="display:flex;align-items:center;gap:8px;min-width:0;">
+              <input type="checkbox" value="${escapeAttr(item.name)}" ${selectedMap.has(item.name) ? 'checked' : ''} onchange="syncOrderServicesModalSelection(this)">
+              <span>${escapeHtml(item.name)}</span>
+            </span>
+            <span style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+              <button type="button" class="icon-btn" style="width:28px;height:28px;border-radius:8px;" onclick="event.preventDefault(); event.stopPropagation(); adjustOrderServiceQty('${escapeAttr(item.name)}', -1)">−</button>
+            <input
+                type="number"
+                min="1"
+                step="1"
+                class="form-input"
+                data-service-qty="${escapeAttr(item.name)}"
+                value="${selectedMap.get(item.name) || 0}"
+                style="width:64px;padding:8px 10px;text-align:center;"
+                onclick="event.stopPropagation()"
+                oninput="syncOrderServiceQtyInput('${escapeAttr(item.name)}', this.value)"
+              >
+              <button type="button" class="icon-btn" style="width:28px;height:28px;border-radius:8px;" onclick="event.preventDefault(); event.stopPropagation(); adjustOrderServiceQty('${escapeAttr(item.name)}', 1)">+</button>
+            </span>
           </label>
         `).join('')}
       </div>
@@ -548,6 +612,35 @@ function syncOrderServicesModalSelection(changedEl) {
       if (el.value === CUSTOM_SERVICE_TYPE_NAME) el.checked = false;
     });
   }
+  const qtyInput = getOrderServicesModalQtyInput(changedEl?.value || '');
+  if (!qtyInput) return;
+  if (changedEl?.checked && Number(qtyInput.value) < 1) {
+    qtyInput.value = '1';
+  }
+  if (changedEl && !changedEl.checked) {
+    qtyInput.value = '0';
+  }
+}
+
+function adjustOrderServiceQty(name, delta) {
+  const input = getOrderServicesModalQtyInput(name);
+  const checkbox = getOrderServicesModalCheckbox(name);
+  if (!input) return;
+  const baseValue = Number(input.value) || 0;
+  const nextValue = Math.max(0, baseValue + Number(delta || 0));
+  input.value = String(nextValue);
+  if (checkbox) checkbox.checked = nextValue > 0;
+  syncOrderServicesModalSelection(checkbox);
+}
+
+function syncOrderServiceQtyInput(name, rawValue) {
+  const input = getOrderServicesModalQtyInput(name);
+  const checkbox = getOrderServicesModalCheckbox(name);
+  if (!input) return;
+  const nextValue = Math.max(0, Number(rawValue) || 0);
+  input.value = String(nextValue);
+  if (checkbox) checkbox.checked = nextValue > 0;
+  syncOrderServicesModalSelection(checkbox);
 }
 
 async function saveOrderServices(orderId) {
@@ -555,7 +648,10 @@ async function saveOrderServices(orderId) {
   if (!order) return;
   const values = [...document.querySelectorAll('#order-services-modal-list input[type="checkbox"]')]
     .filter(el => el.checked)
-    .map(el => el.value);
+    .map(el => {
+      const qtyInput = getOrderServicesModalQtyInput(el.value);
+      return { name: el.value, qty: Math.max(1, Number(qtyInput?.value) || 1) };
+    });
   if (!order.onlySale && !values.length) {
     showToast('Выберите хотя бы одну услугу', 'error');
     return;
@@ -563,9 +659,10 @@ async function saveOrderServices(orderId) {
   const btn = document.getElementById('order-services-save-btn');
   if (btn) btn.disabled = true;
   try {
-    const saved = await sbPatchOrderFields(orderId, { service_type: values.join(', ') });
+    const serialized = serializeOrderServiceSelections(values);
+    const saved = await sbPatchOrderFields(orderId, { service_type: serialized });
     const idx = orders.findIndex(item => item.id === orderId);
-    if (idx !== -1) orders[idx] = { ...orders[idx], ...saved, serviceType: values.join(', ') };
+    if (idx !== -1) orders[idx] = { ...orders[idx], ...saved, serviceType: serialized };
     closeOrderServicesModal();
     currentMonthFilter ? renderOrdersForMonth(currentMonthFilter) : renderOrders();
     showToast('Услуги сохранены ✓');
@@ -972,7 +1069,7 @@ function openOrderDetail(id) {
     <div class="detail-section">
       <div class="detail-section-title">${icon('wrench')} Работы</div>
       <div class="detail-grid">
-        ${field(`${icon('tool')} Вид послуги`, o.serviceType)}
+        ${field(`${icon('tool')} Вид послуги`, formatOrderServiceTypeText(o.serviceType))}
         ${field(`${icon('wrench')} Стоимость работ`, o.total ? o.total + ' ₴' : '')}
         ${field(`${icon('wrench')} Монтаж`, o.mount ? o.mount + ' ₴' : '')}
         ${field(`${icon('receipt')} Только продажа`, o.onlySale ? 'Да' : '')}
@@ -1367,16 +1464,28 @@ function populateRefSelects() {
   // Услуги — чекбоксы
   const svcBox = document.getElementById('service-type-checkboxes');
   if (svcBox) {
-    const cur = (document.getElementById('f-service-type')?.value || '').split(',').map(s => s.trim()).filter(Boolean);
+    const curMap = getOrderServiceSelectionMap(document.getElementById('f-service-type')?.value || '');
     const groups = [...new Set(SERVICE_TYPE_OPTIONS.map(item => item.group))];
     svcBox.innerHTML = groups.map(group => `
       <div class="service-group">
         <div class="service-group-title">${group}</div>
         <div class="service-group-options">
           ${SERVICE_TYPE_OPTIONS.filter(item => item.group === group).map(item => `
-            <label class="checkbox">
-              <input type="checkbox" value="${item.name}" ${cur.includes(item.name) ? 'checked' : ''} onchange="syncServiceTypes(this)">
-              <span>${item.name}</span>
+            <label class="checkbox" style="justify-content:space-between;align-items:center;gap:10px;">
+              <span style="display:flex;align-items:center;gap:8px;min-width:0;">
+                <input type="checkbox" value="${item.name}" ${curMap.has(item.name) ? 'checked' : ''} onchange="syncServiceTypes(this)">
+                <span>${item.name}</span>
+              </span>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                class="form-input"
+                data-form-service-qty="${item.name}"
+                value="${curMap.get(item.name) || 0}"
+                style="width:64px;padding:8px 10px;text-align:center;"
+                oninput="syncServiceTypes(this, false)"
+              >
             </label>
           `).join('')}
         </div>
@@ -1466,16 +1575,16 @@ function populateRefSelects() {
 }
 
 function setServiceTypeSelection(value = '') {
-  const selected = String(value || '')
-    .split(',')
-    .map(s => s.trim())
-    .filter(Boolean);
-  const selectedSet = new Set(selected);
+  const selectedMap = getOrderServiceSelectionMap(value);
   document.querySelectorAll('#service-type-checkboxes input[type="checkbox"]').forEach(el => {
-    el.checked = selectedSet.has(el.value);
+    el.checked = selectedMap.has(el.value);
+  });
+  document.querySelectorAll('#service-type-checkboxes [data-form-service-qty]').forEach(el => {
+    const name = el.getAttribute('data-form-service-qty');
+    el.value = String(selectedMap.get(name) || 0);
   });
   const hidden = document.getElementById('f-service-type');
-  if (hidden) hidden.value = selected.join(', ');
+  if (hidden) hidden.value = serializeOrderServiceSelections(getOrderServiceSelections(value));
 }
 
 function updateOrderServiceTypeAccess() {
@@ -2933,18 +3042,45 @@ function recalcFullMargins() {
 // синхронизация чекбоксов услуг с hidden-полем
 function syncServiceTypes(changedEl = null, recalc = true) {
   const box = document.querySelectorAll('#service-type-checkboxes input[type="checkbox"]');
-  if (changedEl?.value === CUSTOM_SERVICE_TYPE_NAME && changedEl.checked) {
+  const changedName = changedEl?.value || changedEl?.getAttribute?.('data-form-service-qty') || '';
+  const changedCheckbox = changedEl?.matches?.('input[type="checkbox"]')
+    ? changedEl
+    : [...box].find(el => el.value === changedName);
+  if (changedName === CUSTOM_SERVICE_TYPE_NAME && changedCheckbox?.checked) {
     box.forEach(el => {
-      if (el !== changedEl) el.checked = false;
+      if (el !== changedCheckbox) el.checked = false;
+      if (el !== changedCheckbox) {
+        const qtyInput = getOrderFormServiceQtyInput(el.value);
+        if (qtyInput) qtyInput.value = '0';
+      }
     });
-  } else if (changedEl?.checked) {
+  } else if (changedCheckbox?.checked) {
     box.forEach(el => {
-      if (el.value === CUSTOM_SERVICE_TYPE_NAME) el.checked = false;
+      if (el.value === CUSTOM_SERVICE_TYPE_NAME) {
+        el.checked = false;
+        const qtyInput = getOrderFormServiceQtyInput(el.value);
+        if (qtyInput) qtyInput.value = '0';
+      }
     });
   }
-  const vals = [...box].filter(el => el.checked).map(el => el.value);
+  const changedQtyInput = changedName ? getOrderFormServiceQtyInput(changedName) : null;
+  if (changedCheckbox?.checked && changedQtyInput && Number(changedQtyInput.value) < 1) {
+    changedQtyInput.value = '1';
+  }
+  if (changedCheckbox && !changedCheckbox.checked) {
+    if (changedQtyInput) changedQtyInput.value = '0';
+  }
+  if (changedCheckbox && changedEl?.matches?.('[data-form-service-qty]')) {
+    changedCheckbox.checked = Number(changedEl.value) > 0;
+  }
+  const vals = [...box]
+    .filter(el => el.checked)
+    .map(el => {
+      const qtyInput = getOrderFormServiceQtyInput(el.value);
+      return { name: el.value, qty: Math.max(1, Number(qtyInput?.value) || 1) };
+    });
   const hidden = document.getElementById('f-service-type');
-  if (hidden) hidden.value = vals.join(', ');
+  if (hidden) hidden.value = serializeOrderServiceSelections(vals);
   if (recalc) recalcTotal();
 }
 
