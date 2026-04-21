@@ -381,14 +381,11 @@ function renderOrderCard(o) {
           >${specialServiceAction.label}</button>
         ` : ''}
         ${canEditListActions ? `
-          <div class="order-card-action-dropdown" onclick="event.stopPropagation()">
-            <button class="icon-action-btn order-card-action-trigger" title="Действия заказа" onclick="toggleOrderActionMenu('${o.id}', event)">${icon('list')}</button>
-            <div class="order-card-action-menu" data-order-action-menu="${escapeAttr(o.id)}">
-              <button class="icon-action-btn" title="Скопировать данные" onclick="event.stopPropagation(); closeOrderActionMenus(); copyOrderSummary('${o.id}')">${icon('clipboard-list')}</button>
-              <button class="icon-action-btn" title="Создать дубликат" onclick="event.stopPropagation(); closeOrderActionMenus(); duplicateOrder('${o.id}')">${icon('plus')}</button>
-              <button class="icon-action-btn" title="Редактировать" onclick="event.stopPropagation(); closeOrderActionMenus(); openOrderModal('${o.id}')">${icon('pencil')}</button>
-              ${canDeleteListAction ? `<button type="button" class="icon-action-btn icon-action-danger" title="Полностью удалить заказ" onpointerdown="event.stopPropagation()" onclick="deleteOrder('${escapeAttr(o.id)}', event)">${icon('trash-2')}</button>` : ''}
-            </div>
+          <div class="order-card-inline-actions" onpointerdown="event.stopPropagation()" onclick="event.stopPropagation()">
+            <button type="button" class="icon-action-btn" onclick="event.stopPropagation(); copyOrderSummary('${o.id}')">${icon('clipboard-list')}</button>
+            <button type="button" class="icon-action-btn" onclick="event.stopPropagation(); duplicateOrder('${o.id}')">${icon('plus')}</button>
+            <button type="button" class="icon-action-btn" onclick="event.stopPropagation(); openOrderModal('${o.id}')">${icon('pencil')}</button>
+            ${canDeleteListAction ? `<button type="button" class="icon-action-btn icon-action-danger" onpointerdown="event.stopPropagation()" onclick="deleteOrder('${escapeAttr(o.id)}', event)">${icon('trash-2')}</button>` : ''}
           </div>
         ` : ''}
         ${canMark ? `
@@ -579,6 +576,7 @@ async function saveOrderServices(orderId) {
 
 function closeOrderActionMenus() {
   document.querySelectorAll('.order-card-action-menu.active').forEach(menu => menu.classList.remove('active'));
+  document.querySelectorAll('.order-card-action-dropdown.active').forEach(dropdown => dropdown.classList.remove('active'));
 }
 
 function toggleOrderActionMenu(orderId, event) {
@@ -586,9 +584,13 @@ function toggleOrderActionMenu(orderId, event) {
   const menu = Array.from(document.querySelectorAll('.order-card-action-menu'))
     .find(item => item.dataset.orderActionMenu === String(orderId));
   if (!menu) return;
+  const dropdown = menu.closest('.order-card-action-dropdown');
   const isOpen = menu.classList.contains('active');
   closeOrderActionMenus();
-  if (!isOpen) menu.classList.add('active');
+  if (!isOpen) {
+    menu.classList.add('active');
+    dropdown?.classList.add('active');
+  }
 }
 
 document.addEventListener('click', closeOrderActionMenus);
@@ -1106,6 +1108,7 @@ function copyOrderSummary(id) {
 
   if (o.car) lines.push(`Авто: ${o.car}`);
   if (o.phone) lines.push(`Телефон: ${o.phone}`);
+  if (o.notes) lines.push(`Заметки: ${o.notes}`);
   const manufacturerText = getGlassManufacturerCopyText(o.glassManufacturer);
   if (manufacturerText) lines.push(manufacturerText);
   services.forEach(([label, amount]) => lines.push(`${label}: ${fmt(amount)}`));
