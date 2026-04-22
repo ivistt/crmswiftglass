@@ -15,6 +15,10 @@ function canManageAssistantSalary() {
   return currentRole === 'senior' || currentRole === 'extra';
 }
 
+function canAccessPersonalCash() {
+  return currentRole === 'senior' || currentRole === 'extra' || currentWorkerName === MANAGER_CARD_CASH_WORKER_NAME;
+}
+
 // ── ЗАГРУЗКА ─────────────────────────────────────────────────
 
 async function loadWorkerSalaries() {
@@ -40,7 +44,7 @@ async function loadWorkerSalaries() {
 }
 
 async function loadWorkerCashLog() {
-  if (currentRole !== 'senior' && currentWorkerName !== MANAGER_CARD_CASH_WORKER_NAME) return;
+  if (!canAccessPersonalCash()) return;
   try {
     workerCashLog = await sbFetchCashLog(currentWorkerName);
   } catch (e) {
@@ -152,7 +156,7 @@ function renderCashScreen() {
   const el = document.getElementById('cash-content');
   if (!el) return;
 
-  if (currentRole !== 'senior' && currentWorkerName !== MANAGER_CARD_CASH_WORKER_NAME) {
+  if (!canAccessPersonalCash()) {
     el.innerHTML = ''
       + '<div class="profile-header">'
       + '<div class="worker-avatar" style="width:56px;height:56px;font-size:20px;border-radius:16px;flex-shrink:0;">' + getInitials(currentWorkerName) + '</div>'
@@ -160,7 +164,7 @@ function renderCashScreen() {
       + '<div style="font-size:13px;color:var(--text3);margin-top:2px;">Касса</div></div>'
       + '</div>'
       + '<div class="profile-today-card" style="margin-top:12px;">'
-      + '<div style="font-size:14px;color:var(--text3);text-align:center;">Касса доступна только старшему специалисту</div>'
+      + '<div style="font-size:14px;color:var(--text3);text-align:center;">Касса доступна только старшему, extra и Саше Менеджеру</div>'
       + '</div>';
     initIcons();
     return;
@@ -598,14 +602,17 @@ function isConfirmedFopCashEntry(entry) {
 function renderManagerCashSections() {
   const today = getLocalDateString();
   const combinedCashLog = (workerCashLog || []).filter(entry => !isFopCashEntry(entry) && !isManagerCardCashEntry(entry));
+  const currencyCashLog = combinedCashLog.filter(isCurrencyCashEntry);
+  const regularCashLog = combinedCashLog.filter(entry => !isCurrencyCashEntry(entry));
   const cardCashLog = (workerCashLog || []).filter(isManagerCardCashEntry);
   const confirmedCardCashLog = cardCashLog.filter(entry => entry.fop_confirmed === true);
   const pendingCardCashLog = cardCashLog.filter(entry => entry.fop_confirmed !== true);
-  return renderCashSection(combinedCashLog, calcCashBalance(combinedCashLog), today, {
+  return renderCashSection(regularCashLog, calcCashBalance(regularCashLog), today, {
       title: 'Касса',
       account: 'cash',
       buttonText: '+ Запись',
-  }) + renderCashSection(confirmedCardCashLog, calcCashBalance(confirmedCardCashLog), today, {
+  }) + renderCurrencyCashSection(currencyCashLog, calcCurrencyCashBalance(currencyCashLog), today)
+    + renderCashSection(confirmedCardCashLog, calcCashBalance(confirmedCardCashLog), today, {
       title: 'Касса карта',
       account: 'card-sasha',
       buttonText: '+ Карта',

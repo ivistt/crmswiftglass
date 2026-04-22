@@ -5,6 +5,56 @@
 // Зарплаты из БД: массив { id, worker_name, date, amount }
 let allSalaries = [];
 
+function getFinanceSalaryEntries(entries = allSalaries) {
+  return (entries || [])
+    .filter(isRelevantSalaryEntry)
+    .filter(entry => entry?.worker_name && entry.date)
+    .filter(entry => !isSalaryWithdrawalEntry(entry));
+}
+
+function getOrderClientPaidAmount(order) {
+  const payments = Array.isArray(order?.clientPayments) ? order.clientPayments : [];
+  if (payments.length) {
+    return payments.reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
+  }
+  return Number(order?.debt) || 0;
+}
+
+function calcFinanceTotals(monthKey = '') {
+  const relevantOrders = (orders || [])
+    .filter(isOrderFinanciallyActive)
+    .filter(order => !monthKey || String(order.date || '').startsWith(monthKey));
+  const salaryTotal = getFinanceSalaryEntries()
+    .filter(entry => !monthKey || String(entry.date || '').startsWith(monthKey))
+    .reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
+
+  let clientIncome = 0;
+  let purchaseTotal = 0;
+  let moldingExpense = 0;
+  let toningExpense = 0;
+
+  for (const order of relevantOrders) {
+    clientIncome += getOrderClientPaidAmount(order);
+    purchaseTotal += Number(order.purchase) || 0;
+    moldingExpense += (Number(order.molding) || 0) * 0.2;
+    toningExpense += (Number(order.toning) || 0) * 0.2;
+  }
+
+  const expenses = purchaseTotal + moldingExpense + toningExpense + salaryTotal;
+  const revenue = clientIncome - expenses;
+
+  return {
+    orders: relevantOrders,
+    clientIncome,
+    purchaseTotal,
+    moldingExpense,
+    toningExpense,
+    salaryTotal,
+    expenses,
+    revenue,
+  };
+}
+
 function getManualSalaryReports(entries = allSalaries) {
   return (entries || []).filter(isManualSalaryReportEntry);
 }
@@ -254,6 +304,7 @@ function buildSalaryData() {
 async function renderFinance() {
   await loadAllSalaries();
   const container = document.getElementById('finance-content');
+  const currentMonthKey = (typeof getLocalDateString === 'function' ? getLocalDateString() : new Date().toISOString().slice(0, 10)).slice(0, 7);
 
   // Группируем заказы по месяцам
   const map = {};
@@ -276,17 +327,8 @@ async function renderFinance() {
     return;
   }
 
-  // Итоги по всем месяцам
-  let grandTotal = 0, grandPurchase = 0, grandIncome = 0;
-  for (const ym of keys) {
-    for (const o of map[ym]) {
-      grandTotal    += Number(o.total)    || 0;
-      grandPurchase += Number(o.purchase) || 0;
-      grandIncome   += Number(o.income)   || 0;
-    }
-  }
-  const grandProfit     = grandIncome - grandPurchase;
-  const grandSalaries   = calcTotalSalaries();
+  const overall = calcFinanceTotals();
+  const currentMonthTotals = calcFinanceTotals(currentMonthKey);
 
   container.innerHTML = `
     <!-- Инструменты архивации -->
@@ -319,12 +361,11 @@ async function renderFinance() {
     <div class="fin-summary">
       <div class="fin-summary-title">Общая сводка</div>
       <div class="fin-summary-grid">
-        ${finSummaryItem('Выручка', grandTotal, 'var(--text)')}
-        ${finSummaryItem('Затраты', grandPurchase, 'var(--red)')}
-        ${finSummaryItem('Приход', grandIncome, 'var(--accent)')}
-        ${finSummaryItem('Прибыль', grandProfit, grandProfit >= 0 ? 'var(--accent)' : 'var(--red)')}
-        ${finSummaryItem('Зарплаты', grandSalaries, 'var(--yellow)')}
-        ${finSummaryItem('Прибыль за вычетом зарплат', grandProfit - grandSalaries, (grandProfit - grandSalaries) >= 0 ? 'var(--accent)' : 'var(--red)')}
+        ${finSummaryItem('Выручка', overall.revenue, overall.revenue >= 0 ? 'var(--accent)' : 'var(--red)')}
+        ${finSummaryItem('Затраты', overall.expenses, 'var(--red)')}
+        ${finSummaryItem('Приход', overall.clientIncome, 'var(--accent)')}
+        ${finSummaryItem('Фактический приход', currentMonthTotals.clientIncome, 'var(--blue)')}
+        ${finSummaryItem('Зарплаты', overall.salaryTotal, 'var(--yellow)')}
       </div>
     </div>
 
@@ -338,10 +379,9 @@ async function renderFinance() {
 }
 
 function calcTotalSalaries(ym) {
-  // ym — опционально, если не указан — все месяцы
-  return getManualSalaryReports()
-    .filter(s => !ym || s.date.startsWith(ym))
-    .reduce((sum, s) => sum + Number(s.amount), 0);
+  return getFinanceSalaryEntries()
+    .filter(entry => !ym || entry.date.startsWith(ym))
+    .reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
 }
 
 function renderFinanceMonth(ym, monthOrders) {
@@ -350,15 +390,8 @@ function renderFinanceMonth(ym, monthOrders) {
     'Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
   const monthName = MONTH_NAMES[parseInt(month) - 1];
 
-  let total = 0, purchase = 0, income = 0;
-  for (const o of monthOrders) {
-    total    += Number(o.total)    || 0;
-    purchase += Number(o.purchase) || 0;
-    income   += Number(o.income)   || 0;
-  }
-  const profit         = income - purchase;
-  const monthSalaries  = calcTotalSalaries(ym);
-  const profitAfterSal = profit - monthSalaries;
+  const monthTotals = calcFinanceTotals(ym);
+  const monthSalaries = monthTotals.salaryTotal;
 
   return `
     <div class="fin-month-card">
@@ -369,8 +402,8 @@ function renderFinanceMonth(ym, monthOrders) {
         </div>
         <div style="display:flex;align-items:center;gap:14px;">
           <div style="text-align:right;">
-            <div style="font-size:11px;color:var(--text3);margin-bottom:2px;">Прибыль</div>
-            <div style="font-size:18px;font-weight:800;color:${profit >= 0 ? 'var(--accent)' : 'var(--red)'};">${profit.toLocaleString('ru')} ₴</div>
+            <div style="font-size:11px;color:var(--text3);margin-bottom:2px;">Выручка</div>
+            <div style="font-size:18px;font-weight:800;color:${monthTotals.revenue >= 0 ? 'var(--accent)' : 'var(--red)'};">${monthTotals.revenue.toLocaleString('ru')} ₴</div>
           </div>
           <i data-lucide="chevron-down" style="width:16px;height:16px;color:var(--text3);transition:transform 0.2s;" id="chevron-${ym}"></i>
         </div>
@@ -381,13 +414,10 @@ function renderFinanceMonth(ym, monthOrders) {
         <!-- Финансовые показатели -->
         <div class="fin-section-title">📊 Показатели</div>
         <div class="fin-metrics-grid">
-          ${finMetric('Выручка', total, 'var(--text)')}
-          ${finMetric('Затраты (закупка)', purchase, 'var(--red)')}
-          ${finMetric('Приход', income, 'var(--blue)')}
-          ${finMetric('Прибыль общая', profit, profit >= 0 ? 'var(--accent)' : 'var(--red)')}
-          ${finMetric('Прибыль с учётом затрат', profit, profit >= 0 ? 'var(--accent)' : 'var(--red)')}
+          ${finMetric('Выручка', monthTotals.revenue, monthTotals.revenue >= 0 ? 'var(--accent)' : 'var(--red)')}
+          ${finMetric('Затраты', monthTotals.expenses, 'var(--red)')}
+          ${finMetric('Приход', monthTotals.clientIncome, 'var(--blue)')}
           ${finMetric('Зарплаты', monthSalaries, 'var(--yellow)')}
-          ${finMetric('Прибыль за вычетом зарплат', profitAfterSal, profitAfterSal >= 0 ? 'var(--accent)' : 'var(--red)')}
         </div>
 
         <!-- Зарплаты сотрудников (из профилей) -->
@@ -409,7 +439,7 @@ function renderFinanceMonth(ym, monthOrders) {
 
 // Компактный вид зарплат внутри месяца финансов
 function renderSalaryRowsCompact(ym) {
-  const rows = getManualSalaryReports().filter(s => s.date.startsWith(ym));
+  const rows = getFinanceSalaryEntries().filter(s => s.date.startsWith(ym));
   if (!rows.length) {
     return `<div style="font-size:13px;color:var(--text3);padding:8px 0;">Зарплаты не внесены</div>`;
   }

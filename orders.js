@@ -420,6 +420,9 @@ function goBackFromOrdersList() {
 function renderOrderCard(o) {
   const canOpenModal = canCurrentUserOpenOrderModal(o);
   const cardClickAction = canOpenModal ? `openOrderModal('${escapeAttr(o.id)}')` : '';
+  const primaryTitle = currentRole === 'manager'
+    ? (o.client || '—')
+    : (o.car || '—');
   const clientTotal = getOrderClientTotal(o);
   const clientPaidInlineHtml = clientTotal > 0
     ? `<span class="order-meta-inline-money" title="Клиент оплатил / общая сумма заказа"><span>${(Number(o.debt) || 0).toLocaleString('ru')}</span><span class="order-meta-money-separator">/</span><span>${clientTotal.toLocaleString('ru')} ₴</span></span>`
@@ -454,7 +457,7 @@ function renderOrderCard(o) {
             ${specialistBonusFlags}
           </div>
           <div class="order-card-title-row">
-            <span class="order-name">${o.car || '—'}</span>
+            <span class="order-name">${primaryTitle}</span>
           </div>
         </div>
       </div>
@@ -477,7 +480,7 @@ function renderManagerOrderCardMeta(order) {
   if (currentRole !== 'manager' || !order) return '';
   const groups = [
     [
-      { iconLabel: icon('user'), value: order.client || '—' },
+      { iconLabel: icon('car'), value: order.car || '—' },
       { iconLabel: icon('phone'), value: order.phone || '—' },
       { iconLabel: icon('calendar'), value: formatDate(order.date) },
       { iconLabel: icon('users'), value: getWorkerDisplayPair(order.responsible, order.assistant) || '—' },
@@ -1759,46 +1762,79 @@ function syncSupplierLeftFromPayments() {
   leftEl.value = String(Math.max(0, purchase - paid));
 }
 
-function addClientPayment() {
+async function addClientPayment() {
   if (!canCurrentUserManageOrderPayments(getOrderDraftFromForm(editingOrderId ? orders.find(item => item.id === editingOrderId) : null))) return;
+  if (!editingOrderId) return showToast('Сначала сохраните заказ, потом добавляйте оплату', 'error');
   const amtEl = document.getElementById('f-new-payment-amount');
   const dateEl = document.getElementById('f-new-payment-date');
   const methodEl = document.getElementById('f-payment-method');
+  const addBtn = document.getElementById('add-client-payment-btn');
   const amount = Number(amtEl.value);
   if (!amount || amount <= 0) return showToast('Введите сумму оплаты', 'error');
   const date = dateEl.value || todayStr();
   const method = normalizePaymentMethod(methodEl?.value || '');
-  
+  if (!method) return showToast('Выберите способ оплаты', 'error');
+
+  const prevPayments = JSON.parse(JSON.stringify(currentClientPayments || []));
   currentClientPayments.push({ amount, date, method, timestamp: new Date().toISOString() });
-  amtEl.value = '';
-  renderClientPayments();
-  syncClientPaidFromPayments();
-  recalcTotal();
-  persistImmediateOrderPaymentsUpdate();
+  if (addBtn) addBtn.disabled = true;
+  try {
+    await persistImmediateOrderPaymentsUpdate();
+    amtEl.value = '';
+    renderClientPayments();
+    syncClientPaidFromPayments();
+    recalcTotal();
+    showToast('Оплата клиента добавлена ✓');
+  } catch (e) {
+    currentClientPayments = prevPayments;
+    renderClientPayments();
+    syncClientPaidFromPayments();
+    recalcTotal();
+    showToast('Ошибка сохранения: ' + e.message, 'error');
+  } finally {
+    if (addBtn) addBtn.disabled = false;
+  }
 }
 
-function addSupplierPayment() {
+async function addSupplierPayment() {
   if (!canCurrentUserManageOrderPayments(getOrderDraftFromForm(editingOrderId ? orders.find(item => item.id === editingOrderId) : null))) return;
+  if (!editingOrderId) return showToast('Сначала сохраните заказ, потом добавляйте оплату', 'error');
   const amtEl = document.getElementById('f-new-supplier-payment-amount');
   const dateEl = document.getElementById('f-new-supplier-payment-date');
   const methodEl = document.getElementById('f-new-supplier-payment-method');
+  const addBtn = document.getElementById('add-supplier-payment-btn');
   const amount = Number(amtEl.value);
   if (!amount || amount <= 0) return showToast('Введите сумму поставщику', 'error');
   const date = dateEl.value || todayStr();
   const method = normalizePaymentMethod(methodEl?.value || '');
+  if (!method) return showToast('Выберите способ оплаты', 'error');
 
+  const prevPayments = JSON.parse(JSON.stringify(currentSupplierPayments || []));
   currentSupplierPayments.push({ amount, date, method, timestamp: new Date().toISOString() });
-  amtEl.value = '';
-  renderSupplierPayments();
-  syncSupplierPaidFromPayments();
-  recalcTotal();
-  persistImmediateOrderPaymentsUpdate();
+  if (addBtn) addBtn.disabled = true;
+  try {
+    await persistImmediateOrderPaymentsUpdate();
+    amtEl.value = '';
+    renderSupplierPayments();
+    syncSupplierPaidFromPayments();
+    recalcTotal();
+    showToast('Оплата поставщику добавлена ✓');
+  } catch (e) {
+    currentSupplierPayments = prevPayments;
+    renderSupplierPayments();
+    syncSupplierPaidFromPayments();
+    recalcTotal();
+    showToast('Ошибка сохранения: ' + e.message, 'error');
+  } finally {
+    if (addBtn) addBtn.disabled = false;
+  }
 }
 
 async function persistImmediateOrderPaymentsUpdate() {
   if (!editingOrderId) return;
   const existingOrder = orders.find(item => item.id === editingOrderId);
-  if (!existingOrder) return;
+  if (!existingOrder) throw new Error('Заказ не найден');
+  const sumAmounts = payments => (payments || []).reduce((sum, payment) => sum + (Number(payment?.amount) || 0), 0);
 
   const data = getOrderDraftFromForm(existingOrder);
   data.clientPayments = currentClientPayments;
@@ -1848,39 +1884,47 @@ async function persistImmediateOrderPaymentsUpdate() {
     });
   }
 
-  try {
-    const result = await sbSaveOrderWithCash(data, {
-      isNew: false,
-      cashEntries,
-      rollbackOrder: existingOrder,
+  const saved = await sbPatchOrderFields(editingOrderId, {
+    client_payments: data.clientPayments,
+    supplier_payments: data.supplierPayments,
+    debt: sumAmounts(data.clientPayments),
+    check_sum: sumAmounts(data.supplierPayments),
+  });
+  const idx = orders.findIndex(item => item.id === editingOrderId);
+  if (idx !== -1 && saved) {
+    orders[idx] = {
+      ...orders[idx],
+      ...saved,
+      clientPayments: data.clientPayments,
+      supplierPayments: data.supplierPayments,
+    };
+  }
+
+  for (const rawCashEntry of cashEntries) {
+    const cashEntry = await sbInsertCashEntry({
+      worker_name: rawCashEntry.worker_name,
+      amount: rawCashEntry.amount,
+      comment: rawCashEntry.comment,
+      cash_account: 'cash',
     });
-    const saved = result.order;
-    const idx = orders.findIndex(item => item.id === editingOrderId);
-    if (idx !== -1) orders[idx] = saved;
-
-    const savedCashEntries = result.cashEntries || [];
-    for (const cashEntry of savedCashEntries) {
-      if (typeof workerCashLog !== 'undefined' && cashEntry?.worker_name === currentWorkerName) {
-        workerCashLog.unshift(cashEntry);
-      }
-      if (currentRole === 'owner' && Array.isArray(window.allCashLog) && cashEntry) {
-        window.allCashLog.unshift(cashEntry);
-      }
+    if (typeof workerCashLog !== 'undefined' && cashEntry?.worker_name === currentWorkerName) {
+      workerCashLog.unshift(cashEntry);
     }
-
-    try {
-      orders = await sbFetchOrders();
-    } catch (refreshError) {
-      console.warn('Failed to refresh orders after immediate payment save:', refreshError);
+    if (currentRole === 'owner' && Array.isArray(window.allCashLog) && cashEntry) {
+      window.allCashLog.unshift(cashEntry);
     }
+  }
 
-    if (typeof refreshActiveOrdersViews === 'function') {
-      refreshActiveOrdersViews();
-    } else {
-      currentMonthFilter ? renderOrdersForMonth(currentMonthFilter) : renderOrders();
-    }
-  } catch (e) {
-    showToast('Ошибка сохранения: ' + e.message, 'error');
+  try {
+    orders = await sbFetchOrders();
+  } catch (refreshError) {
+    console.warn('Failed to refresh orders after immediate payment save:', refreshError);
+  }
+
+  if (typeof refreshActiveOrdersViews === 'function') {
+    refreshActiveOrdersViews();
+  } else {
+    currentMonthFilter ? renderOrdersForMonth(currentMonthFilter) : renderOrders();
   }
 }
 
@@ -3215,19 +3259,31 @@ function renderOrdersForMonth(ym) {
 async function toggleWorkerDone(orderId) {
   const o = orders.find(x => x.id === orderId);
   if (!o) return;
+  const draftOrder = (editingOrderId === orderId && document.getElementById('order-modal')?.classList.contains('active'))
+    ? getOrderDraftFromForm(o)
+    : o;
   if (o.responsible !== currentWorkerName) return;
-  if (!isOrderFinanciallyActive(o)) {
+  if (!isOrderFinanciallyActive(draftOrder)) {
     showToast('Выполнить можно только заказ в работе', 'error');
     return;
   }
   if (o.workerDone) return;
-  if (!o.onlySale && !String(o.serviceType || '').trim()) {
+  if (!draftOrder.onlySale && !String(draftOrder.serviceType || '').trim()) {
     alert('Услуги не выбраны, ЗП не начислится');
     return;
   }
   if (!confirm(`Отметить заказ ${o.id} выполненным? После этого будет начислена зарплата.`)) return;
   o.workerDone = true;
   try {
+    if (String(draftOrder.serviceType || '').trim() !== String(o.serviceType || '').trim()) {
+      const savedServices = await sbPatchOrderFields(o.id, { service_type: String(draftOrder.serviceType || '').trim() || null });
+      if (savedServices) {
+        const idx = orders.findIndex(x => x.id === orderId);
+        if (idx !== -1) orders[idx] = { ...orders[idx], ...savedServices, serviceType: draftOrder.serviceType };
+      } else {
+        o.serviceType = draftOrder.serviceType;
+      }
+    }
     const saved = await sbPatchOrderFields(o.id, { worker_done: true });
     if (saved) {
       const idx = orders.findIndex(x => x.id === orderId);
@@ -3802,6 +3858,30 @@ function acOpen(type) {
   if (!input || !listEl) return;
   acRender(type, input.value);
   listEl.classList.add('open');
+}
+
+function onCarInputChange(rawValue) {
+  const value = String(rawValue || '').trim().toLowerCase();
+  const codeEl = document.getElementById('f-code');
+  if (!codeEl) return;
+  if (!value) {
+    codeEl.value = '';
+    return;
+  }
+  const exact = (refCars || []).find(car => String(car?.model || '').trim().toLowerCase() === value);
+  codeEl.value = exact?.eurocode || '';
+}
+
+function onCodeInputChange(rawValue) {
+  const value = String(rawValue || '').trim().toLowerCase();
+  const carEl = document.getElementById('f-car');
+  if (!carEl) return;
+  if (!value) {
+    carEl.value = '';
+    return;
+  }
+  const exact = (refCars || []).find(car => String(car?.eurocode || '').trim().toLowerCase() === value);
+  carEl.value = exact?.model || '';
 }
 
 function acFilter(type) {
