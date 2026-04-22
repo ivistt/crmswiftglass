@@ -1339,6 +1339,55 @@ body {
   white-space: pre-wrap;
 }
 
+.order-card-manager-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.order-card-manager-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.order-card-manager-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 28px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--order-pill-border);
+  background: var(--order-pill-bg);
+}
+
+.order-card-manager-row-label {
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--text3);
+  flex-shrink: 0;
+}
+
+.order-card-manager-row-value {
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.35;
+  color: var(--order-pill-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.order-card-manager-row-strong .order-card-manager-row-label,
+.order-card-manager-row-strong .order-card-manager-row-value {
+  color: var(--text);
+}
+
 .btn-order-services {
   min-height: 34px;
   padding: 0 10px;
@@ -1805,9 +1854,35 @@ body {
 
 .modal-title { font-size: 18px; font-weight: 800; letter-spacing: -0.4px; }
 
+.order-modal-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.order-modal-owner-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.order-modal-owner-actions .icon-action-btn {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #050505;
+}
+
+.order-modal-owner-actions .icon-action-btn:hover,
+.order-modal-owner-actions .icon-action-btn.icon-action-danger:hover {
+  border-color: var(--accent2);
+  background: var(--accent2);
+  color: #050505;
+}
+
 .order-modal-tabs {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
   padding: 12px 24px;
   border-bottom: 1px solid var(--border);
@@ -2341,6 +2416,27 @@ input[type="datetime-local"] {
 }
 .fin-add-salary-btn:hover { border-color: var(--accent); color: var(--accent); }
 
+.subtle-reload-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  min-height: 24px;
+  border: 0;
+  background: transparent;
+  color: var(--text3);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  opacity: 0.85;
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+
+.subtle-reload-btn:hover {
+  opacity: 1;
+  color: var(--text2);
+}
+
 @media (max-width: 640px) {
   .fin-summary-grid { grid-template-columns: 1fr; }
 }
@@ -2616,7 +2712,7 @@ input[type="datetime-local"] {
 .service-group {
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 12px;
+  padding: 8px 10px;
   background: var(--surface2);
 }
 .service-group-title {
@@ -2624,16 +2720,15 @@ input[type="datetime-local"] {
   font-weight: 900;
   color: var(--text3);
   letter-spacing: 0.04em;
-  margin-bottom: 10px;
+  margin-bottom: 4px;
 }
 .service-group-options {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  display: grid;
+  gap: 2px;
 }
 .service-checkboxes label.checkbox {
-  border: 1px solid var(--border);
-  padding: 6px 14px;
+  border: 0;
+  padding: 0;
   border-radius: 100px;
   cursor: pointer;
   font-size: 13px;
@@ -2641,23 +2736,204 @@ input[type="datetime-local"] {
   color: var(--text2);
   transition: all 0.2s;
   display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  align-items: flex-end;
+  gap: 2px;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 34px;
 }
 .service-checkboxes label.checkbox:hover {
-  border-color: var(--accent);
   color: var(--text);
-  background: var(--surface2);
 }
 .service-checkboxes label.checkbox:has(input:checked) {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: #000;
+  color: var(--text2);
+}
+.service-checkboxes label.checkbox:has(input:checked) .service-option-label {
+  color: var(--accent);
 }
 .service-checkboxes label.checkbox input[type="checkbox"] {
   display: none;
+}
+.service-option-main {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+  padding: 4px 0;
+}
+.service-option-label {
+  min-width: 0;
+  line-height: 1.2;
+}
+.service-option-qty {
+  display: inline-flex;
+  align-items: flex-end;
+  flex-shrink: 0;
+  padding: 4px 0;
+  margin-left: -2px;
+}
+.service-qty-input.form-input {
+  width: auto;
+  min-width: 22px;
+  max-width: 42px;
+  min-height: 22px;
+  padding: 0 4px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1.1;
+  appearance: none;
+  -moz-appearance: textfield;
+  transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease;
+}
+.service-qty-input.form-input:focus {
+  background: rgba(0, 229, 160, 0.06);
+  border-color: rgba(0, 229, 160, 0.18);
+  box-shadow: none;
+}
+.service-qty-input.form-input::placeholder {
+  color: currentColor;
+  opacity: 0.5;
+}
+.service-qty-input::-webkit-outer-spin-button,
+.service-qty-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.service-checkboxes label.checkbox:has(input:checked) .service-qty-input.form-input {
+  background: rgba(0, 229, 160, 0.14);
+  color: var(--accent);
+  border-color: rgba(0, 229, 160, 0.12);
+}
+
+@media (min-width: 1100px) {
+  .service-checkboxes {
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 10px;
+  }
+}
+
+@media (max-width: 640px) {
+  .service-checkboxes label.checkbox {
+    min-height: 40px;
+  }
+  .service-qty-input.form-input {
+    min-width: 20px;
+    max-width: 38px;
+    font-size: 14px;
+  }
+}
+
+.order-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.order-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.order-summary-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface2);
+  padding: 12px;
+}
+
+.order-summary-title {
+  font-size: 13px;
+  font-weight: 900;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
+.order-summary-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.order-summary-row {
+  display: grid;
+  grid-template-columns: minmax(0, 42%) minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text3);
+}
+
+.order-summary-row span {
+  min-width: 0;
+  line-height: 1.35;
+}
+
+.order-summary-row strong {
+  color: var(--text);
+  font-weight: 800;
+  text-align: right;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.35;
+}
+
+.order-summary-payouts {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.order-summary-payout-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--surface);
+}
+
+.order-summary-payout-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.order-summary-payout-head strong {
+  color: var(--accent);
+  font-weight: 900;
+}
+
+.order-summary-payout-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.order-summary-payout-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text3);
+}
+
+.order-summary-empty {
+  font-size: 12px;
+  color: var(--text3);
 }
 
 /* Отдельные флаги заказа */

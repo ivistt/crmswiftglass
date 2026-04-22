@@ -56,6 +56,38 @@ function updateThemeAssets() {
   });
 }
 
+function clearCacheAndReload() {
+  const preserve = new Map();
+  try {
+    ['crm_role', 'crm_token', 'crm_worker_name', THEME_STORAGE_KEY].forEach(key => {
+      const value = localStorage.getItem(key);
+      if (value !== null) preserve.set(key, value);
+    });
+    localStorage.clear();
+    preserve.forEach((value, key) => localStorage.setItem(key, value));
+  } catch (e) {}
+
+  try {
+    sessionStorage.clear();
+  } catch (e) {}
+
+  if (typeof orders !== 'undefined') orders = [];
+  if (typeof workers !== 'undefined') workers = [];
+  if (typeof carDirectory !== 'undefined') carDirectory = [];
+  if (typeof workerSalaries !== 'undefined') workerSalaries = [];
+  if (typeof assistantWorkerSalaries !== 'undefined') assistantWorkerSalaries = [];
+  if (typeof workerCashLog !== 'undefined') workerCashLog = [];
+  if (typeof allSalaries !== 'undefined') allSalaries = [];
+  if (typeof manualClients !== 'undefined') manualClients = [];
+  if (typeof currentClientPayments !== 'undefined') currentClientPayments = [];
+  if (typeof currentSupplierPayments !== 'undefined') currentSupplierPayments = [];
+  if (typeof window !== 'undefined') {
+    window.allCashLog = [];
+  }
+
+  location.reload();
+}
+
 async function initApp() {
   updateThemeAssets();
   updateThemeToggleButton();
@@ -403,6 +435,7 @@ async function loadOrders() {
   if (btn) { btn.innerHTML = '<i data-lucide="loader" style="width:15px;height:15px;"></i>'; btn.disabled = true; initIcons(); }
   try {
     orders = await sbFetchOrders();
+    if (typeof refreshActiveOrdersViews === 'function') refreshActiveOrdersViews();
   } catch (e) {
     showToast('Ошибка загрузки: ' + e.message, 'error');
   } finally {
@@ -736,12 +769,13 @@ function getOwnerCashLogs(confirmFilter = ownerCashConfirmFilter) {
     .filter(entry => {
       const account = String(entry?.cash_account || 'cash').toLowerCase();
       if (account === 'fop') return entry.worker_name === 'Oleg Starshiy';
-      if (account === 'card') return entry.worker_name === 'Sasha Manager';
+      if (account === 'card_sasha') return entry.worker_name === 'Sasha Manager';
+      if (account === 'card_oleg') return entry.worker_name === 'Oleg Starshiy';
       return account === 'cash';
     })
     .filter(entry => {
       const account = String(entry?.cash_account || 'cash').toLowerCase();
-      const isConfirmable = account === 'fop' || account === 'card';
+      const isConfirmable = account === 'fop' || account === 'card_sasha' || account === 'card_oleg';
       if (confirmFilter === 'confirmed') return !isConfirmable || entry.fop_confirmed === true;
       if (confirmFilter === 'pending') return isConfirmable && entry.fop_confirmed !== true;
       return true;
@@ -1178,7 +1212,7 @@ function renderOwnerEmployeeCurrencyCashHistory(workerName, logs) {
 
 function renderOwnerCashEntryConfirmBadge(entry) {
   const account = String(entry?.cash_account || 'cash').toLowerCase();
-  if (account !== 'fop' && account !== 'card') return '';
+  if (account !== 'fop' && account !== 'card_sasha' && account !== 'card_oleg') return '';
   const confirmed = entry?.fop_confirmed === true;
   const label = confirmed ? 'подтверждено' : 'ожидает подтверждения';
   const color = confirmed ? 'var(--accent)' : 'var(--yellow)';
@@ -1299,7 +1333,7 @@ function getOwnerPaymentEntries() {
 
   (window.allCashLog || [])
     .filter(entry => {
-      if (String(entry?.cash_account || '').toLowerCase() !== 'card' || entry.fop_confirmed !== true) return false;
+      if (String(entry?.cash_account || '').toLowerCase() !== 'card_sasha' || entry.fop_confirmed !== true) return false;
       return !String(entry.fop_source_key || '').startsWith('order:');
     })
     .forEach(entry => {

@@ -97,7 +97,8 @@ function renderProfile() {
       + '<div class="profile-today-card" style="margin-top:12px;">'
       + '<div style="font-size:12px;font-weight:800;color:var(--text3);margin-bottom:12px;letter-spacing:0.04em;">ИСТОРИЯ ЗАРПЛАТ</div>'
       + '<div style="display:flex;flex-direction:column;gap:12px;">' + salaryHistoryHtml + '</div>'
-      + '</div>';
+      + '</div>'
+      + '<button class="subtle-reload-btn" style="margin-top:12px;" onclick="clearCacheAndReload()">Очистить кеш и перезагрузить</button>';
     initIcons();
     return;
   }
@@ -141,7 +142,8 @@ function renderProfile() {
     + '<div><div style="font-size:20px;font-weight:800;">' + getWorkerDisplayName(currentWorkerName) + '</div>'
     + '<div style="font-size:13px;color:var(--text3);margin-top:2px;">' + (ROLE_LABELS[currentRole] || currentRole) + '</div></div>'
     + '</div>'
-    + salaryGroupHtml;
+    + salaryGroupHtml
+    + '<button class="subtle-reload-btn" style="margin-top:12px;" onclick="clearCacheAndReload()">Очистить кеш и перезагрузить</button>';
 
   initIcons();
 }
@@ -177,14 +179,18 @@ function renderCashScreen() {
   }
 
   const today = getLocalDateString();
-  const regularCashLog = (workerCashLog || []).filter(entry => !isFopCashEntry(entry));
+  const regularCashLog = (workerCashLog || []).filter(entry => !isFopCashEntry(entry) && !isOlegCardCashEntry(entry));
   const currencyCashLog = regularCashLog.filter(isCurrencyCashEntry);
   const fopCashLog = (workerCashLog || []).filter(isFopCashEntry);
+  const olegCardCashLog = (workerCashLog || []).filter(isOlegCardCashEntry);
   const confirmedFopCashLog = fopCashLog.filter(entry => entry.fop_confirmed === true);
   const pendingFopCashLog = fopCashLog.filter(entry => entry.fop_confirmed !== true);
+  const confirmedOlegCardCashLog = olegCardCashLog.filter(entry => entry.fop_confirmed === true);
+  const pendingOlegCardCashLog = olegCardCashLog.filter(entry => entry.fop_confirmed !== true);
   const balance = calcCashBalance(regularCashLog);
   const currencyBalance = calcCurrencyCashBalance(currencyCashLog);
   const fopBalance = calcCashBalance(confirmedFopCashLog);
+  const olegCardBalance = calcCashBalance(confirmedOlegCardCashLog);
 
   el.innerHTML = ''
     + '<div class="profile-header">'
@@ -201,6 +207,15 @@ function renderCashScreen() {
     + renderCurrencyCashSection(currencyCashLog, currencyBalance, today)
     + (currentWorkerName === FOP_CASH_WORKER_NAME
       ? renderCashSection(confirmedFopCashLog, fopBalance, today, { title: 'Касса БАБЕНКО', account: 'fop', buttonText: '+ БАБЕНКО', pendingEntries: pendingFopCashLog })
+        + renderCashSection(confirmedOlegCardCashLog, olegCardBalance, today, {
+          title: 'Касса карта',
+          account: 'card-oleg',
+          buttonText: '+ Карта',
+          pendingEntries: pendingOlegCardCashLog,
+          pendingLabel: 'ОЖИДАЮТ ПОДТВЕРЖДЕНИЯ ПО КАРТЕ',
+          confirmToast: 'Карта Олега подтверждена ✓',
+          defaultPendingComment: 'КАРТА ОЛЕГ',
+        })
       : '')
     + renderWorkerDropshipperCashSection();
 
@@ -224,33 +239,12 @@ function hasSalaryBaseEntry(entries, date) {
 
 function getSalaryAccrualForDateWithExpectedBase(workerName, entries, date) {
   const relevantEntries = (entries || []).filter(isRelevantSalaryEntry);
-  let total = getSalaryAccrualForDate(relevantEntries, date);
-  if (typeof calcDailyBaseSalary !== 'function') return total;
-
-  const expectedBase = Number(calcDailyBaseSalary(workerName, date)) || 0;
-  if (expectedBase && !hasSalaryBaseEntry(relevantEntries, date)) {
-    total += expectedBase;
-  }
-
-  return total;
+  return getSalaryAccrualForDate(relevantEntries, date);
 }
 
 function getSalaryAccumulatedForWithdraw(workerName, entries) {
   const relevantEntries = (entries || []).filter(isRelevantSalaryEntry);
-  let total = relevantEntries.reduce((sum, s) => sum + Number(s.amount), 0);
-  if (typeof calcDailyBaseSalary !== 'function') return total;
-
-  const dates = new Set((orders || [])
-    .filter(order => order.workerDone && isOrderFinanciallyActive(order) && order.date)
-    .map(order => order.date));
-
-  dates.forEach(date => {
-    const expectedBase = Number(calcDailyBaseSalary(workerName, date)) || 0;
-    if (!expectedBase) return;
-    if (!hasSalaryBaseEntry(relevantEntries, date)) total += expectedBase;
-  });
-
-  return total;
+  return relevantEntries.reduce((sum, s) => sum + Number(s.amount), 0);
 }
 
 function renderWorkerSalarySection({ title, accumulated, todayAmount, todaySummary, withdrawAction, withdrawDisabled, showWithdraw = true, attendanceHtml = '' }) {
@@ -284,24 +278,22 @@ function getTodayAttendanceAmount() {
 }
 
 function renderWorkAttendanceCard() {
-  if (typeof getSalaryRule !== 'function') return '';
-  const rule = getSalaryRule(currentWorkerName);
-  const amount = Number(rule.attendanceBase) || 0;
+  if (typeof getShiftBaseAmount !== 'function') return '';
+  const amount = Number(getShiftBaseAmount(currentWorkerName)) || 0;
   if (!amount) return '';
   const entry = getTodayAttendanceEntry();
   return ''
     + '<div style="padding:14px;background:var(--surface2);border-radius:12px;border:1px solid var(--border);">'
-    + '<div class="profile-today-label"><i data-lucide="calendar-check" style="width:15px;height:15px;"></i> Выход в работу</div>'
+    + '<div class="profile-today-label"><i data-lucide="calendar-check" style="width:15px;height:15px;"></i> Смена</div>'
     + '<div style="font-size:12px;color:var(--text3);margin-top:6px;">Ставка за день: ' + amount.toLocaleString('ru') + ' ₴</div>'
     + '<button class="' + (entry ? 'btn-secondary' : 'btn-primary') + '" style="margin-top:12px;width:100%;min-height:44px;font-weight:800;" onclick="toggleWorkAttendance()">'
-    + (entry ? 'Я сегодня в работе ✓' : 'Я в работе')
+    + (entry ? 'Я на смене ✓' : 'Я на смене')
     + '</button>'
     + '</div>';
 }
 
 async function toggleWorkAttendance() {
-  const rule = getSalaryRule(currentWorkerName);
-  const amount = Number(rule.attendanceBase) || 0;
+  const amount = Number(typeof getShiftBaseAmount === 'function' ? getShiftBaseAmount(currentWorkerName) : 0) || 0;
   if (!amount) {
     showToast('Для вас ставка выхода не настроена', 'error');
     return;
@@ -321,7 +313,7 @@ async function toggleWorkAttendance() {
         order_id: WORK_ATTENDANCE_ORDER_ID,
       });
       if (created) workerSalaries.unshift(created);
-      showToast('Выход в работу отмечен ✓');
+      showToast('Смена отмечена ✓');
     }
     renderProfile();
   } catch (e) {
@@ -588,11 +580,15 @@ function buildWithdrawalsBlock(entries) {
 // Разбита на: Текущая (сегодня) + Архив (года → месяцы → дни)
 
 function isFopCashEntry(entry) {
-  return String(entry?.cash_account || '').toLowerCase() === 'fop';
+  return String(entry?.cash_account || '').toLowerCase() === CASH_ACCOUNT_FOP;
 }
 
 function isManagerCardCashEntry(entry) {
-  return String(entry?.cash_account || '').toLowerCase() === 'card';
+  return String(entry?.cash_account || '').toLowerCase() === CASH_ACCOUNT_CARD_SASHA;
+}
+
+function isOlegCardCashEntry(entry) {
+  return String(entry?.cash_account || '').toLowerCase() === CASH_ACCOUNT_CARD_OLEG;
 }
 
 function isConfirmedFopCashEntry(entry) {
@@ -601,13 +597,18 @@ function isConfirmedFopCashEntry(entry) {
 
 function renderManagerCashSections() {
   const today = getLocalDateString();
-  const combinedCashLog = (workerCashLog || []).filter(entry => !isFopCashEntry(entry) && (!isManagerCardCashEntry(entry) || entry.fop_confirmed === true));
+  const combinedCashLog = (workerCashLog || []).filter(entry => !isFopCashEntry(entry) && !isManagerCardCashEntry(entry));
   const cardCashLog = (workerCashLog || []).filter(isManagerCardCashEntry);
+  const confirmedCardCashLog = cardCashLog.filter(entry => entry.fop_confirmed === true);
   const pendingCardCashLog = cardCashLog.filter(entry => entry.fop_confirmed !== true);
   return renderCashSection(combinedCashLog, calcCashBalance(combinedCashLog), today, {
       title: 'Касса',
       account: 'cash',
       buttonText: '+ Запись',
+  }) + renderCashSection(confirmedCardCashLog, calcCashBalance(confirmedCardCashLog), today, {
+      title: 'Касса карта',
+      account: 'card-sasha',
+      buttonText: '+ Карта',
       pendingEntries: pendingCardCashLog,
       pendingLabel: 'ОЖИДАЮТ ПОДТВЕРЖДЕНИЯ ПО КАРТЕ',
       confirmToast: 'Карта Саши подтверждена ✓',
@@ -1107,7 +1108,11 @@ function _buildCashArchive(log) {
 function openCashEntryModal(account = 'cash') {
   window._cashAccount = account === 'fop'
     ? 'fop'
-    : (account === 'card' ? 'card' : (account === 'currency' ? 'currency' : (account === 'currency-back' ? 'currency-back' : (account === 'currency-entry' ? 'currency-entry' : 'cash'))));
+    : (account === 'card' || account === 'card-sasha'
+      ? 'card-sasha'
+      : (account === 'card-oleg'
+        ? 'card-oleg'
+        : (account === 'currency' ? 'currency' : (account === 'currency-back' ? 'currency-back' : (account === 'currency-entry' ? 'currency-entry' : 'cash')))));
   let modal = document.getElementById('cash-entry-modal');
   if (!modal) {
     modal = document.createElement('div');
@@ -1245,7 +1250,7 @@ function openCashEntryModal(account = 'cash') {
     if (titleEl) {
       const titleByAccount = window._cashAccount === 'fop'
         ? ' Запись в кассу БАБЕНКО'
-        : (window._cashAccount === 'card' ? ' Запись на карту Саши' : ' Запись в кассу');
+        : (window._cashAccount === 'card-sasha' ? ' Запись на карту Саши' : (window._cashAccount === 'card-oleg' ? ' Запись на карту Олега' : ' Запись в кассу'));
       titleEl.innerHTML = icon('banknote') + titleByAccount;
     }
   }
@@ -1383,9 +1388,13 @@ async function saveCashEntry() {
         worker_name: currentWorkerName,
         amount,
         comment,
-        cash_account: window._cashAccount === 'fop' ? 'fop' : (window._cashAccount === 'card' ? 'card' : 'cash'),
+        cash_account: window._cashAccount === 'fop'
+          ? CASH_ACCOUNT_FOP
+          : (window._cashAccount === 'card-sasha'
+            ? CASH_ACCOUNT_CARD_SASHA
+            : (window._cashAccount === 'card-oleg' ? CASH_ACCOUNT_CARD_OLEG : CASH_ACCOUNT_CASH)),
         fop_confirmed: false,
-        fop_date: (window._cashAccount === 'fop' || window._cashAccount === 'card') ? getLocalDateString() : null,
+        fop_date: (window._cashAccount === 'fop' || window._cashAccount === 'card-sasha' || window._cashAccount === 'card-oleg') ? getLocalDateString() : null,
       });
     }
     workerCashLog.unshift(entry);
@@ -1602,11 +1611,9 @@ function renderSalaryRuleCard(workerName) {
   if (rule.base) {
     parts.push({ label: 'Ставка за день', value: rule.base.toLocaleString('ru') + ' ₴' });
   }
-  if (rule.dailyBaseIfCompleted) {
-    parts.push({ label: 'Ставка за день с заказами', value: rule.dailyBaseIfCompleted.toLocaleString('ru') + ' ₴' });
-  }
-  if (rule.attendanceBase) {
-    parts.push({ label: 'Ставка по кнопке "Я в работе"', value: rule.attendanceBase.toLocaleString('ru') + ' ₴' });
+  const shiftBase = Number(typeof getShiftBaseAmount === 'function' ? getShiftBaseAmount(workerName) : 0) || 0;
+  if (shiftBase) {
+    parts.push({ label: 'Ставка по кнопке "Я на смене"', value: shiftBase.toLocaleString('ru') + ' ₴' });
   }
   if (rule.baseIfResp) {
     parts.push({ label: 'Доплата за день (если ответственный)', value: rule.baseIfResp.toLocaleString('ru') + ' ₴' });
@@ -1650,8 +1657,7 @@ function renderSalaryRuleCard(workerName) {
   // Формула одной строкой
   const formulaParts = [];
   if (rule.base) formulaParts.push(rule.base + ' ₴');
-  if (rule.dailyBaseIfCompleted) formulaParts.push(rule.dailyBaseIfCompleted + ' ₴/день с заказом');
-  if (rule.attendanceBase) formulaParts.push(rule.attendanceBase + ' ₴/выход');
+  if (shiftBase) formulaParts.push(shiftBase + ' ₴/смена');
   if (rule.baseIfResp) formulaParts.push(rule.baseIfResp + ' ₴ (если отв.)');
   if (rule.glassMarginPct) formulaParts.push('маржа × ' + Math.round(rule.glassMarginPct * 100) + '%');
   if (rule.moldingPct) formulaParts.push('молдинг × ' + Math.round(rule.moldingPct * 100) + '%');

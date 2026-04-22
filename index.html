@@ -648,15 +648,23 @@
           <span id="modal-total-all" class="modal-live-total-sum">0 ₴</span>
         </div>
       </div>
-      <button class="modal-close" onclick="closeOrderModal()">
-        <i data-lucide="x" style="width:16px;height:16px;"></i>
-      </button>
+      <div class="order-modal-header-actions">
+        <div class="order-modal-owner-actions" id="order-modal-owner-actions" style="display:none;">
+          <button type="button" class="icon-action-btn" id="order-modal-copy-btn" title="Скопировать" onclick="if (editingOrderId) copyOrderSummary(editingOrderId)"><span class="svg-icon" style="--icon-url:url('images/ico/clipboard-list.svg');" aria-hidden="true"></span></button>
+          <button type="button" class="icon-action-btn" id="order-modal-duplicate-btn" title="Продублировать" onclick="if (editingOrderId) duplicateOrder(editingOrderId)"><span class="svg-icon" style="--icon-url:url('images/ico/plus.svg');" aria-hidden="true"></span></button>
+          <button type="button" class="icon-action-btn icon-action-danger" id="order-modal-delete-btn" title="Удалить" onclick="if (editingOrderId) deleteOrder(editingOrderId, event)"><span class="svg-icon" style="--icon-url:url('images/ico/trash-2.svg');" aria-hidden="true"></span></button>
+        </div>
+        <button class="modal-close" onclick="closeOrderModal()">
+          <i data-lucide="x" style="width:16px;height:16px;"></i>
+        </button>
+      </div>
     </div>
 
     <div class="order-modal-tabs" id="order-modal-tabs">
       <button type="button" class="order-modal-tab active" data-order-modal-tab="order" onclick="setOrderModalPanel('order')">Заказ</button>
       <button type="button" class="order-modal-tab" data-order-modal-tab="work" onclick="setOrderModalPanel('work')">Работы</button>
       <button type="button" class="order-modal-tab" data-order-modal-tab="finance" onclick="setOrderModalPanel('finance')">Финансы</button>
+      <button type="button" class="order-modal-tab" data-order-modal-tab="summary" onclick="setOrderModalPanel('summary')">Сводка</button>
     </div>
 
     <div class="modal-body">
@@ -688,22 +696,22 @@
               <input class="form-input" type="date" id="f-date">
             </div>
             <div class="form-group">
-              <label class="form-label">🕐 Время</label>
+              <label class="form-label">🕐 Время 🤙🏼</label>
               <input class="form-input" type="time" id="f-time">
             </div>
           </div>
           <div class="form-row">
             <div class="form-group">
-              <label class="form-label">🚧 Ответственный</label>
+              <label class="form-label">🚧 Ответ</label>
               <select class="form-select" id="f-responsible"></select>
             </div>
             <div class="form-group">
-              <label class="form-label">🤝 Помощник</label>
+              <label class="form-label">🤝 Помощь 🤙🏼</label>
               <select class="form-select" id="f-assistant"></select>
             </div>
           </div>
           <div class="form-group">
-            <label class="form-label">📋 Ответственный менеджер</label>
+            <label class="form-label">📋 Ответст менеджер</label>
             <select class="form-select" id="f-manager"></select>
           </div>
           <div class="form-group">
@@ -727,22 +735,6 @@
             <input class="form-input" type="text" id="f-address" placeholder="Адрес / Расположение">
           </div>
           <div class="form-group">
-            <label class="form-label">VIN код</label>
-            <textarea class="form-input" id="f-vin" placeholder="17 символов" maxlength="17" autocomplete="off" rows="2"></textarea>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Доп заметка</label>
-            <textarea class="form-input" id="f-extra-note" placeholder="Дополнительная заметка" rows="2"></textarea>
-          </div>
-          <div class="form-group">
-            <label class="form-label">🚗 Автомобиль</label>
-            <div class="ac-wrap" id="ac-car-wrap">
-              <input class="form-input" type="text" id="f-car" placeholder="Марка, модель"
-                autocomplete="off" oninput="acFilter('car')" onfocus="acOpen('car')" onblur="acBlur('car')" onkeydown="acKey(event,'car')">
-              <div class="ac-dropdown" id="ac-car-list"></div>
-            </div>
-          </div>
-          <div class="form-group">
             <label class="form-label">🔢 Еврокод</label>
             <div class="ac-wrap" id="ac-code-wrap">
               <input class="form-input" type="text" id="f-code" placeholder="Авто из справочника"
@@ -751,7 +743,23 @@
             </div>
           </div>
           <div class="form-group">
-            <label class="form-label">🏭 Производитель стекла</label>
+            <label class="form-label">🚗 Автомобиль / Год авто</label>
+            <div class="ac-wrap" id="ac-car-wrap">
+              <input class="form-input" type="text" id="f-car" placeholder="Марка, модель, год"
+                autocomplete="off" oninput="acFilter('car')" onfocus="acOpen('car')" onblur="acBlur('car')" onkeydown="acKey(event,'car')">
+              <div class="ac-dropdown" id="ac-car-list"></div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">VIN код</label>
+            <textarea class="form-input" id="f-vin" placeholder="17 символов" maxlength="17" autocomplete="off" rows="2"></textarea>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Доп заметка</label>
+            <textarea class="form-input" id="f-extra-note" placeholder="Дополнительная заметка" rows="2"></textarea>
+          </div>
+          <div class="form-group">
+            <label class="form-label">🏭 Производитель</label>
             <select class="form-select" id="f-glass-manufacturer">
               <option value="">— выбрать —</option>
               <option value="🇨🇳 XYG (Китай)">🇨🇳 XYG (Китай)</option>
@@ -827,7 +835,7 @@
       </div>
 
       <!-- ── СЕКЦИЯ 3: РАБОТЫ (суммы) ── -->
-      <div class="form-section" data-order-modal-panel="work">
+      <div class="form-section" id="order-work-costs-section" data-order-modal-panel="work">
         <div class="form-section-title form-section-title--teal">
           <i data-lucide="hammer" style="width:13px;height:13px;"></i>
           Стоимость работ
@@ -919,7 +927,7 @@
                   </select>
                 </div>
                 <div style="display:flex;align-items:end;min-width:0;">
-                  <button type="button" class="btn-secondary" style="width:100%;height:44px;padding:0 16px;font-weight:800;" onclick="addSupplierPayment()">Добавить</button>
+                  <button type="button" class="btn-secondary" id="add-supplier-payment-btn" style="width:100%;height:44px;padding:0 16px;font-weight:800;" onclick="addSupplierPayment()">Добавить</button>
                 </div>
               </div>
               <div class="form-grid">
@@ -976,7 +984,7 @@
                   </select>
                 </div>
                 <div style="display:flex;align-items:end;min-width:0;">
-                  <button type="button" class="btn-secondary" style="width:100%;height:44px;padding:0 16px;font-weight:800;" onclick="addClientPayment()">Добавить</button>
+                  <button type="button" class="btn-secondary" id="add-client-payment-btn" style="width:100%;height:44px;padding:0 16px;font-weight:800;" onclick="addClientPayment()">Добавить</button>
                 </div>
               </div>
 
@@ -1007,6 +1015,14 @@
         </div>
       </div>
 
+      <div class="form-section" id="order-summary-section" data-order-modal-panel="summary" style="display:none;">
+        <div class="form-section-title form-section-title--finance">
+          <i data-lucide="scroll-text" style="width:13px;height:13px;"></i>
+          Сводка
+        </div>
+        <div id="order-summary-content" class="order-summary"></div>
+      </div>
+
     </div>
 
     <!-- STICKY FOOTER -->
@@ -1023,6 +1039,10 @@
       <button class="btn-primary" id="order-save-btn" style="display:flex;align-items:center;gap:6px;" onclick="saveOrder()">
         <i data-lucide="save" style="width:14px;height:14px;"></i>
         <span id="order-save-label">Сохранить</span>
+      </button>
+      <button class="btn-confirm-done" id="order-complete-btn" type="button" style="display:none;" onclick="completeOrderFromModal()">
+        <i data-lucide="check" style="width:14px;height:14px;"></i>
+        Выполнить
       </button>
     </div>
 

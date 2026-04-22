@@ -754,7 +754,8 @@ function renderOwnerSalaryScreen() {
     + pendingSalaryHtml
     + manualSalaryHtml
     + analyticsHtml
-    + anomaliesHtml;
+    + anomaliesHtml
+    + '<button class="subtle-reload-btn" style="margin-top:12px;" onclick="clearCacheAndReload()">Очистить кеш и перезагрузить</button>';
   initIcons();
 }
 

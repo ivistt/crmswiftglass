@@ -5,6 +5,23 @@
 async function loadWorkers() {
   try {
     workers = await sbFetchWorkers();
+    if (currentWorkerName && currentRole !== 'owner') {
+      const currentWorker = workers.find(worker => worker.name === currentWorkerName);
+      const nextRole = currentWorker?.systemRole || currentRole;
+      if (nextRole && nextRole !== currentRole) {
+        currentRole = nextRole;
+        try {
+          localStorage.setItem('crm_role', nextRole);
+        } catch (e) {}
+        const badge = document.getElementById('role-badge');
+        if (badge) {
+          const roleLabel = ROLE_LABELS[nextRole] || nextRole;
+          badge.textContent = currentWorkerName ? `${currentWorkerName} · ${roleLabel.replace(/^.\s/, '')}` : roleLabel;
+          badge.className = 'role-badge role-' + nextRole;
+        }
+        if (typeof updateNavbarVisibility === 'function') updateNavbarVisibility();
+      }
+    }
     if (currentRole !== 'owner') {
       workers = workers.map(worker => ({ ...worker, salaryFormula: '' }));
     }
@@ -152,6 +169,16 @@ function openWorkerEditModal(workerId) {
             <input class="form-input" type="text" id="we-alias" placeholder="Например: 🐻 Василий">
           </div>
 
+          <div class="form-group">
+            <label class="form-label">${icon('badge-check')} Роль в интерфейсе</label>
+            <select class="form-select" id="we-display-role">
+              <option value="Старший специалист">Старший специалист</option>
+              <option value="Младший специалист">Младший специалист</option>
+              <option value="Менеджер">Менеджер</option>
+              <option value="Монтажник">Монтажник</option>
+            </select>
+          </div>
+
           <!-- Роль -->
           <div class="form-group">
             <label class="form-label">${icon('user')} Роль (системная)</label>
@@ -216,6 +243,7 @@ function openWorkerEditModal(workerId) {
   document.getElementById('worker-edit-name-display').textContent = getWorkerDisplayName(w.name);
   document.getElementById('we-password').value = '';
   document.getElementById('we-alias').value = w.alias || '';
+  document.getElementById('we-display-role').value = w.role || 'Старший специалист';
   document.getElementById('we-role').value = w.systemRole || 'senior';
   // Показываем условия ЗП из SALARY_CONFIG
   _renderWeSalaryRule(w.name);
@@ -263,10 +291,9 @@ function _renderWeSalaryRule(workerName) {
 
   if (rule.base)
     rows.push(['Ставка за день', rule.base.toLocaleString('ru') + ' ₴']);
-  if (rule.dailyBaseIfCompleted)
-    rows.push(['Ставка за день с заказами', rule.dailyBaseIfCompleted.toLocaleString('ru') + ' ₴']);
-  if (rule.attendanceBase)
-    rows.push(['Ставка по кнопке "Я в работе"', rule.attendanceBase.toLocaleString('ru') + ' ₴']);
+  const shiftBaseAmount = Number(typeof getShiftBaseAmount === 'function' ? getShiftBaseAmount(workerName) : 0) || 0;
+  if (shiftBaseAmount)
+    rows.push(['Ставка по кнопке "Я на смене"', shiftBaseAmount.toLocaleString('ru') + ' ₴']);
   if (rule.baseIfResp)
     rows.push(['Доплата за день (если ответственный)', rule.baseIfResp.toLocaleString('ru') + ' ₴']);
   if (rule.glassMarginPct)
@@ -296,8 +323,7 @@ function _renderWeSalaryRule(workerName) {
 
   const formulaParts = [];
   if (rule.base) formulaParts.push(rule.base + ' ₴');
-  if (rule.dailyBaseIfCompleted) formulaParts.push(rule.dailyBaseIfCompleted + ' ₴/день с заказом');
-  if (rule.attendanceBase) formulaParts.push(rule.attendanceBase + ' ₴/выход');
+  if (shiftBaseAmount) formulaParts.push(shiftBaseAmount + ' ₴/смена');
   if (rule.baseIfResp) formulaParts.push(rule.baseIfResp + ' ₴ (если отв.)');
   if (rule.glassMarginPct) formulaParts.push('маржа × ' + Math.round(rule.glassMarginPct * 100) + '%');
   if (rule.moldingPct) formulaParts.push('молдинг × ' + Math.round(rule.moldingPct * 100) + '%');
@@ -365,6 +391,7 @@ async function saveWorkerEdit() {
 
   const password  = document.getElementById('we-password').value.trim();
   const alias     = document.getElementById('we-alias')?.value.trim() || '';
+  const displayRole = document.getElementById('we-display-role')?.value || '';
   const role      = document.getElementById('we-role').value;
   const assistant = document.getElementById('we-assistant')?.value || '';
 
@@ -373,6 +400,7 @@ async function saveWorkerEdit() {
 
   try {
     const updates = {
+      role: displayRole,
       systemRole: role,
       alias: alias,
       assistant: assistant,
@@ -383,6 +411,7 @@ async function saveWorkerEdit() {
 
     // Обновляем локально
     Object.assign(w, updates);
+    w.role = displayRole;
     w.systemRole = role;
     w.alias = alias;
     w.assistant = assistant;

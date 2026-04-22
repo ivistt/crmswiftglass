@@ -205,6 +205,7 @@ async function sbInsertWorker(entry) {
 // Обновление данных сотрудника (роль, формула, пароль)
 async function sbUpdateWorker(workerId, updates) {
   const body = {};
+  if (updates.role !== undefined) body.role = updates.role || '';
   if (updates.systemRole !== undefined) body.system_role    = updates.systemRole;
   if (updates.salaryFormula !== undefined) body.salary_formula = updates.salaryFormula || '';
   if (updates.assistant !== undefined) body.assistant = updates.assistant || '';
@@ -930,11 +931,30 @@ function _selectedServicesSalary(workerName, order) {
   }, 0);
 }
 
-function calcDailyBaseSalary(workerName, date) {
+function getShiftBaseAmount(workerName) {
   const rule = getSalaryRule(workerName);
-  const dayOrders = _getCompletedOrdersForWorkerDate(workerName, date);
-  if (!dayOrders.length) return 0;
-  return Number(rule.dailyBaseIfCompleted) || 0;
+  return Number(rule.attendanceBase) || Number(rule.dailyBaseIfCompleted) || 0;
+}
+
+function hasWorkAttendanceForDate(workerName, date, entries = null) {
+  const pool = Array.isArray(entries)
+    ? entries
+    : (
+        (typeof allSalaries !== 'undefined' && Array.isArray(allSalaries) && allSalaries.length)
+          ? allSalaries
+          : (typeof workerSalaries !== 'undefined' && Array.isArray(workerSalaries) ? workerSalaries : [])
+      );
+  return pool.some(entry =>
+    entry?.worker_name === workerName &&
+    entry?.date === date &&
+    entry?.order_id === WORK_ATTENDANCE_ORDER_ID &&
+    Number(entry.amount) > 0
+  );
+}
+
+function calcDailyBaseSalary(workerName, date) {
+  if (!workerName || !date) return 0;
+  return hasWorkAttendanceForDate(workerName, date) ? getShiftBaseAmount(workerName) : 0;
 }
 
 function calcOrderSalary(workerName, order) {
@@ -1064,13 +1084,7 @@ function calcDaySalary(workerName, date) {
   const salaryEntries = (typeof allSalaries !== 'undefined' && Array.isArray(allSalaries) && allSalaries.length)
     ? allSalaries
     : (typeof workerSalaries !== 'undefined' && Array.isArray(workerSalaries) ? workerSalaries : []);
-  const attendanceAmount = salaryEntries.some(entry =>
-    entry.worker_name === workerName &&
-    entry.date === date &&
-    entry.order_id === WORK_ATTENDANCE_ORDER_ID
-  ) ? (Number(getSalaryRule(workerName).attendanceBase) || 0) : 0;
-  return attendanceAmount
-    + calcDailyBaseSalary(workerName, date)
+  return calcDailyBaseSalary(workerName, date)
     + orders
       .filter(o => o.workerDone && !o.isCancelled && o.date === date &&
               isOrderFinanciallyActive(o) &&
@@ -1178,6 +1192,11 @@ const PAYMENT_METHOD_OPTIONS = [
   '📂 БЕЗНАЛ БАБЕНКО',
 ];
 const SASHA_MANAGER_CARD_METHOD = '👤 Шепель Александр 💳 4149 4975 1422 9980 (PRIVAT)';
+const OLEG_CARD_METHOD = '👤 Бабенко Олег 💳 5457 0825 0103 4743 (PRIVAT)';
+const CASH_ACCOUNT_CASH = 'cash';
+const CASH_ACCOUNT_FOP = 'fop';
+const CASH_ACCOUNT_CARD_SASHA = 'card_sasha';
+const CASH_ACCOUNT_CARD_OLEG = 'card_oleg';
 
 function normalizePaymentMethod(method) {
   if (!method) return '';
@@ -1196,6 +1215,10 @@ function isFopPaymentMethod(method) {
 
 function isSashaManagerCardPaymentMethod(method) {
   return normalizePaymentMethod(method) === SASHA_MANAGER_CARD_METHOD;
+}
+
+function isOlegCardPaymentMethod(method) {
+  return normalizePaymentMethod(method) === OLEG_CARD_METHOD;
 }
 
 let currentRole = null;
