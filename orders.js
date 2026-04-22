@@ -1298,64 +1298,6 @@ function getCashClientPaidForOrderSnapshot(order) {
   return isCashPaymentMethod(order?.paymentMethod) ? (Number(order?.debt) || 0) : 0;
 }
 
-function getOrderPaymentSignature(payment) {
-  return [
-    normalizePaymentMethod(payment?.method || ''),
-    Number(payment?.amount) || 0,
-    payment?.date || '',
-    payment?.timestamp || '',
-  ].join('||');
-}
-
-function getNewOrderPaymentsDelta(oldPayments = [], newPayments = []) {
-  const seen = new Map();
-  (oldPayments || []).forEach(payment => {
-    const key = getOrderPaymentSignature(payment);
-    seen.set(key, (seen.get(key) || 0) + 1);
-  });
-  const added = [];
-  (newPayments || []).forEach(payment => {
-    const key = getOrderPaymentSignature(payment);
-    const left = seen.get(key) || 0;
-    if (left > 0) {
-      seen.set(key, left - 1);
-      return;
-    }
-    added.push(payment);
-  });
-  return added;
-}
-
-function buildNewNonCashPaymentEntries(order, oldOrder = null) {
-  const entries = [];
-  const clientDelta = getNewOrderPaymentsDelta(oldOrder?.clientPayments || [], order?.clientPayments || []);
-  const supplierDelta = getNewOrderPaymentsDelta(oldOrder?.supplierPayments || [], order?.supplierPayments || []);
-
-  clientDelta.forEach(payment => {
-    if (isCashPaymentMethod(payment?.method)) return;
-    const payload = buildOrderPaymentCashEntryPayload({
-      order,
-      payment,
-      paymentType: 'client',
-      fallbackWorkerName: order?.responsible || currentWorkerName,
-    });
-    if (payload) entries.push(payload);
-  });
-
-  supplierDelta.forEach(payment => {
-    if (isCashPaymentMethod(payment?.method)) return;
-    const payload = buildOrderPaymentCashEntryPayload({
-      order,
-      payment,
-      paymentType: 'supplier',
-      fallbackWorkerName: order?.responsible || currentWorkerName,
-    });
-    if (payload) entries.push(payload);
-  });
-
-  return entries;
-}
-
 async function addCashEntriesForDuplicatedOrder(order) {
   if (!isOrderFinanciallyActive(order)) return;
 
@@ -1913,7 +1855,6 @@ async function persistImmediateOrderPaymentsUpdate() {
   const newCashClientPaid = newFinanciallyActive ? getCashClientPaidForOrderSnapshot({ ...data, clientPayments: newClientPayments }) : 0;
   const cashClientDiff = newFinanciallyActive ? (newCashClientPaid - oldCashClientPaid) : 0;
   const cashEntries = [];
-  const nonCashEntries = buildNewNonCashPaymentEntries(data, existingOrder);
 
   if ((currentRole === 'senior' || currentRole === 'owner') && cashSupplierDiff !== 0) {
     const amount = -cashSupplierDiff;
@@ -1970,16 +1911,6 @@ async function persistImmediateOrderPaymentsUpdate() {
       workerCashLog.unshift(cashEntry);
     }
     if (currentRole === 'owner' && Array.isArray(window.allCashLog) && cashEntry) {
-      window.allCashLog.unshift(cashEntry);
-    }
-  }
-
-  for (const rawEntry of nonCashEntries) {
-    const cashEntry = await sbInsertCashEntry(rawEntry);
-    if (typeof workerCashLog !== 'undefined' && cashEntry?.worker_name === currentWorkerName) {
-      workerCashLog.unshift(cashEntry);
-    }
-    if (Array.isArray(window.allCashLog) && cashEntry) {
       window.allCashLog.unshift(cashEntry);
     }
   }
@@ -2926,7 +2857,6 @@ async function saveOrder() {
   const newCashClientPaid = newFinanciallyActive ? getCashClientPaidForOrderSnapshot({ ...data, clientPayments: newClientPayments }) : 0;
   const cashClientDiff = newFinanciallyActive ? (newCashClientPaid - oldCashClientPaid) : 0;
   const cashEntries = [];
-  const nonCashEntries = buildNewNonCashPaymentEntries(data, existingOrder);
 
   if ((currentRole === 'senior' || currentRole === 'owner') && cashSupplierDiff !== 0) {
     const amount = -cashSupplierDiff; // наличная оплата поставщику уменьшает кассу
@@ -3011,16 +2941,6 @@ async function saveOrder() {
         workerCashLog.unshift(cashEntry);
       }
       if (currentRole === 'owner' && Array.isArray(window.allCashLog) && cashEntry) {
-        window.allCashLog.unshift(cashEntry);
-      }
-    }
-
-    for (const rawEntry of nonCashEntries) {
-      const cashEntry = await sbInsertCashEntry(rawEntry);
-      if (typeof workerCashLog !== 'undefined' && cashEntry?.worker_name === currentWorkerName) {
-        workerCashLog.unshift(cashEntry);
-      }
-      if (Array.isArray(window.allCashLog) && cashEntry) {
         window.allCashLog.unshift(cashEntry);
       }
     }
