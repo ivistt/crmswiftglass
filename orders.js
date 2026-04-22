@@ -2887,21 +2887,30 @@ async function saveOrder() {
   }
 
   try {
+    const shouldUseSaveWithCash = cashEntries.length > 0;
     const result = isNew
       ? await saveNewOrderWithNextIdOnConflict(
           data,
-          currentCashEntries => sbSaveOrderWithCash(data, {
-            isNew: true,
-            cashEntries: currentCashEntries,
-            rollbackOrder: existingOrder,
-          }),
+          async currentCashEntries => {
+            if (shouldUseSaveWithCash) {
+              return await sbSaveOrderWithCash(data, {
+                isNew: true,
+                cashEntries: currentCashEntries,
+                rollbackOrder: existingOrder,
+              });
+            }
+            const savedOrder = await sbInsertOrder(data);
+            return { order: savedOrder, cashEntries: [] };
+          },
           { cashEntries }
         )
-      : await sbSaveOrderWithCash(data, {
-          isNew: false,
-          cashEntries,
-          rollbackOrder: existingOrder,
-        });
+      : (shouldUseSaveWithCash
+        ? await sbSaveOrderWithCash(data, {
+            isNew: false,
+            cashEntries,
+            rollbackOrder: existingOrder,
+          })
+        : { order: await sbUpdateOrder(data), cashEntries: [] });
     const saved = result.order;
 
     if (isNew) {
