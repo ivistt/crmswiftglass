@@ -183,18 +183,21 @@ function renderCashScreen() {
   }
 
   const today = getLocalDateString();
-  const regularCashLog = (workerCashLog || []).filter(entry => !isFopCashEntry(entry) && !isOlegCardCashEntry(entry));
-  const currencyCashLog = regularCashLog.filter(isCurrencyCashEntry);
+  const nonFopCashLog = (workerCashLog || []).filter(entry => !isFopCashEntry(entry));
+  const currencyCashLog = nonFopCashLog.filter(isCurrencyCashEntry);
   const fopCashLog = (workerCashLog || []).filter(isFopCashEntry);
   const olegCardCashLog = (workerCashLog || []).filter(isOlegCardCashEntry);
+  const confirmedUnifiedCashLog = nonFopCashLog.filter(entry => {
+    if (isCurrencyCashEntry(entry)) return false;
+    if (isOlegCardCashEntry(entry)) return entry.fop_confirmed === true;
+    return true;
+  });
   const confirmedFopCashLog = fopCashLog.filter(entry => entry.fop_confirmed === true);
   const pendingFopCashLog = fopCashLog.filter(entry => entry.fop_confirmed !== true);
-  const confirmedOlegCardCashLog = olegCardCashLog.filter(entry => entry.fop_confirmed === true);
   const pendingOlegCardCashLog = olegCardCashLog.filter(entry => entry.fop_confirmed !== true);
-  const balance = calcCashBalance(regularCashLog);
+  const balance = calcCashBalance(confirmedUnifiedCashLog);
   const currencyBalance = calcCurrencyCashBalance(currencyCashLog);
   const fopBalance = calcCashBalance(confirmedFopCashLog);
-  const olegCardBalance = calcCashBalance(confirmedOlegCardCashLog);
 
   el.innerHTML = ''
     + '<div class="profile-header">'
@@ -202,7 +205,7 @@ function renderCashScreen() {
     + '<div><div style="font-size:20px;font-weight:800;">' + getWorkerDisplayName(currentWorkerName) + '</div>'
     + '<div style="font-size:13px;color:var(--text3);margin-top:2px;">Касса</div></div>'
     + '</div>'
-    + renderCashSection(regularCashLog, balance, today, {
+    + renderCashSection(confirmedUnifiedCashLog, balance, today, {
       title: 'Касса (наличка)',
       account: 'cash',
       buttonText: '+ Запись',
@@ -211,15 +214,10 @@ function renderCashScreen() {
     + renderCurrencyCashSection(currencyCashLog, currencyBalance, today)
     + (currentWorkerName === FOP_CASH_WORKER_NAME
       ? renderCashSection(confirmedFopCashLog, fopBalance, today, { title: 'Касса БАБЕНКО', account: 'fop', buttonText: '+ БАБЕНКО', pendingEntries: pendingFopCashLog })
-        + renderCashSection(confirmedOlegCardCashLog, olegCardBalance, today, {
-          title: 'Касса карта',
-          account: 'card-oleg',
-          buttonText: '+ Карта',
-          pendingEntries: pendingOlegCardCashLog,
+        + (pendingOlegCardCashLog.length ? renderFopPendingEntries(pendingOlegCardCashLog, {
           pendingLabel: 'ОЖИДАЮТ ПОДТВЕРЖДЕНИЯ ПО КАРТЕ',
-          confirmToast: 'Карта Олега подтверждена ✓',
           defaultPendingComment: 'КАРТА ОЛЕГ',
-        })
+        }) : '')
       : '')
     + renderWorkerDropshipperCashSection();
 
@@ -601,26 +599,24 @@ function isConfirmedFopCashEntry(entry) {
 
 function renderManagerCashSections() {
   const today = getLocalDateString();
-  const combinedCashLog = (workerCashLog || []).filter(entry => !isFopCashEntry(entry) && !isManagerCardCashEntry(entry));
-  const currencyCashLog = combinedCashLog.filter(isCurrencyCashEntry);
-  const regularCashLog = combinedCashLog.filter(entry => !isCurrencyCashEntry(entry));
+  const nonFopCashLog = (workerCashLog || []).filter(entry => !isFopCashEntry(entry));
+  const currencyCashLog = nonFopCashLog.filter(isCurrencyCashEntry);
   const cardCashLog = (workerCashLog || []).filter(isManagerCardCashEntry);
-  const confirmedCardCashLog = cardCashLog.filter(entry => entry.fop_confirmed === true);
   const pendingCardCashLog = cardCashLog.filter(entry => entry.fop_confirmed !== true);
-  return renderCashSection(regularCashLog, calcCashBalance(regularCashLog), today, {
+  const confirmedUnifiedCashLog = nonFopCashLog.filter(entry => {
+    if (isCurrencyCashEntry(entry)) return false;
+    if (isManagerCardCashEntry(entry)) return entry.fop_confirmed === true;
+    return true;
+  });
+  return renderCashSection(confirmedUnifiedCashLog, calcCashBalance(confirmedUnifiedCashLog), today, {
       title: 'Касса',
       account: 'cash',
       buttonText: '+ Запись',
   }) + renderCurrencyCashSection(currencyCashLog, calcCurrencyCashBalance(currencyCashLog), today)
-    + renderCashSection(confirmedCardCashLog, calcCashBalance(confirmedCardCashLog), today, {
-      title: 'Касса карта',
-      account: 'card-sasha',
-      buttonText: '+ Карта',
-      pendingEntries: pendingCardCashLog,
+    + (pendingCardCashLog.length ? renderFopPendingEntries(pendingCardCashLog, {
       pendingLabel: 'ОЖИДАЮТ ПОДТВЕРЖДЕНИЯ ПО КАРТЕ',
-      confirmToast: 'Карта Саши подтверждена ✓',
       defaultPendingComment: 'КАРТА САША',
-  });
+    }) : '');
 }
 
 function getCurrentWorkerDropshipperNames() {
@@ -817,7 +813,12 @@ async function confirmFopCashEntry(id) {
     renderCashScreen();
     if (document.getElementById('screen-profile')?.classList.contains('active')) renderProfile();
     const account = String(updated?.cash_account || '').toLowerCase();
-    showToast(account === 'card' ? 'Карта Саши подтверждена ✓' : 'БАБЕНКО подтверждено ✓');
+    const paymentMethod = getPaymentMethodFromSourceKey(updated?.fop_source_key);
+    if (account === 'fop') showToast('БАБЕНКО подтверждено ✓');
+    else if (account === 'card_sasha') showToast('Карта Саши подтверждена ✓');
+    else if (account === 'card_oleg') showToast('Карта Олега подтверждена ✓');
+    else if (paymentMethod) showToast(`Подтверждено: ${paymentMethod} ✓`);
+    else showToast('Запись подтверждена ✓');
   } catch (e) {
     showToast('Ошибка: ' + e.message, 'error');
   }

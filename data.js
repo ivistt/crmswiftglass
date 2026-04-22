@@ -74,7 +74,10 @@ function getWorkerDisplayName(name) {
   const raw = String(name || '').trim();
   if (!raw) return '';
   const workerAlias = (workers || []).find(w => w.name === raw)?.alias;
-  const staticNames = { Maksim: 'Макс' };
+  const staticNames = {
+    Maksim: 'Макс',
+    'Карты владельца': 'Карты владельца',
+  };
   return workerAlias || staticNames[raw] || raw;
 }
 
@@ -1197,6 +1200,7 @@ const CASH_ACCOUNT_CASH = 'cash';
 const CASH_ACCOUNT_FOP = 'fop';
 const CASH_ACCOUNT_CARD_SASHA = 'card_sasha';
 const CASH_ACCOUNT_CARD_OLEG = 'card_oleg';
+const OWNER_PENDING_CASH_WORKER_NAME = 'Карты владельца';
 
 function normalizePaymentMethod(method) {
   if (!method) return '';
@@ -1219,6 +1223,93 @@ function isSashaManagerCardPaymentMethod(method) {
 
 function isOlegCardPaymentMethod(method) {
   return normalizePaymentMethod(method) === OLEG_CARD_METHOD;
+}
+
+function buildPaymentSourceKey(orderId, method) {
+  return `order:${String(orderId || '').trim()}|method:${encodeURIComponent(normalizePaymentMethod(method) || '')}`;
+}
+
+function getPaymentMethodFromSourceKey(sourceKey) {
+  const raw = String(sourceKey || '');
+  const match = raw.match(/(?:^|\|)method:([^|]+)/);
+  if (!match) return '';
+  try {
+    return decodeURIComponent(match[1]);
+  } catch (e) {
+    return match[1];
+  }
+}
+
+function isConfirmableCashEntry(entry) {
+  const account = String(entry?.cash_account || 'cash').toLowerCase();
+  if (account === CASH_ACCOUNT_FOP || account === CASH_ACCOUNT_CARD_SASHA || account === CASH_ACCOUNT_CARD_OLEG) return true;
+  return String(entry?.worker_name || '') === OWNER_PENDING_CASH_WORKER_NAME
+    && !!getPaymentMethodFromSourceKey(entry?.fop_source_key);
+}
+
+function getPaymentCashRoute(method, fallbackWorkerName = '') {
+  const normalized = normalizePaymentMethod(method);
+  if (isCashPaymentMethod(normalized)) {
+    return {
+      workerName: fallbackWorkerName || currentWorkerName || '',
+      cashAccount: CASH_ACCOUNT_CASH,
+      requiresConfirmation: false,
+    };
+  }
+  if (isFopPaymentMethod(normalized)) {
+    return {
+      workerName: 'Oleg Starshiy',
+      cashAccount: CASH_ACCOUNT_FOP,
+      requiresConfirmation: true,
+    };
+  }
+  if (isSashaManagerCardPaymentMethod(normalized)) {
+    return {
+      workerName: 'Sasha Manager',
+      cashAccount: CASH_ACCOUNT_CARD_SASHA,
+      requiresConfirmation: true,
+    };
+  }
+  if (isOlegCardPaymentMethod(normalized)) {
+    return {
+      workerName: 'Oleg Starshiy',
+      cashAccount: CASH_ACCOUNT_CARD_OLEG,
+      requiresConfirmation: true,
+    };
+  }
+  return {
+    workerName: OWNER_PENDING_CASH_WORKER_NAME,
+    cashAccount: CASH_ACCOUNT_CASH,
+    requiresConfirmation: true,
+  };
+}
+
+function buildOrderPaymentCashEntryPayload({ order, payment, paymentType = 'client', fallbackWorkerName = '' }) {
+  const amount = Number(payment?.amount) || 0;
+  const method = normalizePaymentMethod(payment?.method || '');
+  if (!amount || !method) return null;
+
+  const route = getPaymentCashRoute(method, fallbackWorkerName || order?.responsible || '');
+  const signedAmount = paymentType === 'supplier' ? -amount : amount;
+  const orderId = order?.id || '—';
+  const paymentDate = payment?.date || order?.date || '';
+  const dateLabel = paymentDate ? formatDate(paymentDate) : '—';
+  const carLabel = order?.car || order?.client || '—';
+  const actionLabel = paymentType === 'supplier' ? 'Оплата поставщику' : 'Оплата клиента';
+  const payload = {
+    worker_name: route.workerName,
+    amount: signedAmount,
+    comment: `${actionLabel} ${method} ${orderId}, ${dateLabel}, авто: ${carLabel}`,
+    cash_account: route.cashAccount,
+  };
+
+  if (route.requiresConfirmation) {
+    payload.fop_confirmed = false;
+    payload.fop_date = paymentDate || null;
+    payload.fop_source_key = buildPaymentSourceKey(orderId, method);
+  }
+
+  return payload;
 }
 
 let currentRole = null;

@@ -753,10 +753,13 @@ function _ownerCashEntryDate(entry) {
 
 function getOwnerCashSeniorNames() {
   const names = (workers || [])
-    .filter(w => w.systemRole === 'senior')
+    .filter(w => w.systemRole === 'senior' || w.systemRole === 'extra')
     .map(w => w.name);
   if ((workers || []).some(w => w.name === 'Sasha Manager') && !names.includes('Sasha Manager')) {
     names.push('Sasha Manager');
+  }
+  if (!names.includes(OWNER_PENDING_CASH_WORKER_NAME)) {
+    names.push(OWNER_PENDING_CASH_WORKER_NAME);
   }
   return names;
 }
@@ -771,11 +774,13 @@ function getOwnerCashLogs(confirmFilter = ownerCashConfirmFilter) {
       if (account === 'fop') return entry.worker_name === 'Oleg Starshiy';
       if (account === 'card_sasha') return entry.worker_name === 'Sasha Manager';
       if (account === 'card_oleg') return entry.worker_name === 'Oleg Starshiy';
+      if (entry.worker_name === OWNER_PENDING_CASH_WORKER_NAME) {
+        return account === 'cash' && !!getPaymentMethodFromSourceKey(entry?.fop_source_key);
+      }
       return account === 'cash';
     })
     .filter(entry => {
-      const account = String(entry?.cash_account || 'cash').toLowerCase();
-      const isConfirmable = account === 'fop' || account === 'card_sasha' || account === 'card_oleg';
+      const isConfirmable = isConfirmableCashEntry(entry);
       if (confirmFilter === 'confirmed') return !isConfirmable || entry.fop_confirmed === true;
       if (confirmFilter === 'pending') return isConfirmable && entry.fop_confirmed !== true;
       return true;
@@ -1211,8 +1216,7 @@ function renderOwnerEmployeeCurrencyCashHistory(workerName, logs) {
 }
 
 function renderOwnerCashEntryConfirmBadge(entry) {
-  const account = String(entry?.cash_account || 'cash').toLowerCase();
-  if (account !== 'fop' && account !== 'card_sasha' && account !== 'card_oleg') return '';
+  if (!isConfirmableCashEntry(entry)) return '';
   const confirmed = entry?.fop_confirmed === true;
   const label = confirmed ? 'подтверждено' : 'ожидает подтверждения';
   const color = confirmed ? 'var(--accent)' : 'var(--yellow)';
@@ -1857,7 +1861,7 @@ function renderOwnerCashScreen() {
       <div style="padding:12px 16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;">
         ${currentCashRows.length ? currentCashRows.map(row => `
           <div class="owner-cash-worker-row ${ownerCashSelectedWorker === row.workerName ? 'active' : ''}" onclick="setOwnerCashSelectedWorker('${escapeAttr(row.workerName)}')">
-            <div class="owner-cash-worker-name">${escapeHtml(row.workerName)}</div>
+            <div class="owner-cash-worker-name">${escapeHtml(getWorkerDisplayName(row.workerName) || row.workerName)}</div>
             <div class="owner-cash-worker-balance" style="color:${row.balance >= 0 ? 'var(--accent)' : '#ef4444'};">${row.balance.toLocaleString('ru')} ₴</div>
           </div>
         `).join('') : `
