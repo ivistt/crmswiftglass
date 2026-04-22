@@ -1774,6 +1774,7 @@ function addClientPayment() {
   renderClientPayments();
   syncClientPaidFromPayments();
   recalcTotal();
+  persistImmediateOrderPaymentsUpdate();
 }
 
 function addSupplierPayment() {
@@ -1791,6 +1792,96 @@ function addSupplierPayment() {
   renderSupplierPayments();
   syncSupplierPaidFromPayments();
   recalcTotal();
+  persistImmediateOrderPaymentsUpdate();
+}
+
+async function persistImmediateOrderPaymentsUpdate() {
+  if (!editingOrderId) return;
+  const existingOrder = orders.find(item => item.id === editingOrderId);
+  if (!existingOrder) return;
+
+  const data = getOrderDraftFromForm(existingOrder);
+  data.clientPayments = currentClientPayments;
+  data.supplierPayments = currentSupplierPayments;
+
+  const oldSupplierPayments = existingOrder?.supplierPayments || [];
+  const newSupplierPayments = data.supplierPayments || [];
+  const hasSupplierPaymentHistory = oldSupplierPayments.length > 0 || newSupplierPayments.length > 0;
+  const oldFinanciallyActive = isOrderFinanciallyActive(existingOrder);
+  const newFinanciallyActive = isOrderFinanciallyActive(data);
+  const oldCashSupplierPaid = oldFinanciallyActive ? (hasSupplierPaymentHistory ? sumCashSupplierPayments(oldSupplierPayments) : (Number(existingOrder.check) || 0)) : 0;
+  const newCashSupplierPaid = newFinanciallyActive ? (hasSupplierPaymentHistory ? sumCashSupplierPayments(newSupplierPayments) : (Number(data.check) || 0)) : 0;
+  const cashSupplierDiff = newFinanciallyActive ? (newCashSupplierPaid - oldCashSupplierPaid) : 0;
+
+  const oldClientPayments = existingOrder?.clientPayments || [];
+  const newClientPayments = data.clientPayments || [];
+  const oldCashClientPaid = oldFinanciallyActive ? getCashClientPaidForOrderSnapshot({ ...existingOrder, clientPayments: oldClientPayments }) : 0;
+  const newCashClientPaid = newFinanciallyActive ? getCashClientPaidForOrderSnapshot({ ...data, clientPayments: newClientPayments }) : 0;
+  const cashClientDiff = newFinanciallyActive ? (newCashClientPaid - oldCashClientPaid) : 0;
+  const cashEntries = [];
+
+  if ((currentRole === 'senior' || currentRole === 'owner') && cashSupplierDiff !== 0) {
+    const amount = -cashSupplierDiff;
+    const typeStr = cashSupplierDiff > 0 ? 'Списание' : 'Возврат';
+    const fDate = data.date ? formatDate(data.date) : '—';
+    const fTime = data.time || '—';
+    const fCar = data.car || '—';
+    const targetWorker = data.responsible || currentWorkerName;
+    cashEntries.push({
+      worker_name: targetWorker,
+      amount,
+      comment: `${typeStr} за стекло ${data.id}, ${fDate} ${fTime}, авто: ${fCar}, склад: ${data.warehouse || '—'}`,
+      cashType: 'supplier',
+    });
+  }
+
+  if ((currentRole === 'senior' || currentRole === 'owner') && cashClientDiff !== 0) {
+    const typeStr = cashClientDiff > 0 ? 'Оплата клиента' : 'Возврат клиенту';
+    const fDate = data.date ? formatDate(data.date) : '—';
+    const fCar = data.car || '—';
+    const targetWorker = data.responsible || currentWorkerName;
+    cashEntries.push({
+      worker_name: targetWorker,
+      amount: cashClientDiff,
+      comment: `${typeStr} наличкой ${data.id}, ${fDate}, авто: ${fCar}`,
+      cashType: 'client',
+    });
+  }
+
+  try {
+    const result = await sbSaveOrderWithCash(data, {
+      isNew: false,
+      cashEntries,
+      rollbackOrder: existingOrder,
+    });
+    const saved = result.order;
+    const idx = orders.findIndex(item => item.id === editingOrderId);
+    if (idx !== -1) orders[idx] = saved;
+
+    const savedCashEntries = result.cashEntries || [];
+    for (const cashEntry of savedCashEntries) {
+      if (typeof workerCashLog !== 'undefined' && cashEntry?.worker_name === currentWorkerName) {
+        workerCashLog.unshift(cashEntry);
+      }
+      if (currentRole === 'owner' && Array.isArray(window.allCashLog) && cashEntry) {
+        window.allCashLog.unshift(cashEntry);
+      }
+    }
+
+    try {
+      orders = await sbFetchOrders();
+    } catch (refreshError) {
+      console.warn('Failed to refresh orders after immediate payment save:', refreshError);
+    }
+
+    if (typeof refreshActiveOrdersViews === 'function') {
+      refreshActiveOrdersViews();
+    } else {
+      currentMonthFilter ? renderOrdersForMonth(currentMonthFilter) : renderOrders();
+    }
+  } catch (e) {
+    showToast('Ошибка сохранения: ' + e.message, 'error');
+  }
 }
 
 function sumCashSupplierPayments(payments) {
