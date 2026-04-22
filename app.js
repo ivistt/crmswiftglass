@@ -385,7 +385,7 @@ function openCalendarDayModal(dateKey) {
     : 'Все сотрудники';
 
   const ordersHtml = dayOrders.length ? dayOrders.map(order => `
-    <div class="calendar-modal-order" onclick="closeCalendarDayModal(); openOrderDetail('${escapeAttr(order.id)}')">
+    <div class="calendar-modal-order" onclick="closeCalendarDayModal(); openOrderModal('${escapeAttr(order.id)}')">
       <div class="calendar-modal-order-top">
         <div>
           <div class="calendar-modal-order-title">${escapeHtml(order.car || order.client || order.id)}</div>
@@ -521,6 +521,11 @@ async function refreshOrders() {
 
 // --- НАВИГАЦИЯ ---
 function showScreen(name) {
+  const activeScreen = document.querySelector('.screen.active');
+  const activeScreenId = activeScreen?.id || '';
+  if (activeScreenId === 'screen-orders' && name !== 'orders') {
+    if (typeof resetOrdersFilters === 'function') resetOrdersFilters();
+  }
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   const el = document.getElementById('screen-' + name);
   if (el) el.classList.add('active');
@@ -772,8 +777,6 @@ function getOwnerCashLogs(confirmFilter = ownerCashConfirmFilter) {
     .filter(entry => {
       const account = String(entry?.cash_account || 'cash').toLowerCase();
       if (account === 'fop') return entry.worker_name === 'Oleg Starshiy';
-      if (account === 'card_sasha') return entry.worker_name === 'Sasha Manager';
-      if (account === 'card_oleg') return entry.worker_name === 'Oleg Starshiy';
       if (entry.worker_name === OWNER_PENDING_CASH_WORKER_NAME) {
         return account === 'cash' && !!getPaymentMethodFromSourceKey(entry?.fop_source_key);
       }
@@ -1013,10 +1016,20 @@ function renderOwnerEmployeeCashHistory(workerName, logs) {
           const extraMeta = getCashEntryDisplayMeta(entry);
           const time = getOwnerCashEntryTime(entry);
           const isCurrency = isCurrencyCashEntry(entry);
+          const account = String(entry?.cash_account || 'cash').toLowerCase();
+          const paymentMethod = getPaymentMethodFromSourceKey(entry?.fop_source_key);
+          const isConfirmedCard = entry?.fop_confirmed === true
+            && account === 'cash'
+            && paymentMethod
+            && !isCashPaymentMethod(paymentMethod)
+            && !isFopPaymentMethod(paymentMethod);
+          const cardTag = isConfirmedCard
+            ? '<span style="display:inline-flex;align-items:center;padding:2px 7px;border-radius:999px;background:rgba(29,233,182,.12);border:1px solid rgba(29,233,182,.22);color:var(--accent);font-size:10px;font-weight:800;margin-left:6px;">карта</span>'
+            : '';
           return `
             <div class="owner-cash-entry-row">
               <div class="owner-cash-entry-main">
-                <div class="owner-cash-entry-comment">${escapeHtml(comment)}</div>
+                <div class="owner-cash-entry-comment">${escapeHtml(comment)}${cardTag}</div>
                 <div class="owner-cash-entry-meta">${time ? escapeHtml(time) : '—'}${extraMeta ? ' · ' + escapeHtml(extraMeta) : ''} ${renderOwnerCashEntryConfirmBadge(entry)}</div>
               </div>
               <div style="display:flex;align-items:center;gap:8px;">
@@ -1337,7 +1350,9 @@ function getOwnerPaymentEntries() {
 
   (window.allCashLog || [])
     .filter(entry => {
-      if (String(entry?.cash_account || '').toLowerCase() !== 'card_sasha' || entry.fop_confirmed !== true) return false;
+      const paymentMethod = getPaymentMethodFromSourceKey(entry?.fop_source_key);
+      if (String(entry?.cash_account || '').toLowerCase() !== 'cash' || entry.fop_confirmed !== true) return false;
+      if (!isSashaManagerCardPaymentMethod(paymentMethod)) return false;
       return !String(entry.fop_source_key || '').startsWith('order:');
     })
     .forEach(entry => {

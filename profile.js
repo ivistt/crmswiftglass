@@ -586,11 +586,15 @@ function isFopCashEntry(entry) {
 }
 
 function isManagerCardCashEntry(entry) {
-  return String(entry?.cash_account || '').toLowerCase() === CASH_ACCOUNT_CARD_SASHA;
+  return String(entry?.cash_account || '').toLowerCase() === CASH_ACCOUNT_CASH
+    && String(entry?.worker_name || '') === 'Sasha Manager'
+    && isSashaManagerCardPaymentMethod(getPaymentMethodFromSourceKey(entry?.fop_source_key));
 }
 
 function isOlegCardCashEntry(entry) {
-  return String(entry?.cash_account || '').toLowerCase() === CASH_ACCOUNT_CARD_OLEG;
+  return String(entry?.cash_account || '').toLowerCase() === CASH_ACCOUNT_CASH
+    && String(entry?.worker_name || '') === 'Oleg Starshiy'
+    && isOlegCardPaymentMethod(getPaymentMethodFromSourceKey(entry?.fop_source_key));
 }
 
 function isConfirmedFopCashEntry(entry) {
@@ -815,8 +819,8 @@ async function confirmFopCashEntry(id) {
     const account = String(updated?.cash_account || '').toLowerCase();
     const paymentMethod = getPaymentMethodFromSourceKey(updated?.fop_source_key);
     if (account === 'fop') showToast('БАБЕНКО подтверждено ✓');
-    else if (account === 'card_sasha') showToast('Карта Саши подтверждена ✓');
-    else if (account === 'card_oleg') showToast('Карта Олега подтверждена ✓');
+    else if (isSashaManagerCardPaymentMethod(paymentMethod)) showToast('Карта Саши подтверждена ✓');
+    else if (isOlegCardPaymentMethod(paymentMethod)) showToast('Карта Олега подтверждена ✓');
     else if (paymentMethod) showToast(`Подтверждено: ${paymentMethod} ✓`);
     else showToast('Запись подтверждена ✓');
   } catch (e) {
@@ -854,10 +858,20 @@ function _cashEntryRow(e) {
   const time  = dt.toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' });
   const displayComment = getCashEntryDisplayComment(e);
   const displayMeta = getCashEntryDisplayMeta(e);
+  const account = String(e?.cash_account || 'cash').toLowerCase();
+  const paymentMethod = getPaymentMethodFromSourceKey(e?.fop_source_key);
+  const isConfirmedCard = e?.fop_confirmed === true
+    && account === 'cash'
+    && paymentMethod
+    && !isCashPaymentMethod(paymentMethod)
+    && !isFopPaymentMethod(paymentMethod);
+  const cardTag = isConfirmedCard
+    ? '<span style="display:inline-flex;align-items:center;padding:2px 7px;border-radius:999px;background:rgba(29,233,182,.12);border:1px solid rgba(29,233,182,.22);color:var(--accent);font-size:10px;font-weight:800;margin-left:6px;">карта</span>'
+    : '';
   return '<div style="display:flex;justify-content:space-between;align-items:center;'
     + 'padding:10px 0;border-bottom:1px solid var(--border);">'
     + '<div>'
-    + '<div style="font-size:13px;color:var(--text2);">' + escapeHtml(displayComment || '—') + '</div>'
+    + '<div style="font-size:13px;color:var(--text2);display:flex;align-items:center;flex-wrap:wrap;">' + escapeHtml(displayComment || '—') + cardTag + '</div>'
     + '<div style="font-size:11px;color:var(--text3);margin-top:2px;">' + time + (displayMeta ? ' · ' + escapeHtml(displayMeta) : '') + '</div>'
     + '</div>'
     + '<div style="font-size:15px;font-weight:800;color:' + color + ';white-space:nowrap;margin-left:12px;">'
@@ -1116,11 +1130,7 @@ function _buildCashArchive(log) {
 function openCashEntryModal(account = 'cash') {
   window._cashAccount = account === 'fop'
     ? 'fop'
-    : (account === 'card' || account === 'card-sasha'
-      ? 'card-sasha'
-      : (account === 'card-oleg'
-        ? 'card-oleg'
-        : (account === 'currency' ? 'currency' : (account === 'currency-back' ? 'currency-back' : (account === 'currency-entry' ? 'currency-entry' : 'cash')))));
+    : (account === 'currency' ? 'currency' : (account === 'currency-back' ? 'currency-back' : (account === 'currency-entry' ? 'currency-entry' : 'cash')));
   let modal = document.getElementById('cash-entry-modal');
   if (!modal) {
     modal = document.createElement('div');
@@ -1258,7 +1268,7 @@ function openCashEntryModal(account = 'cash') {
     if (titleEl) {
       const titleByAccount = window._cashAccount === 'fop'
         ? ' Запись в кассу БАБЕНКО'
-        : (window._cashAccount === 'card-sasha' ? ' Запись на карту Саши' : (window._cashAccount === 'card-oleg' ? ' Запись на карту Олега' : ' Запись в кассу'));
+        : ' Запись в кассу';
       titleEl.innerHTML = icon('banknote') + titleByAccount;
     }
   }
@@ -1396,13 +1406,9 @@ async function saveCashEntry() {
         worker_name: currentWorkerName,
         amount,
         comment,
-        cash_account: window._cashAccount === 'fop'
-          ? CASH_ACCOUNT_FOP
-          : (window._cashAccount === 'card-sasha'
-            ? CASH_ACCOUNT_CARD_SASHA
-            : (window._cashAccount === 'card-oleg' ? CASH_ACCOUNT_CARD_OLEG : CASH_ACCOUNT_CASH)),
+        cash_account: window._cashAccount === 'fop' ? CASH_ACCOUNT_FOP : CASH_ACCOUNT_CASH,
         fop_confirmed: false,
-        fop_date: (window._cashAccount === 'fop' || window._cashAccount === 'card-sasha' || window._cashAccount === 'card-oleg') ? getLocalDateString() : null,
+        fop_date: window._cashAccount === 'fop' ? getLocalDateString() : null,
       });
     }
     workerCashLog.unshift(entry);

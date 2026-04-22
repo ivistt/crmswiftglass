@@ -420,9 +420,7 @@ function goBackFromOrdersList() {
 function renderOrderCard(o) {
   const canOpenModal = canCurrentUserOpenOrderModal(o);
   const cardClickAction = canOpenModal ? `openOrderModal('${escapeAttr(o.id)}')` : '';
-  const primaryTitle = currentRole === 'manager'
-    ? (o.client || '—')
-    : (o.car || '—');
+  const primaryTitle = o.client || '—';
   const clientTotal = getOrderClientTotal(o);
   const clientPaidInlineHtml = clientTotal > 0
     ? `<span class="order-meta-inline-money" title="Клиент оплатил / общая сумма заказа"><span>${(Number(o.debt) || 0).toLocaleString('ru')}</span><span class="order-meta-money-separator">/</span><span>${clientTotal.toLocaleString('ru')} ₴</span></span>`
@@ -458,12 +456,13 @@ function renderOrderCard(o) {
           </div>
           <div class="order-card-title-row">
             <span class="order-name">${primaryTitle}</span>
+            ${currentRole === 'manager' ? clientPaidInlineHtml : ''}
           </div>
         </div>
       </div>
       ${currentRole === 'manager' ? managerMetaHtml : `
       <div class="order-card-meta">
-        <span class="order-meta-item order-meta-pill order-meta-client-pill ${clientPaidInlineHtml ? 'order-meta-client-money-pill' : ''}">${icon('user')} <span class="order-meta-client-name">${o.client || '—'}</span>${clientPaidInlineHtml}</span>
+        <span class="order-meta-item order-meta-pill order-meta-client-pill">${icon('car')} <span class="order-meta-client-name">${o.car || '—'}</span></span>
         <span class="order-meta-item order-meta-pill">${icon('phone')} ${o.phone || '—'}</span>
         <span class="order-meta-item order-meta-pill">${icon('calendar')} ${formatDate(o.date)}</span>
         <span class="order-meta-item order-meta-pill">${getWorkerDisplayPair(o.responsible, o.assistant)}</span>
@@ -478,6 +477,16 @@ function renderOrderCard(o) {
 
 function renderManagerOrderCardMeta(order) {
   if (currentRole !== 'manager' || !order) return '';
+  const clientTotal = getOrderClientTotal(order);
+  const clientPaidInlineHtml = clientTotal > 0
+    ? `<span class="order-meta-inline-money" title="Клиент оплатил / общая сумма заказа"><span>${(Number(order.debt) || 0).toLocaleString('ru')}</span><span class="order-meta-money-separator">/</span><span>${clientTotal.toLocaleString('ru')} ₴</span></span>`
+    : '';
+  const supplierPaidInlineHtml = (Number(order.check) > 0 || Number(order.purchase) > 0)
+    ? `<span class="order-meta-inline-money"><span>${(Number(order.check) || 0).toLocaleString('ru')}</span><span class="order-meta-money-separator">/</span><span>${(Number(order.purchase) || 0).toLocaleString('ru')} ₴</span></span>`
+    : '';
+  const warehouseCodeInlineHtml = order.warehouseCode
+    ? `<span style="margin-left:6px;color:var(--accent);font-weight:900;">${escapeHtml(order.warehouseCode)}</span>`
+    : '';
   const groups = [
     [
       { iconLabel: icon('car'), value: order.car || '—' },
@@ -491,7 +500,7 @@ function renderManagerOrderCardMeta(order) {
       { value: order.vin || '—' },
     ],
     [
-      { value: order.warehouse || '—' },
+      { html: `${escapeHtml(order.warehouse || '—')}${warehouseCodeInlineHtml}${supplierPaidInlineHtml}` },
       { value: order.warehouseCode || '—' },
     ],
     [
@@ -513,7 +522,7 @@ function renderManagerOrderCardMeta(order) {
                 : (row.label
                   ? `<span class="order-card-manager-row-label">${escapeHtml(row.label)}:</span>`
                   : '')}
-              <span class="order-card-manager-row-value">${escapeHtml(row.value)}</span>
+              <span class="order-card-manager-row-value">${row.html || escapeHtml(row.value)}</span>
             </div>
           `).join('')}
         </div>
@@ -750,7 +759,7 @@ function renderOrderStatusBadges(o) {
     if (o.callStatus && !o.workerDone) badges.push('<span class="status-badge status-call">Прозвон</span>');
     if (!o.callStatus && !o.inWork && !o.ownWarehouse && !o.workerDone) badges.push('<span class="status-badge status-selection">Подборка</span>');
     if (o.inWork && !o.workerDone) badges.push('<span class="status-badge" style="background:#F59E0B;color:#fff;">В работе</span>');
-    if (o.workerDone && currentRole !== 'senior') badges.push('<span class="status-badge status-done">✓ Выполнен</span>');
+    if (o.workerDone) badges.push('<span class="status-badge status-done">✓ Выполнен</span>');
   }
   badges.push(statusBadge(getEffectivePaymentStatus(o)));
   return badges.join('');
@@ -964,7 +973,9 @@ function renderOrders() {
   let list = [...orders];
 
   if (currentRole === 'owner' || currentRole === 'manager') {
-    if (currentOrderTab === 'planner') {
+    if (currentOrderTab === 'all') {
+      // без дополнительной фильтрации
+    } else if (currentOrderTab === 'planner') {
       list = list.filter(o => o.inWork && !o.ownWarehouse && !o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'call') {
       list = list.filter(_isCallOrderVisibleInCurrentContext);
@@ -1296,6 +1307,64 @@ function getCashClientPaidForOrderSnapshot(order) {
   const payments = order?.clientPayments || [];
   if (payments.length) return sumCashClientPayments(payments);
   return isCashPaymentMethod(order?.paymentMethod) ? (Number(order?.debt) || 0) : 0;
+}
+
+function getOrderPaymentSignature(payment) {
+  return [
+    normalizePaymentMethod(payment?.method || ''),
+    Number(payment?.amount) || 0,
+    payment?.date || '',
+    payment?.timestamp || '',
+  ].join('||');
+}
+
+function getNewOrderPaymentsDelta(oldPayments = [], newPayments = []) {
+  const seen = new Map();
+  (oldPayments || []).forEach(payment => {
+    const key = getOrderPaymentSignature(payment);
+    seen.set(key, (seen.get(key) || 0) + 1);
+  });
+  const added = [];
+  (newPayments || []).forEach(payment => {
+    const key = getOrderPaymentSignature(payment);
+    const left = seen.get(key) || 0;
+    if (left > 0) {
+      seen.set(key, left - 1);
+      return;
+    }
+    added.push(payment);
+  });
+  return added;
+}
+
+function buildNewNonCashPaymentEntries(order, oldOrder = null) {
+  const entries = [];
+  const clientDelta = getNewOrderPaymentsDelta(oldOrder?.clientPayments || [], order?.clientPayments || []);
+  const supplierDelta = getNewOrderPaymentsDelta(oldOrder?.supplierPayments || [], order?.supplierPayments || []);
+
+  clientDelta.forEach(payment => {
+    if (isCashPaymentMethod(payment?.method)) return;
+    const payload = buildOrderPaymentCashEntryPayload({
+      order,
+      payment,
+      paymentType: 'client',
+      fallbackWorkerName: order?.responsible || currentWorkerName,
+    });
+    if (payload) entries.push(payload);
+  });
+
+  supplierDelta.forEach(payment => {
+    if (isCashPaymentMethod(payment?.method)) return;
+    const payload = buildOrderPaymentCashEntryPayload({
+      order,
+      payment,
+      paymentType: 'supplier',
+      fallbackWorkerName: order?.responsible || currentWorkerName,
+    });
+    if (payload) entries.push(payload);
+  });
+
+  return entries;
 }
 
 async function addCashEntriesForDuplicatedOrder(order) {
@@ -1673,6 +1742,26 @@ function populateOrderWorkerFilter() {
 let currentClientPayments = [];
 let currentSupplierPayments = [];
 
+function resetOrdersFilters() {
+  ordersFiltersOpen = false;
+  orderDateFilterExact = '';
+  orderDateFilterFrom = '';
+  orderDateFilterTo = '';
+
+  const searchEl = document.getElementById('filter-search');
+  const statusEl = document.getElementById('filter-status');
+  const workerEl = document.getElementById('filter-worker');
+  const sortEl = document.getElementById('filter-sort');
+
+  if (searchEl) searchEl.value = '';
+  if (statusEl) statusEl.value = '';
+  if (workerEl) workerEl.value = '';
+  if (sortEl) sortEl.value = 'desc';
+
+  updateOrderDateFilterButton();
+  updateOrdersFiltersDropdown();
+}
+
 // ---------- ФУНКЦИИ ИСТОРИИ ОПЛАТ И ДОРАБОТКИ ----------
 
 function toggleReworkSection() {}
@@ -1855,6 +1944,7 @@ async function persistImmediateOrderPaymentsUpdate() {
   const newCashClientPaid = newFinanciallyActive ? getCashClientPaidForOrderSnapshot({ ...data, clientPayments: newClientPayments }) : 0;
   const cashClientDiff = newFinanciallyActive ? (newCashClientPaid - oldCashClientPaid) : 0;
   const cashEntries = [];
+  const nonCashEntries = buildNewNonCashPaymentEntries(data, existingOrder);
 
   if ((currentRole === 'senior' || currentRole === 'owner') && cashSupplierDiff !== 0) {
     const amount = -cashSupplierDiff;
@@ -1911,6 +2001,16 @@ async function persistImmediateOrderPaymentsUpdate() {
       workerCashLog.unshift(cashEntry);
     }
     if (currentRole === 'owner' && Array.isArray(window.allCashLog) && cashEntry) {
+      window.allCashLog.unshift(cashEntry);
+    }
+  }
+
+  for (const rawEntry of nonCashEntries) {
+    const cashEntry = await sbInsertCashEntry(rawEntry);
+    if (typeof workerCashLog !== 'undefined' && cashEntry?.worker_name === currentWorkerName) {
+      workerCashLog.unshift(cashEntry);
+    }
+    if (Array.isArray(window.allCashLog) && cashEntry) {
       window.allCashLog.unshift(cashEntry);
     }
   }
@@ -2857,6 +2957,7 @@ async function saveOrder() {
   const newCashClientPaid = newFinanciallyActive ? getCashClientPaidForOrderSnapshot({ ...data, clientPayments: newClientPayments }) : 0;
   const cashClientDiff = newFinanciallyActive ? (newCashClientPaid - oldCashClientPaid) : 0;
   const cashEntries = [];
+  const nonCashEntries = buildNewNonCashPaymentEntries(data, existingOrder);
 
   if ((currentRole === 'senior' || currentRole === 'owner') && cashSupplierDiff !== 0) {
     const amount = -cashSupplierDiff; // наличная оплата поставщику уменьшает кассу
@@ -2950,6 +3051,16 @@ async function saveOrder() {
         workerCashLog.unshift(cashEntry);
       }
       if (currentRole === 'owner' && Array.isArray(window.allCashLog) && cashEntry) {
+        window.allCashLog.unshift(cashEntry);
+      }
+    }
+
+    for (const rawEntry of nonCashEntries) {
+      const cashEntry = await sbInsertCashEntry(rawEntry);
+      if (typeof workerCashLog !== 'undefined' && cashEntry?.worker_name === currentWorkerName) {
+        workerCashLog.unshift(cashEntry);
+      }
+      if (Array.isArray(window.allCashLog) && cashEntry) {
         window.allCashLog.unshift(cashEntry);
       }
     }
@@ -3219,7 +3330,9 @@ function renderOrdersForMonth(ym) {
   let list = orders.filter(o => o.date && o.date.slice(0, 7) === ym);
 
   if (currentRole === 'owner' || currentRole === 'manager') {
-    if (currentOrderTab === 'planner') {
+    if (currentOrderTab === 'all') {
+      // без дополнительной фильтрации
+    } else if (currentOrderTab === 'planner') {
       list = list.filter(o => o.inWork && !o.ownWarehouse && !o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'call') {
       list = list.filter(_isCallOrderVisibleInCurrentContext);
@@ -3489,6 +3602,7 @@ function initOrderTabs() {
     if (tabsEl) {
       tabsEl.style.display = 'flex';
       tabsEl.innerHTML = `
+        <button class="orders-tab" id="tab-all" onclick="setOrderTab('all')">Все</button>
         <button class="orders-tab" id="tab-selection" onclick="setOrderTab('selection')">Подборка</button>
         <button class="orders-tab" id="tab-call"      onclick="setOrderTab('call')">Прозвон</button>
         <button class="orders-tab" id="tab-planner"   onclick="setOrderTab('planner')">Планёрка</button>

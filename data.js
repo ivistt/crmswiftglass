@@ -1198,8 +1198,6 @@ const SASHA_MANAGER_CARD_METHOD = '👤 Шепель Александр 💳 414
 const OLEG_CARD_METHOD = '👤 Бабенко Олег 💳 5457 0825 0103 4743 (PRIVAT)';
 const CASH_ACCOUNT_CASH = 'cash';
 const CASH_ACCOUNT_FOP = 'fop';
-const CASH_ACCOUNT_CARD_SASHA = 'card_sasha';
-const CASH_ACCOUNT_CARD_OLEG = 'card_oleg';
 const OWNER_PENDING_CASH_WORKER_NAME = 'Карты владельца';
 
 function normalizePaymentMethod(method) {
@@ -1225,8 +1223,19 @@ function isOlegCardPaymentMethod(method) {
   return normalizePaymentMethod(method) === OLEG_CARD_METHOD;
 }
 
-function buildPaymentSourceKey(orderId, method) {
-  return `order:${String(orderId || '').trim()}|method:${encodeURIComponent(normalizePaymentMethod(method) || '')}`;
+function buildPaymentSourceKey(orderId, method, paymentType = 'client', payment = null) {
+  const normalizedMethod = normalizePaymentMethod(method) || '';
+  const amount = Number(payment?.amount) || 0;
+  const date = String(payment?.date || '').trim();
+  const timestamp = String(payment?.timestamp || '').trim();
+  return [
+    `order:${String(orderId || '').trim()}`,
+    `type:${encodeURIComponent(String(paymentType || 'client'))}`,
+    `method:${encodeURIComponent(normalizedMethod)}`,
+    `amount:${encodeURIComponent(String(amount))}`,
+    `date:${encodeURIComponent(date)}`,
+    `ts:${encodeURIComponent(timestamp)}`,
+  ].join('|');
 }
 
 function getPaymentMethodFromSourceKey(sourceKey) {
@@ -1242,9 +1251,9 @@ function getPaymentMethodFromSourceKey(sourceKey) {
 
 function isConfirmableCashEntry(entry) {
   const account = String(entry?.cash_account || 'cash').toLowerCase();
-  if (account === CASH_ACCOUNT_FOP || account === CASH_ACCOUNT_CARD_SASHA || account === CASH_ACCOUNT_CARD_OLEG) return true;
-  return String(entry?.worker_name || '') === OWNER_PENDING_CASH_WORKER_NAME
-    && !!getPaymentMethodFromSourceKey(entry?.fop_source_key);
+  const paymentMethod = getPaymentMethodFromSourceKey(entry?.fop_source_key);
+  if (account !== CASH_ACCOUNT_CASH || !paymentMethod) return false;
+  return !isCashPaymentMethod(paymentMethod) && !isFopPaymentMethod(paymentMethod);
 }
 
 function getPaymentCashRoute(method, fallbackWorkerName = '') {
@@ -1260,20 +1269,20 @@ function getPaymentCashRoute(method, fallbackWorkerName = '') {
     return {
       workerName: 'Oleg Starshiy',
       cashAccount: CASH_ACCOUNT_FOP,
-      requiresConfirmation: true,
+      requiresConfirmation: false,
     };
   }
   if (isSashaManagerCardPaymentMethod(normalized)) {
     return {
       workerName: 'Sasha Manager',
-      cashAccount: CASH_ACCOUNT_CARD_SASHA,
+      cashAccount: CASH_ACCOUNT_CASH,
       requiresConfirmation: true,
     };
   }
   if (isOlegCardPaymentMethod(normalized)) {
     return {
       workerName: 'Oleg Starshiy',
-      cashAccount: CASH_ACCOUNT_CARD_OLEG,
+      cashAccount: CASH_ACCOUNT_CASH,
       requiresConfirmation: true,
     };
   }
@@ -1303,10 +1312,13 @@ function buildOrderPaymentCashEntryPayload({ order, payment, paymentType = 'clie
     cash_account: route.cashAccount,
   };
 
+  if (!isCashPaymentMethod(method)) {
+    payload.fop_date = paymentDate || null;
+    payload.fop_source_key = buildPaymentSourceKey(orderId, method, paymentType, payment);
+  }
+
   if (route.requiresConfirmation) {
     payload.fop_confirmed = false;
-    payload.fop_date = paymentDate || null;
-    payload.fop_source_key = buildPaymentSourceKey(orderId, method);
   }
 
   return payload;

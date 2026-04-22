@@ -35,6 +35,7 @@ async function doLogin() {
     localStorage.setItem('crm_token',       data.token);
     localStorage.setItem('crm_worker_name', data.workerName || '');
 
+    if (typeof resetOrdersFilters === 'function') resetOrdersFilters();
     _showApp(data.role, data.workerName);
     initIcons();
     initApp();
@@ -49,6 +50,7 @@ async function doLogin() {
 }
 
 function doLogout() {
+  if (typeof resetOrdersFilters === 'function') resetOrdersFilters();
   currentRole       = null;
   currentWorkerName = null;
   sessionToken      = null;
@@ -83,6 +85,7 @@ function autoLogin() {
   currentWorkerName = savedName;
   sessionToken      = savedToken;
 
+  if (typeof resetOrdersFilters === 'function') resetOrdersFilters();
   _showApp(savedRole, savedName);
   initIcons();
   initApp();
