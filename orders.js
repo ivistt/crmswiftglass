@@ -1073,6 +1073,7 @@ function openOrderDetail(id) {
       <div class="detail-grid">
         ${field(`${icon('car')} Авто`, o.car)}
         ${field('VIN', o.vin, 'mono')}
+        ${field('Доп заметка', o.extraNote)}
         ${field(`${icon('hash')} Єврокод`, o.code, 'mono')}
         ${field(`${icon('factory')} Производитель стекла`, o.glassManufacturer)}
         ${field(`${icon('warehouse')} Склад`, o.warehouse)}
@@ -1972,6 +1973,7 @@ function fillOrderForm(o) {
   set('f-phone', o.phone);
   set('f-address', o.address);
   set('f-vin', o.vin);
+  set('f-extra-note', o.extraNote);
   set('f-car', o.car);
   set('f-code', o.code);
   set('f-glass-manufacturer', o.glassManufacturer);
@@ -2216,6 +2218,7 @@ async function saveOrder() {
     phone:           get('f-phone'),
     address:         get('f-address'),
     vin:             get('f-vin'),
+    extraNote:       get('f-extra-note'),
     car:             get('f-car'),
     code:            get('f-code'),
     glassManufacturer: get('f-glass-manufacturer'),
