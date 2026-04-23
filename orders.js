@@ -457,16 +457,27 @@ function renderOrderCard(o) {
             ${renderOrderStatusBadges(o)}
             ${specialistBonusFlags}
           </div>
-          <div class="order-card-title-row">
-            <span class="order-name">${escapeHtml(primaryTitle)}</span>
-            ${clientPaidInlineHtml}
-          </div>
         </div>
       </div>
-      ${currentRole === 'manager' ? managerMetaHtml : `
+      ${currentRole === 'manager' ? `
+      <div class="order-card-primary-group">
+        <div class="order-card-title-row">
+          <span class="order-name">${escapeHtml(primaryTitle)}</span>
+          ${clientPaidInlineHtml}
+        </div>
+        ${managerMetaHtml}
+      </div>` : `
+      <div class="order-card-primary-group">
+        <div class="order-card-title-row">
+          <span class="order-name">${escapeHtml(primaryTitle)}</span>
+          ${clientPaidInlineHtml}
+        </div>
+        <div class="order-card-meta order-card-primary-meta">
+          <span class="order-meta-item order-meta-pill order-meta-client-pill">${icon('car')} <span class="order-meta-client-name">${o.car || '—'}</span></span>
+          <span class="order-meta-item order-meta-pill">${phoneHtml}</span>
+        </div>
+      </div>
       <div class="order-card-meta">
-        <span class="order-meta-item order-meta-pill order-meta-client-pill">${icon('car')} <span class="order-meta-client-name">${o.car || '—'}</span></span>
-        <span class="order-meta-item order-meta-pill">${phoneHtml}</span>
         <span class="order-meta-item order-meta-pill">${icon('calendar')} ${formatDate(o.date)}</span>
         <span class="order-meta-item order-meta-pill">${getWorkerDisplayPair(o.responsible, o.assistant)}</span>
         ${o.manager ? `<span class="order-meta-item order-meta-pill">${getWorkerDisplayName(o.manager)}</span>` : ''}
@@ -476,6 +487,16 @@ function renderOrderCard(o) {
       ${callNotesHtml}
     </div>
   `;
+}
+
+function orderHasDebtTabFinancialMeaning(order) {
+  if (!isOrderFinanciallyActive(order)) return false;
+  if (order.inWork) return false;
+  const hasDebt = ['Не оплачено', 'Частично'].includes(getEffectivePaymentStatus(order));
+  if (!hasDebt) return false;
+  if (order.onlySale) return true;
+  const hasGlass = (Number(order?.income) || 0) > 0 || (Number(order?.purchase) || 0) > 0;
+  return hasGlass;
 }
 
 function renderManagerOrderCardMeta(order) {
@@ -553,10 +574,10 @@ function renderOrderCardCallNotes(order) {
 
 function getSpecialServiceAction(order) {
   if (!order || !isOrderFinanciallyActive(order)) return null;
-  if (currentWorkerName === 'Roma' && Number(order.tatu) > 0 && !order.tatuDone) {
+  if (currentWorkerName === 'Roma' && !!order.tatuStatus && !order.tatuDone) {
     return { type: 'tatu', label: 'Выполнить тату', title: 'Подтвердить выполнение тату' };
   }
-  if (currentWorkerName === 'Lyosha' && Number(order.toning) > 0 && !order.toningDone && !order.toningExternal) {
+  if (currentWorkerName === 'Lyosha' && !!order.toningStatus && !order.toningDone && !order.toningExternal) {
     return { type: 'toning', label: 'Выполнить тонировку', title: 'Подтвердить выполнение тонировки' };
   }
   return null;
@@ -779,16 +800,16 @@ function _isCurrentWorkerOrder(order) {
 function _filterSpecialistOrdersByTab(list) {
   const today = todayStr();
   if (currentWorkerName === 'Roma' && currentWorkerTab === 'tatuActual') {
-    return list.filter(o => isOrderFinanciallyActive(o) && Number(o.tatu) > 0 && !o.tatuDone);
+    return list.filter(o => isOrderFinanciallyActive(o) && !!o.tatuStatus && !o.tatuDone);
   }
   if (currentWorkerName === 'Roma' && currentWorkerTab === 'tatuDone') {
-    return list.filter(o => Number(o.tatu) > 0 && o.tatuDone);
+    return list.filter(o => !!o.tatuStatus && o.tatuDone);
   }
   if (currentWorkerName === 'Lyosha' && currentWorkerTab === 'toningActual') {
-    return list.filter(o => isOrderFinanciallyActive(o) && Number(o.toning) > 0 && !o.toningDone && !o.toningExternal);
+    return list.filter(o => isOrderFinanciallyActive(o) && !!o.toningStatus && !o.toningDone && !o.toningExternal);
   }
   if (currentWorkerName === 'Lyosha' && currentWorkerTab === 'toningDone') {
-    return list.filter(o => Number(o.toning) > 0 && o.toningDone);
+    return list.filter(o => !!o.toningStatus && o.toningDone);
   }
   if (currentWorkerName === 'Nastya' && currentWorkerTab === 'ownWarehouse') {
     return list.filter(o => o.ownWarehouse && !o.workerDone && !o.isCancelled);
@@ -993,7 +1014,7 @@ function renderOrders() {
     } else if (currentOrderTab === 'done') {
       list = list.filter(o => o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'debt') {
-      list = list.filter(o => isOrderFinanciallyActive(o) && ['Не оплачено', 'Частично'].includes(getEffectivePaymentStatus(o)));
+      list = list.filter(orderHasDebtTabFinancialMeaning);
     } else if (currentOrderTab === 'cancelled') {
       list = list.filter(o => o.isCancelled);
     }
@@ -2162,6 +2183,11 @@ function openOrderModal(id) {
 
   const tonExtEl = document.getElementById('f-toning-external');
   if (tonExtEl) tonExtEl.addEventListener('change', () => { recalcFullMargins(); recalcTotal(); });
+  ['f-tatu-status', 'f-toning-status'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('change', syncSpecialServiceStatusPreview);
+  });
 
   ['f-responsible','f-assistant','f-manager','f-dropshipper','f-order-status'].forEach(id => {
     const el = document.getElementById(id);
@@ -2250,6 +2276,8 @@ function getOrderDraftFromForm(baseOrder = null) {
   order.extraWork = getN('f-extra-work');
   order.toning = getN('f-toning');
   order.tatu = getN('f-tatu');
+  order.tatuStatus = document.getElementById('f-tatu-status')?.checked || false;
+  order.toningStatus = document.getElementById('f-toning-status')?.checked || false;
   order.total = getN('f-total');
   order.income = getN('f-income');
   order.purchase = getN('f-purchase');
@@ -2539,6 +2567,9 @@ function updateOrderModalAccess(order = null) {
     const allow = isPrivileged || (canManagePayments && id === 'f-debt-date');
     setElementDisabledState(el, !allow);
   });
+  ['f-tatu-status', 'f-toning-status'].forEach(id => {
+    setElementDisabledState(document.getElementById(id), !isPrivileged);
+  });
 
   ['f-new-payment-amount','f-new-payment-date','f-payment-method','f-new-supplier-payment-amount','f-new-supplier-payment-date','f-new-supplier-payment-method'].forEach(id => {
     setElementDisabledState(document.getElementById(id), !canManagePayments);
@@ -2607,6 +2638,10 @@ function syncConfiguration() {
   if (hidden) hidden.value = selected.join(',');
 }
 
+function syncSpecialServiceStatusPreview() {
+  renderOrderSummary(editingOrderId ? orders.find(item => item.id === editingOrderId) : null);
+}
+
 function applyOrderFormDateTimeDefaults() {
   const defaultDateIds = ['f-date', 'f-new-supplier-payment-date', 'f-new-payment-date', 'f-debt-date'];
   defaultDateIds.forEach(id => {
@@ -2643,6 +2678,10 @@ function fillOrderForm(o) {
   const newPostEl = document.getElementById('f-new-post');
   if (newPostEl) newPostEl.checked = !!o.newPost;
   set('f-configuration', o.configuration || '');
+  const tatuStatusEl = document.getElementById('f-tatu-status');
+  if (tatuStatusEl) tatuStatusEl.checked = !!o.tatuStatus;
+  const toningStatusEl = document.getElementById('f-toning-status');
+  if (toningStatusEl) toningStatusEl.checked = !!o.toningStatus;
   set('f-manager', o.manager || '');
   set('f-check', o.check);
   set('f-debt', o.debt);
@@ -2726,6 +2765,10 @@ function clearOrderForm() {
   if (newPostEl) newPostEl.checked = false;
   const tonExtEl = document.getElementById('f-toning-external');
   if (tonExtEl) tonExtEl.checked = false;
+  const tatuStatusEl = document.getElementById('f-tatu-status');
+  if (tatuStatusEl) tatuStatusEl.checked = false;
+  const toningStatusEl = document.getElementById('f-toning-status');
+  if (toningStatusEl) toningStatusEl.checked = false;
   setServiceTypeSelection('');
   document.querySelectorAll('#f-configuration-checkboxes input[type="checkbox"]').forEach(el => el.checked = false);
   syncConfiguration();
@@ -2895,6 +2938,8 @@ async function saveOrder() {
     extraWork:       getN('f-extra-work'),
     tatu:            getN('f-tatu'),
     toning:          getN('f-toning'),
+    tatuStatus:      document.getElementById('f-tatu-status')?.checked || false,
+    toningStatus:    document.getElementById('f-toning-status')?.checked || false,
     delivery:        getN('f-delivery'),
     warehouse:       get('f-warehouse'),
     warehouseCode:   get('f-warehouse-code'),
@@ -3366,7 +3411,7 @@ function renderOrdersForMonth(ym) {
     } else if (currentOrderTab === 'done') {
       list = list.filter(o => o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'debt') {
-      list = list.filter(o => isOrderFinanciallyActive(o) && ['Не оплачено', 'Частично'].includes(getEffectivePaymentStatus(o)));
+      list = list.filter(orderHasDebtTabFinancialMeaning);
     } else if (currentOrderTab === 'cancelled') {
       list = list.filter(o => o.isCancelled);
     }

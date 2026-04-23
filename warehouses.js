@@ -5,6 +5,13 @@
 let currentWarehouseFilter = null;
 let currentDropshipperFilter = null;
 let warehousePaymentFilter = 'all';
+let warehouseSearchFilter = '';
+let warehouseStatusFilter = '';
+let warehouseWorkerFilter = '';
+let warehouseSortFilter = 'desc';
+let warehouseDateFilterExact = '';
+let warehouseDateFilterFrom = '';
+let warehouseDateFilterTo = '';
 
 function getSupplierDebt(order) {
   return Math.max(0, (Number(order.purchase) || 0) - (Number(order.check) || 0));
@@ -96,6 +103,13 @@ function renderWarehousesScreen() {
 
 function openWarehouseDetail(w) {
   currentWarehouseFilter = w;
+  warehouseSearchFilter = '';
+  warehouseStatusFilter = '';
+  warehouseWorkerFilter = '';
+  warehouseSortFilter = 'desc';
+  warehouseDateFilterExact = '';
+  warehouseDateFilterFrom = '';
+  warehouseDateFilterTo = '';
   const titleEl = document.getElementById('warehouse-detail-title');
   if (titleEl) titleEl.textContent = `Склад: ${w}`;
   renderWarehouseDetail();
@@ -115,14 +129,32 @@ function renderWarehouseDetail() {
     return;
   }
 
-  const filteredList = list.filter(o => {
+  let filteredList = list.filter(o => {
     if (warehousePaymentFilter === 'all') return true;
     if (warehousePaymentFilter === 'returns') return getWarehouseReturnAmount(o) > 0;
     const hasDebt = getSupplierDebt(o) > 0;
     return warehousePaymentFilter === 'debt' ? (!o.isCancelled && hasDebt) : (!o.isCancelled && !hasDebt);
   });
 
+  if (warehouseSearchFilter) filteredList = filteredList.filter(o => orderMatchesSearch(o, warehouseSearchFilter));
+  if (warehouseDateFilterExact || warehouseDateFilterFrom || warehouseDateFilterTo) filteredList = filteredList.filter(order => {
+    const date = String(order?.date || '').slice(0, 10);
+    if (!date) return !(warehouseDateFilterExact || warehouseDateFilterFrom || warehouseDateFilterTo);
+    if (warehouseDateFilterExact) return date === warehouseDateFilterExact;
+    if (warehouseDateFilterFrom && date < warehouseDateFilterFrom) return false;
+    if (warehouseDateFilterTo && date > warehouseDateFilterTo) return false;
+    return true;
+  });
+  if (warehouseStatusFilter) filteredList = filteredList.filter(o => getEffectivePaymentStatus(o) === warehouseStatusFilter);
+  if (warehouseWorkerFilter) filteredList = filteredList.filter(o => o.responsible === warehouseWorkerFilter || o.assistant === warehouseWorkerFilter || o.manager === warehouseWorkerFilter);
+  filteredList.sort((a, b) => {
+    const ad = a.date || '';
+    const bd = b.date || '';
+    return warehouseSortFilter === 'asc' ? ad.localeCompare(bd) : bd.localeCompare(ad);
+  });
+
   container.innerHTML = renderWarehousePaymentFilters()
+    + renderWarehouseOrderFilters()
     + (filteredList.length ? renderWarehouseOrderTree(filteredList) : '<div class="empty-state">Записей по фильтру нет</div>');
   initIcons();
 }
@@ -140,6 +172,120 @@ function renderWarehousePaymentFilters() {
 
 function setWarehousePaymentFilter(type) {
   warehousePaymentFilter = type || 'all';
+  renderWarehouseDetail();
+}
+
+function getWarehouseDateFilterLabel() {
+  if (warehouseDateFilterExact) return formatDate(warehouseDateFilterExact);
+  if (warehouseDateFilterFrom && warehouseDateFilterTo) return `${formatDate(warehouseDateFilterFrom)} — ${formatDate(warehouseDateFilterTo)}`;
+  if (warehouseDateFilterFrom) return `От ${formatDate(warehouseDateFilterFrom)}`;
+  if (warehouseDateFilterTo) return `До ${formatDate(warehouseDateFilterTo)}`;
+  return 'Дата';
+}
+
+function getWarehouseWorkerOptions() {
+  return [...new Set((orders || []).flatMap(o => [o.responsible, o.assistant, o.manager]).filter(Boolean))]
+    .sort((a, b) => getWorkerDisplayName(a).localeCompare(getWorkerDisplayName(b), 'ru'));
+}
+
+function renderWarehouseOrderFilters() {
+  const workerOptions = getWarehouseWorkerOptions();
+  return `
+    <div class="filters-bar" style="margin-bottom:14px;">
+      <input class="filter-search" type="text" placeholder="Поиск..." value="${escapeAttr(warehouseSearchFilter)}" oninput="setWarehouseSearchFilter(this.value)">
+      <select class="filter-select" onchange="setWarehouseStatusFilter(this.value)">
+        <option value="">Все статусы</option>
+        ${['Не оплачено', 'Частично', 'Оплачено'].map(status => `<option value="${escapeAttr(status)}" ${warehouseStatusFilter === status ? 'selected' : ''}>${escapeHtml(status)}</option>`).join('')}
+      </select>
+      <select class="filter-select" onchange="setWarehouseWorkerFilter(this.value)">
+        <option value="">Все сотрудники</option>
+        ${workerOptions.map(name => `<option value="${escapeAttr(name)}" ${warehouseWorkerFilter === name ? 'selected' : ''}>${escapeHtml(getWorkerDisplayName(name))}</option>`).join('')}
+      </select>
+      <select class="filter-select" onchange="setWarehouseSortFilter(this.value)">
+        <option value="desc" ${warehouseSortFilter === 'desc' ? 'selected' : ''}>Сначала новые</option>
+        <option value="asc" ${warehouseSortFilter === 'asc' ? 'selected' : ''}>Сначала старые</option>
+      </select>
+      <button class="filter-select" type="button" onclick="openWarehouseDateFilterModal()">${escapeHtml(getWarehouseDateFilterLabel())}</button>
+    </div>
+  `;
+}
+
+function setWarehouseSearchFilter(value) {
+  warehouseSearchFilter = value || '';
+  renderWarehouseDetail();
+}
+
+function setWarehouseStatusFilter(value) {
+  warehouseStatusFilter = value || '';
+  renderWarehouseDetail();
+}
+
+function setWarehouseWorkerFilter(value) {
+  warehouseWorkerFilter = value || '';
+  renderWarehouseDetail();
+}
+
+function setWarehouseSortFilter(value) {
+  warehouseSortFilter = value || 'desc';
+  renderWarehouseDetail();
+}
+
+function openWarehouseDateFilterModal() {
+  let modal = document.getElementById('warehouse-date-filter-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'warehouse-date-filter-modal';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  modal.innerHTML = `
+    <div class="modal" style="max-width:420px;">
+      <div class="modal-header">
+        <div class="modal-title">Фильтр по дате</div>
+        <button class="modal-close" onclick="closeWarehouseDateFilterModal()">${icon('x')}</button>
+      </div>
+      <div class="modal-body" style="display:grid;gap:12px;">
+        <div style="padding:12px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;">
+          <div style="font-size:12px;font-weight:900;color:var(--text3);letter-spacing:0.04em;margin-bottom:10px;">КОНКРЕТНОЕ ЧИСЛО</div>
+          <input class="form-input" type="date" id="warehouse-date-filter-exact" value="${escapeAttr(warehouseDateFilterExact)}">
+        </div>
+        <div style="padding:12px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;">
+          <div style="font-size:12px;font-weight:900;color:var(--text3);letter-spacing:0.04em;margin-bottom:10px;">ДИАПАЗОН</div>
+          <input class="form-input" type="date" id="warehouse-date-filter-from" value="${escapeAttr(warehouseDateFilterFrom)}">
+          <input class="form-input" style="margin-top:10px;" type="date" id="warehouse-date-filter-to" value="${escapeAttr(warehouseDateFilterTo)}">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="clearWarehouseDateFilter()">Сбросить</button>
+        <button class="btn-primary" onclick="applyWarehouseDateFilter()">Применить</button>
+      </div>
+    </div>
+  `;
+  modal.classList.add('active');
+  initIcons();
+}
+
+function closeWarehouseDateFilterModal() {
+  document.getElementById('warehouse-date-filter-modal')?.classList.remove('active');
+}
+
+function applyWarehouseDateFilter() {
+  const exact = document.getElementById('warehouse-date-filter-exact')?.value || '';
+  let from = document.getElementById('warehouse-date-filter-from')?.value || '';
+  let to = document.getElementById('warehouse-date-filter-to')?.value || '';
+  if (from && to && from > to) [from, to] = [to, from];
+  warehouseDateFilterExact = exact;
+  warehouseDateFilterFrom = exact ? '' : from;
+  warehouseDateFilterTo = exact ? '' : to;
+  closeWarehouseDateFilterModal();
+  renderWarehouseDetail();
+}
+
+function clearWarehouseDateFilter() {
+  warehouseDateFilterExact = '';
+  warehouseDateFilterFrom = '';
+  warehouseDateFilterTo = '';
+  closeWarehouseDateFilterModal();
   renderWarehouseDetail();
 }
 
@@ -614,8 +760,12 @@ function renderDropshipperStatusOverview(pendingOrders, completedOrders) {
 }
 
 function openDropshipperPaymentModal() {
-  const list = orders.filter(o => isOrderFinanciallyActive(o) && o.dropshipper === currentDropshipperFilter && Number(o.dropshipperPayout) > 0);
-  const totalLeft = list.reduce((sum, o) => sum + Math.max(0, (Number(o.dropshipperPayout) || 0) - getDropshipperPaid(o)), 0);
+  const list = orders
+    .filter(o => isOrderFinanciallyActive(o) && o.dropshipper === currentDropshipperFilter && Number(o.dropshipperPayout) > 0)
+    .map(o => ({ order: o, left: Math.max(0, (Number(o.dropshipperPayout) || 0) - getDropshipperPaid(o)) }))
+    .filter(item => item.left > 0)
+    .sort((a, b) => String(a.order.date || '').localeCompare(String(b.order.date || '')) || String(a.order.time || '').localeCompare(String(b.order.time || '')));
+  const totalLeft = list.reduce((sum, item) => sum + item.left, 0);
   let modal = document.getElementById('dropshipper-payment-modal');
   if (!modal) {
     modal = document.createElement('div');
@@ -647,7 +797,11 @@ function openDropshipperPaymentModal() {
               <label class="form-label">Способ оплаты</label>
               <select class="form-select" id="dropshipper-payment-method"></select>
             </div>
-            <div style="font-size:11px;color:var(--text3);">Выплата распределится по неоплаченным заказам этого дропшиппера.</div>
+            <div class="form-group">
+              <label class="form-label">Выберите заказы</label>
+              <div id="dropshipper-payment-orders" style="display:flex;flex-direction:column;gap:8px;max-height:260px;overflow:auto;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--surface2);"></div>
+            </div>
+            <div style="font-size:11px;color:var(--text3);">Отмеченные заказы суммируются автоматически.</div>
           </div>
         </div>
         <div class="modal-footer">
@@ -667,6 +821,27 @@ function openDropshipperPaymentModal() {
     methodEl.innerHTML = '<option value="">— выбрать —</option>' +
       getDropshipperPaymentMethods().map(method => `<option value="${escapeAttr(method)}">${escapeHtml(method)}</option>`).join('');
   }
+  const ordersEl = document.getElementById('dropshipper-payment-orders');
+  if (ordersEl) {
+    ordersEl.innerHTML = list.length
+      ? list.map(item => {
+          const o = item.order;
+          return `
+            <label class="checkbox order-flag-checkbox" style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;">
+              <span style="display:flex;align-items:flex-start;gap:10px;min-width:0;">
+                <input type="checkbox" class="dropshipper-payment-order-checkbox" data-order-id="${escapeAttr(o.id)}" data-amount="${item.left}" checked onchange="syncDropshipperPaymentAmount()">
+                <span style="min-width:0;">
+                  <div style="font-size:13px;font-weight:800;color:var(--text);">${escapeHtml(o.id)} · ${escapeHtml(o.client || '—')}</div>
+                  <div style="font-size:11px;color:var(--text3);margin-top:2px;">${escapeHtml(o.car || '—')} · ${escapeHtml(formatDate(o.date))}</div>
+                </span>
+              </span>
+              <strong style="font-size:13px;color:var(--yellow);white-space:nowrap;">${item.left.toLocaleString('ru')} ₴</strong>
+            </label>
+          `;
+        }).join('')
+      : '<div style="text-align:center;color:var(--text3);font-size:13px;padding:12px 0;">Неоплаченных заказов нет</div>';
+  }
+  syncDropshipperPaymentAmount();
   modal.classList.add('active');
   initIcons();
 }
@@ -675,16 +850,30 @@ function closeDropshipperPaymentModal() {
   document.getElementById('dropshipper-payment-modal')?.classList.remove('active');
 }
 
+function getSelectedDropshipperPaymentOrderIds() {
+  return [...document.querySelectorAll('.dropshipper-payment-order-checkbox:checked')].map(el => String(el.getAttribute('data-order-id') || '').trim()).filter(Boolean);
+}
+
+function syncDropshipperPaymentAmount() {
+  const amount = [...document.querySelectorAll('.dropshipper-payment-order-checkbox:checked')]
+    .reduce((sum, el) => sum + (Number(el.getAttribute('data-amount')) || 0), 0);
+  const input = document.getElementById('dropshipper-payment-amount');
+  if (input) input.value = amount ? String(amount) : '';
+}
+
 async function saveDropshipperPayment() {
   const amount = Number(document.getElementById('dropshipper-payment-amount')?.value) || 0;
   const date = document.getElementById('dropshipper-payment-date')?.value || todayStr();
   const method = normalizePaymentMethod(document.getElementById('dropshipper-payment-method')?.value || '');
+  const selectedIds = getSelectedDropshipperPaymentOrderIds();
   if (!currentDropshipperFilter) return;
   if (amount <= 0) return showToast('Введите сумму выплаты', 'error');
   if (!method) return showToast('Выберите способ оплаты', 'error');
+  if (!selectedIds.length) return showToast('Выберите хотя бы один заказ', 'error');
 
   const eligible = orders
     .filter(o => isOrderFinanciallyActive(o) && o.dropshipper === currentDropshipperFilter && Number(o.dropshipperPayout) > 0)
+    .filter(o => selectedIds.includes(String(o.id)))
     .map(o => ({ order: o, left: Math.max(0, (Number(o.dropshipperPayout) || 0) - getDropshipperPaid(o)) }))
     .filter(item => item.left > 0)
     .sort((a, b) => String(a.order.date || '').localeCompare(String(b.order.date || '')) || String(a.order.time || '').localeCompare(String(b.order.time || '')));

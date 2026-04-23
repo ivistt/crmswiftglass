@@ -616,6 +616,7 @@ function ensureBuiltInDropshippers(rows = []) {
 
 function rowToOrder(r) {
   if (!r) return {};
+  const configurationMeta = parseOrderConfigurationMeta(r.configuration);
   let paymentStatus = r.payment_status || '';
   if (paymentStatus === 'Борг') paymentStatus = 'Не оплачено';
   if (paymentStatus === 'Рассчитано') paymentStatus = 'Оплачено';
@@ -665,7 +666,9 @@ function rowToOrder(r) {
     warehouse:       r.warehouse,
     warehouseCode:   r.warehouse_code,
     newPost:         r.new_post || false,
-    configuration:   r.configuration,
+    configuration:   configurationMeta.configuration,
+    tatuStatus:      configurationMeta.tatuStatus,
+    toningStatus:    configurationMeta.toningStatus,
     warehouseDelta:  r.warehouse_delta,
     dropshipper:     r.drop_shipper,
     dropshipperPayout: r.drop_shipper_payout || 0,
@@ -738,7 +741,10 @@ function orderToRow(o) {
     warehouse:         o.warehouse,
     warehouse_code:    o.warehouseCode,
     new_post:          o.newPost || false,
-    configuration:     o.configuration,
+    configuration:     buildOrderConfigurationMeta(o.configuration, {
+      tatuStatus: !!o.tatuStatus,
+      toningStatus: !!o.toningStatus,
+    }),
     drop_shipper:      o.dropshipper || null,
     drop_shipper_payout: o.dropshipperPayout || 0,
     drop_shipper_payments: o.dropshipperPayments || [],
@@ -1226,9 +1232,51 @@ const PAYMENT_METHOD_OPTIONS = [
 ];
 const SASHA_MANAGER_CARD_METHOD = '👤 Шепель Александр 💳 4149 4975 1422 9980 (PRIVAT)';
 const OLEG_CARD_METHOD = '👤 Бабенко Олег 💳 5457 0825 0103 4743 (PRIVAT)';
+const OWNER_CARD_METHODS = [
+  '👤 Киртока Максим 💳 4441 1144 6035 9811 (MONO)',
+  '👤 Киртока Анастасия 💳 4149 6090 2872 4237 (PRIVAT)',
+];
 const CASH_ACCOUNT_CASH = 'cash';
 const CASH_ACCOUNT_FOP = 'fop';
 const OWNER_PENDING_CASH_WORKER_NAME = 'Карты владельца';
+const ORDER_META_TATU_STATUS_TOKEN = '__tatu_status__';
+const ORDER_META_TONING_STATUS_TOKEN = '__toning_status__';
+
+function parseOrderConfigurationMeta(configuration) {
+  const parts = String(configuration || '')
+    .split(',')
+    .map(part => part.trim())
+    .filter(Boolean);
+  const visibleParts = [];
+  let tatuStatus = false;
+  let toningStatus = false;
+  parts.forEach(part => {
+    if (part === ORDER_META_TATU_STATUS_TOKEN) {
+      tatuStatus = true;
+      return;
+    }
+    if (part === ORDER_META_TONING_STATUS_TOKEN) {
+      toningStatus = true;
+      return;
+    }
+    visibleParts.push(part);
+  });
+  return {
+    configuration: visibleParts.join(','),
+    tatuStatus,
+    toningStatus,
+  };
+}
+
+function buildOrderConfigurationMeta(configuration, options = {}) {
+  const parsed = parseOrderConfigurationMeta(configuration);
+  const parts = parsed.configuration
+    ? parsed.configuration.split(',').map(part => part.trim()).filter(Boolean)
+    : [];
+  if (options.tatuStatus) parts.push(ORDER_META_TATU_STATUS_TOKEN);
+  if (options.toningStatus) parts.push(ORDER_META_TONING_STATUS_TOKEN);
+  return [...new Set(parts)].join(',');
+}
 
 function normalizePaymentMethod(method) {
   if (!method) return '';
@@ -1251,6 +1299,10 @@ function isSashaManagerCardPaymentMethod(method) {
 
 function isOlegCardPaymentMethod(method) {
   return normalizePaymentMethod(method) === OLEG_CARD_METHOD;
+}
+
+function isOwnerCardPaymentMethod(method) {
+  return OWNER_CARD_METHODS.includes(normalizePaymentMethod(method));
 }
 
 function buildPaymentSourceKey(orderId, method, paymentType = 'client', payment = null) {
@@ -1312,6 +1364,13 @@ function getPaymentCashRoute(method, fallbackWorkerName = '') {
   if (isOlegCardPaymentMethod(normalized)) {
     return {
       workerName: 'Oleg Starshiy',
+      cashAccount: CASH_ACCOUNT_CASH,
+      requiresConfirmation: true,
+    };
+  }
+  if (isOwnerCardPaymentMethod(normalized)) {
+    return {
+      workerName: OWNER_PENDING_CASH_WORKER_NAME,
       cashAccount: CASH_ACCOUNT_CASH,
       requiresConfirmation: true,
     };

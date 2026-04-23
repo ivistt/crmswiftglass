@@ -1128,6 +1128,21 @@ body {
   min-width: 0;
 }
 
+.order-card-primary-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface2);
+}
+
+.order-card-primary-meta {
+  margin-top: 0;
+}
+
 .order-card-actions {
   justify-content: flex-end;
   margin-top: 12px;
