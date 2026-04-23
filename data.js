@@ -584,10 +584,27 @@ async function loadRefData() {
     refPartners         = part;
     refSupplierStatuses = ss;
     carDirectory        = carDir;
-    refDropshippers     = drops;
+    refDropshippers     = ensureBuiltInDropshippers(drops);
   } catch (e) {
     showToast('Ошибка загрузки справочников: ' + e.message, 'error');
   }
+}
+
+function ensureBuiltInDropshippers(rows = []) {
+  const list = Array.isArray(rows) ? [...rows] : [];
+  const builtIns = [
+    { name: 'Саша Менеджер', worker_name: 'Sasha Manager' },
+  ];
+
+  builtIns.forEach(entry => {
+    const exists = list.some(row =>
+      String(row?.worker_name || '').trim() === String(entry.worker_name).trim()
+      || String(row?.name || '').trim() === String(entry.name).trim()
+    );
+    if (!exists) list.push(entry);
+  });
+
+  return list;
 }
 
 // ── MAPPERS ──────────────────────────────────────────────────
@@ -923,9 +940,16 @@ function hasCustomSalaryService(order) {
   return _salarySelectedServiceItems(order).some(item => item.salaryCategory === 'custom');
 }
 
+function _customServiceSalary(order) {
+  return Math.round((Number(order?.mount) || 0) * 0.2);
+}
+
 function _selectedServicesSalary(workerName, order) {
   const rule = getSalaryRule(workerName);
   if (!rule.selectedServices) return 0;
+  if (hasCustomSalaryService(order)) {
+    return _customServiceSalary(order);
+  }
   const adjustments = rule.serviceAdjustments || {};
   return _salarySelectedServiceItems(order).reduce((sum, item) => {
     if (item.salaryCategory === 'custom') return sum;
@@ -998,7 +1022,7 @@ function getWorkerOrderSalaryBreakdown(workerName, order) {
   if (order.workerDone && (order.responsible === workerName || order.assistant === workerName)) {
     if (rule.selectedServices) {
       if (hasCustomSalaryService(order)) {
-        parts.push({ label: 'Нестандартная работа, внесите запись в кассу', amount: 0 });
+        parts.push({ label: 'Нестандартные работы 20% от монтажа', amount: _customServiceSalary(order) });
       }
       const adjustments = rule.serviceAdjustments || {};
       const groupedServices = {};
@@ -1169,6 +1193,7 @@ function getWorkerCompletedOrdersSummary(workerName, date) {
     totalAmount: dayOrders.reduce((sum, order) => sum + getOrderClientTotalAmount(order), 0),
     orders: dayOrders.map(order => ({
       id: order.id,
+      client: order.client || '—',
       car: order.car || order.client || '—',
       amount: calcWorkerOrderSalary(workerName, order),
       breakdown: getWorkerOrderSalaryBreakdown(workerName, order),
@@ -1303,12 +1328,13 @@ function buildOrderPaymentCashEntryPayload({ order, payment, paymentType = 'clie
   const orderId = order?.id || '—';
   const paymentDate = payment?.date || order?.date || '';
   const dateLabel = paymentDate ? formatDate(paymentDate) : '—';
+  const clientLabel = order?.client || '—';
   const carLabel = order?.car || order?.client || '—';
   const actionLabel = paymentType === 'supplier' ? 'Оплата поставщику' : 'Оплата клиента';
   const payload = {
     worker_name: route.workerName,
     amount: signedAmount,
-    comment: `${actionLabel} ${method} ${orderId}, ${dateLabel}, авто: ${carLabel}`,
+    comment: `${actionLabel} ${method} ${orderId}, ${dateLabel}, клиент: ${clientLabel}, авто: ${carLabel}`,
     cash_account: route.cashAccount,
   };
 

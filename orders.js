@@ -290,12 +290,13 @@ async function confirmSeniorOrderAmounts(orderId) {
     const typeStr = checkDiff > 0 ? 'Списание' : 'Возврат';
     const fDate = updatedOrder.date ? formatDate(updatedOrder.date) : '—';
     const fTime = updatedOrder.time || '—';
+    const fClient = updatedOrder.client || '—';
     const fCar = updatedOrder.car || '—';
     const targetWorker = updatedOrder.responsible || currentWorkerName;
     cashEntries.push({
       worker_name: targetWorker,
       amount,
-      comment: `${typeStr} за стекло ${updatedOrder.id}, ${fDate} ${fTime}, авто: ${fCar}, склад: ${updatedOrder.warehouse || '—'}`,
+      comment: `${typeStr} за стекло ${updatedOrder.id}, ${fDate} ${fTime}, клиент: ${fClient}, авто: ${fCar}, склад: ${updatedOrder.warehouse || '—'}`,
       cashType: 'supplier',
     });
   }
@@ -303,12 +304,13 @@ async function confirmSeniorOrderAmounts(orderId) {
   if (isOrderFinanciallyActive(updatedOrder) && clientDiff !== 0) {
     const typeStr = clientDiff > 0 ? 'Оплата клиента' : 'Возврат клиенту';
     const fDate = updatedOrder.date ? formatDate(updatedOrder.date) : '—';
+    const fClient = updatedOrder.client || '—';
     const fCar = updatedOrder.car || '—';
     const targetWorker = updatedOrder.responsible || currentWorkerName;
     cashEntries.push({
       worker_name: targetWorker,
       amount: clientDiff,
-      comment: `${typeStr} наличкой ${updatedOrder.id}, ${fDate}, авто: ${fCar}`,
+      comment: `${typeStr} наличкой ${updatedOrder.id}, ${fDate}, клиент: ${fClient}, авто: ${fCar}`,
       cashType: 'client',
     });
   }
@@ -434,6 +436,9 @@ function renderOrderCard(o) {
   const warehousePillHtml = (o.warehouse || warehouseCodeInlineHtml || supplierPaidInlineHtml)
     ? `<span class="order-meta-item order-meta-pill">${escapeHtml(o.warehouse || 'Склад —')}${warehouseCodeInlineHtml}${supplierPaidInlineHtml}</span>`
     : '';
+  const phoneHtml = (currentRole === 'senior' || currentRole === 'junior' || currentRole === 'extra')
+    ? orderCardPhoneCallLink(o.phone)
+    : `${icon('phone')} ${escapeHtml(o.phone || '—')}`;
   const servicesHtml = renderOrderCardServices(o);
   const callNotesHtml = renderOrderCardCallNotes(o);
   const managerMetaHtml = renderManagerOrderCardMeta(o);
@@ -463,7 +468,7 @@ function renderOrderCard(o) {
       ${currentRole === 'manager' ? managerMetaHtml : `
       <div class="order-card-meta">
         <span class="order-meta-item order-meta-pill order-meta-client-pill">${icon('car')} <span class="order-meta-client-name">${o.car || '—'}</span></span>
-        <span class="order-meta-item order-meta-pill">${icon('phone')} ${o.phone || '—'}</span>
+        <span class="order-meta-item order-meta-pill">${phoneHtml}</span>
         <span class="order-meta-item order-meta-pill">${icon('calendar')} ${formatDate(o.date)}</span>
         <span class="order-meta-item order-meta-pill">${getWorkerDisplayPair(o.responsible, o.assistant)}</span>
         ${o.manager ? `<span class="order-meta-item order-meta-pill">${getWorkerDisplayName(o.manager)}</span>` : ''}
@@ -710,6 +715,10 @@ async function saveOrderServices(orderId) {
     });
   if (!order.onlySale && !values.length) {
     showToast('Выберите хотя бы одну услугу', 'error');
+    return;
+  }
+  if (values.some(item => item.name === CUSTOM_SERVICE_TYPE_NAME) && (Number(order.mount) || 0) <= 0) {
+    alert('Сумма монтажа не заполнена');
     return;
   }
   const btn = document.getElementById('order-services-save-btn');
@@ -1378,10 +1387,11 @@ async function addCashEntriesForDuplicatedOrder(order) {
   const targetWorker = order.responsible || currentWorkerName;
   const fDate = order.date ? formatDate(order.date) : '—';
   const fTime = order.time || '—';
+  const fClient = order.client || '—';
   const fCar = order.car || '—';
 
   if (supplierCashPaid !== 0) {
-    const cashComment = `Списание за стекло ${order.id}, ${fDate} ${fTime}, авто: ${fCar}, склад: ${order.warehouse || '—'}`;
+    const cashComment = `Списание за стекло ${order.id}, ${fDate} ${fTime}, клиент: ${fClient}, авто: ${fCar}, склад: ${order.warehouse || '—'}`;
     const cashEntry = await sbInsertCashEntry({
       worker_name: targetWorker,
       amount: -supplierCashPaid,
@@ -1396,7 +1406,7 @@ async function addCashEntriesForDuplicatedOrder(order) {
   }
 
   if (clientCashPaid !== 0) {
-    const cashComment = `Оплата клиента наличкой ${order.id}, ${fDate}, авто: ${fCar}`;
+    const cashComment = `Оплата клиента наличкой ${order.id}, ${fDate}, клиент: ${fClient}, авто: ${fCar}`;
     const cashEntry = await sbInsertCashEntry({
       worker_name: targetWorker,
       amount: clientCashPaid,
@@ -1950,12 +1960,13 @@ async function persistImmediateOrderPaymentsUpdate() {
     const typeStr = cashSupplierDiff > 0 ? 'Списание' : 'Возврат';
     const fDate = data.date ? formatDate(data.date) : '—';
     const fTime = data.time || '—';
+    const fClient = data.client || '—';
     const fCar = data.car || '—';
     const targetWorker = data.responsible || currentWorkerName;
     cashEntries.push({
       worker_name: targetWorker,
       amount,
-      comment: `${typeStr} за стекло ${data.id}, ${fDate} ${fTime}, авто: ${fCar}, склад: ${data.warehouse || '—'}`,
+      comment: `${typeStr} за стекло ${data.id}, ${fDate} ${fTime}, клиент: ${fClient}, авто: ${fCar}, склад: ${data.warehouse || '—'}`,
       cashType: 'supplier',
     });
   }
@@ -1963,12 +1974,13 @@ async function persistImmediateOrderPaymentsUpdate() {
   if ((currentRole === 'senior' || currentRole === 'owner') && cashClientDiff !== 0) {
     const typeStr = cashClientDiff > 0 ? 'Оплата клиента' : 'Возврат клиенту';
     const fDate = data.date ? formatDate(data.date) : '—';
+    const fClient = data.client || '—';
     const fCar = data.car || '—';
     const targetWorker = data.responsible || currentWorkerName;
     cashEntries.push({
       worker_name: targetWorker,
       amount: cashClientDiff,
-      comment: `${typeStr} наличкой ${data.id}, ${fDate}, авто: ${fCar}`,
+      comment: `${typeStr} наличкой ${data.id}, ${fDate}, клиент: ${fClient}, авто: ${fCar}`,
       cashType: 'client',
     });
   }
@@ -2292,7 +2304,10 @@ function getWorkerOrderSalaryPreviewBreakdown(workerName, order) {
   if (isMainWorker) {
     if (rule.selectedServices) {
       if (typeof hasCustomSalaryService === 'function' && hasCustomSalaryService(order)) {
-        parts.push({ label: 'Нестандартная работа, внесите запись в кассу', amount: 0 });
+        const customAmount = typeof _customServiceSalary === 'function'
+          ? _customServiceSalary(order)
+          : Math.round((Number(order.mount) || 0) * 0.2);
+        parts.push({ label: 'Нестандартные работы 20% от монтажа', amount: customAmount });
       }
       const adjustments = rule.serviceAdjustments || {};
       const groupedServices = {};
@@ -2840,6 +2855,17 @@ function validateOrderRequiredFields(data) {
   return false;
 }
 
+function validateCustomServiceMountAmount(data) {
+  const serviceValue = data?.serviceType ?? document.getElementById('f-service-type')?.value ?? '';
+  const hasCustom = typeof getOrderServiceSelections === 'function'
+    ? getOrderServiceSelections(serviceValue).some(item => item.name === CUSTOM_SERVICE_TYPE_NAME)
+    : String(serviceValue || '').includes(CUSTOM_SERVICE_TYPE_NAME);
+  if (!hasCustom) return true;
+  if ((Number(data?.mount) || 0) > 0) return true;
+  alert('Сумма монтажа не заполнена');
+  return false;
+}
+
 // ---------- СОХРАНЕНИЕ ----------
 async function saveOrder() {
   const get  = id => document.getElementById(id)?.value?.trim() || '';
@@ -2924,6 +2950,7 @@ async function saveOrder() {
   };
 
   if (!validateOrderRequiredFields(data)) return;
+  if (!validateCustomServiceMountAmount(data)) return;
 
   const saveBtn = document.getElementById('order-save-btn');
   if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = '<i data-lucide="loader" style="width:14px;height:14px;"></i><span>Сохранение...</span>'; initIcons(); }
@@ -3050,8 +3077,20 @@ async function saveOrder() {
 
     try {
       orders = await sbFetchOrders();
+      const refreshedIdx = orders.findIndex(o => o.id === saved.id);
+      if (refreshedIdx !== -1) {
+        orders[refreshedIdx] = { ...orders[refreshedIdx], ...saved };
+      } else {
+        orders.unshift(saved);
+      }
     } catch (refreshError) {
       console.warn('Failed to refresh orders after save:', refreshError);
+      const fallbackIdx = orders.findIndex(o => o.id === saved.id);
+      if (fallbackIdx !== -1) {
+        orders[fallbackIdx] = { ...orders[fallbackIdx], ...saved };
+      } else {
+        orders.unshift(saved);
+      }
     }
 
     closeOrderModal();
@@ -3116,6 +3155,14 @@ function phoneCallLink(phone) {
   const tel = raw.replace(/[^\d+]/g, '').replace(/(?!^)\+/g, '');
   if (!tel) return raw;
   return `<a class="detail-phone-link" href="tel:${tel}">${raw}</a>`;
+}
+
+function orderCardPhoneCallLink(phone) {
+  if (!phone) return `${icon('phone')} —`;
+  const raw = String(phone).trim();
+  const tel = raw.replace(/[^\d+]/g, '').replace(/(?!^)\+/g, '');
+  if (!tel) return `${icon('phone')} ${escapeHtml(raw)}`;
+  return `<a class="detail-phone-link" href="tel:${escapeAttr(tel)}" onclick="event.stopPropagation()">${icon('phone')} ${escapeHtml(raw)}</a>`;
 }
 
 function formatDate(d) {

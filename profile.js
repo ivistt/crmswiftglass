@@ -43,6 +43,15 @@ async function loadWorkerSalaries() {
   }
 }
 
+async function loadWorkerProblems() {
+  if (currentRole === 'owner') return;
+  try {
+    workerProblems = await sbFetchWorkerProblems(currentWorkerName);
+  } catch (e) {
+    workerProblems = [];
+  }
+}
+
 async function loadWorkerCashLog() {
   if (!canAccessPersonalCash()) return;
   try {
@@ -61,6 +70,7 @@ function calcCashBalance(log) {
 
 async function openProfileScreen() {
   await loadWorkerSalaries();
+  await loadWorkerProblems();
   if (currentWorkerName === MANAGER_CARD_CASH_WORKER_NAME) await loadWorkerCashLog();
   renderProfile();
   showScreen('profile');
@@ -102,6 +112,7 @@ function renderProfile() {
       + '<div style="font-size:12px;font-weight:800;color:var(--text3);margin-bottom:12px;letter-spacing:0.04em;">ИСТОРИЯ ЗАРПЛАТ</div>'
       + '<div style="display:flex;flex-direction:column;gap:12px;">' + salaryHistoryHtml + '</div>'
       + '</div>'
+      + renderWorkerProblemsBlock()
       + '<button class="subtle-reload-btn" style="margin-top:12px;" onclick="clearCacheAndReload()">Очистить кеш и перезагрузить</button>';
     initIcons();
     return;
@@ -147,9 +158,41 @@ function renderProfile() {
     + '<div style="font-size:13px;color:var(--text3);margin-top:2px;">' + (ROLE_LABELS[currentRole] || currentRole) + '</div></div>'
     + '</div>'
     + salaryGroupHtml
+    + renderWorkerProblemsBlock()
     + '<button class="subtle-reload-btn" style="margin-top:12px;" onclick="clearCacheAndReload()">Очистить кеш и перезагрузить</button>';
 
   initIcons();
+}
+
+function renderWorkerProblemsBlock() {
+  if (currentRole === 'owner') return '';
+  const items = (workerProblems || [])
+    .slice()
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+  const listHtml = items.length
+    ? items.map(problem => {
+        const amount = Number(problem.amount) || 0;
+        const meta = [
+          problem.date ? formatDate(problem.date) : '',
+          problem.order_id || '',
+          problem.partner ? 'с ' + problem.partner : ''
+        ].filter(Boolean).join(' · ');
+        return ''
+          + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:10px 12px;background:var(--surface2);border-radius:8px;border-left:2px solid var(--red,#DC2626);">'
+          + '<div style="min-width:0;">'
+          + '<div style="font-size:13px;font-weight:700;color:var(--text);">' + escapeHtml(problem.description || 'Проблема') + '</div>'
+          + (meta ? '<div style="font-size:11px;color:var(--text3);margin-top:3px;">' + escapeHtml(meta) + '</div>' : '')
+          + '</div>'
+          + '<div style="font-size:13px;font-weight:900;color:var(--red,#DC2626);white-space:nowrap;">' + amount.toLocaleString('ru') + ' ₴</div>'
+          + '</div>';
+      }).join('')
+    : '<div style="font-size:13px;color:var(--text3);text-align:center;padding:12px;background:var(--surface2);border-radius:8px;">Проблем не зафиксировано</div>';
+
+  return ''
+    + '<div class="profile-today-card" style="margin-top:12px;">'
+    + '<div style="font-size:12px;font-weight:800;color:var(--text3);margin-bottom:12px;letter-spacing:0.04em;">ПРОБЛЕМЫ</div>'
+    + '<div style="display:flex;flex-direction:column;gap:8px;">' + listHtml + '</div>'
+    + '</div>';
 }
 
 function renderCashScreen() {
@@ -409,7 +452,7 @@ function renderSalaryOrdersList(orderItems) {
       return '<div style="padding:8px 0;border-bottom:1px solid var(--border);">'
         + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;font-size:12px;color:var(--text2);">'
         + '<div style="min-width:0;">'
-        + '<div style="font-weight:800;color:var(--text);">' + escapeHtml(item.id) + ' · ' + escapeHtml(item.car || '—') + '</div>'
+        + '<div style="font-weight:800;color:var(--text);">' + escapeHtml(item.id) + ' · ' + escapeHtml(item.client || '—') + ' · ' + escapeHtml(item.car || '—') + '</div>'
         + '<div style="margin-top:5px;"><span style="display:inline-flex;font-size:10px;font-weight:900;color:var(--accent);background:rgba(29,233,182,.12);border:1px solid rgba(29,233,182,.22);border-radius:999px;padding:2px 6px;">Авто</span></div>'
         + breakdownHtml
         + '</div>'
@@ -725,7 +768,7 @@ function renderCashSection(log, balance, today, options = {}) {
     : '<div style="text-align:center;color:var(--text3);font-size:13px;padding:10px 0;">Сегодня записей нет</div>';
 
   // ── Архив (группировка: год → месяц → день) ──
-  const archiveHtml = _buildCashArchive(archiveLog);
+  const archiveHtml = _buildCashArchive(archiveLog, options.archiveKeyPrefix || options.account || 'cash');
 
   return '<div class="profile-today-card" style="margin-top:12px;">'
 
@@ -1020,7 +1063,7 @@ function _buildCurrencyCashArchive(log) {
 }
 
 // Строит архив: год → месяц → день (все сворачиваемые)
-function _buildCashArchive(log) {
+function _buildCashArchive(log, keyPrefix = 'cash') {
   if (!log.length) return '';
 
   const MONTH_NAMES = ['Январь','Февраль','Март','Апрель','Май','Июнь',
@@ -1047,20 +1090,20 @@ function _buildCashArchive(log) {
       .flatMap(m => Object.values(m).flat())
       .reduce((s, e) => s + Number(e.amount), 0);
     const yearColor = yearSum >= 0 ? 'var(--accent)' : '#ef4444';
-    const yearKey = 'cash-year-' + year;
+    const yearKey = keyPrefix + '-year-' + year;
 
     const monthsHtml = Object.keys(tree[year]).sort((a, b) => b.localeCompare(a)).map(ym => {
       const [y, m] = ym.split('-');
       const monthName = MONTH_NAMES[parseInt(m) - 1];
       const monthSum  = Object.values(tree[year][ym]).flat().reduce((s, e) => s + Number(e.amount), 0);
       const monthColor = monthSum >= 0 ? 'var(--accent)' : '#ef4444';
-      const monthKey = 'cash-month-' + ym;
+      const monthKey = keyPrefix + '-month-' + ym;
 
       const daysHtml = Object.keys(tree[year][ym]).sort((a, b) => b.localeCompare(a)).map(day => {
         const entries  = tree[year][ym][day];
         const daySum   = entries.reduce((s, e) => s + Number(e.amount), 0);
         const dayColor = daySum >= 0 ? 'var(--accent)' : '#ef4444';
-        const dayKey   = 'cash-day-' + day;
+        const dayKey   = keyPrefix + '-day-' + day;
         const [dy, dm, dd] = day.split('-');
 
         const rowsHtml = entries.map(e => _cashEntryRow(e)).join('');
@@ -1577,7 +1620,7 @@ async function addCashFromOrder(order) {
     const entry = await sbInsertCashEntry({
       worker_name: currentWorkerName,
       amount,
-      comment: `Заказ ${order.id} · ${order.car || order.client || ''}`,
+      comment: `Заказ ${order.id} · клиент: ${order.client || '—'} · авто: ${order.car || order.client || ''}`,
     });
     workerCashLog.unshift(entry);
     showToast(`+${amount.toLocaleString('ru')} ₴ в кассу`);
