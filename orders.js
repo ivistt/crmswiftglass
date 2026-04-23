@@ -424,9 +424,7 @@ function renderOrderCard(o) {
   const cardClickAction = canOpenModal ? `openOrderModal('${escapeAttr(o.id)}')` : '';
   const primaryTitle = o.client || '—';
   const clientTotal = getOrderClientTotal(o);
-  const clientPaidInlineHtml = clientTotal > 0
-    ? `<span class="order-meta-inline-money" title="Клиент оплатил / общая сумма заказа"><span>${(Number(o.debt) || 0).toLocaleString('ru')}</span><span class="order-meta-money-separator">/</span><span>${clientTotal.toLocaleString('ru')} ₴</span></span>`
-    : '';
+  const clientPaidInlineHtml = `<span class="order-meta-inline-money" title="Клиент оплатил / общая сумма заказа"><span>${(Number(o.debt) || 0).toLocaleString('ru')}</span><span class="order-meta-money-separator">/</span><span>${clientTotal.toLocaleString('ru')} ₴</span></span>`;
   const supplierPaidInlineHtml = (Number(o.check) > 0 || Number(o.purchase) > 0)
     ? `<span class="order-meta-inline-money"><span>${(Number(o.check) || 0).toLocaleString('ru')}</span><span class="order-meta-money-separator">/</span><span>${(Number(o.purchase) || 0).toLocaleString('ru')} ₴</span></span>`
     : '';
@@ -460,8 +458,8 @@ function renderOrderCard(o) {
             ${specialistBonusFlags}
           </div>
           <div class="order-card-title-row">
-            <span class="order-name">${primaryTitle}</span>
-            ${currentRole === 'manager' ? clientPaidInlineHtml : ''}
+            <span class="order-name">${escapeHtml(primaryTitle)}</span>
+            ${clientPaidInlineHtml}
           </div>
         </div>
       </div>

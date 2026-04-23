@@ -839,7 +839,7 @@ const SALARY_CONFIG = {
   'Kostya':     { selectedServices: true, glassMarginPct: 0.10, moldingPct: 0.10, dailyBaseIfCompleted: 800 },
   'Sasha Manager': { glassMarginPct: 0.10, attendanceBase: 800, managerOnly: true },
   'Nastya':      { attendanceBase: 2000 },
-  'Lyosha':     { selectedServices: true, toningBonusPct: 0.20, globalToningBonus: true },
+  'Lyosha':     { selectedServices: true, toningBonusPct: 0.40, globalToningBonus: true },
 
   // ── Дефолты по роли ──────────────────────────────────────
   _senior:  { selectedServices: true },
