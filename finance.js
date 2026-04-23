@@ -12,14 +12,6 @@ function getFinanceSalaryEntries(entries = allSalaries) {
     .filter(entry => !isSalaryWithdrawalEntry(entry));
 }
 
-function getOrderClientPaidAmount(order) {
-  const payments = Array.isArray(order?.clientPayments) ? order.clientPayments : [];
-  if (payments.length) {
-    return payments.reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
-  }
-  return Number(order?.debt) || 0;
-}
-
 function calcFinanceTotals(monthKey = '') {
   const relevantOrders = (orders || [])
     .filter(isOrderFinanciallyActive)
@@ -534,11 +526,17 @@ function getSalaryEntryKindLabel(entry) {
   return 'Запись';
 }
 
-function getSalaryEntryOrderCar(entry) {
+function getSalaryEntryOrderMeta(entry) {
   const orderId = String(entry?.order_id || '').trim();
-  if (!orderId) return '';
+  if (!orderId) return { client: '', car: '', services: '' };
   const order = (orders || []).find(item => String(item?.id || '') === orderId);
-  return String(order?.car || order?.client || '').trim();
+  return {
+    client: String(order?.client || '').trim(),
+    car: String(order?.car || order?.client || '').trim(),
+    services: typeof formatOrderServiceTypeText === 'function'
+      ? String(formatOrderServiceTypeText(order?.serviceType || '') || '').trim()
+      : '',
+  };
 }
 
 function renderOwnerSalaryEntryRow(entry, { showWorker = false, showEdit = false } = {}) {
@@ -546,7 +544,7 @@ function renderOwnerSalaryEntryRow(entry, { showWorker = false, showEdit = false
   const history = getSalaryEditHistory(entry);
   const canEdit = showEdit && !isSalaryWithdrawalEntry(entry) && !isSalaryEntryClosedByWithdrawal(entry);
   const canDelete = showEdit && currentRole === 'owner';
-  const orderCar = getSalaryEntryOrderCar(entry);
+  const orderMeta = getSalaryEntryOrderMeta(entry);
   return `<div style="padding:10px 0;border-bottom:1px solid var(--border);">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
       <div style="min-width:0;">
@@ -555,7 +553,9 @@ function renderOwnerSalaryEntryRow(entry, { showWorker = false, showEdit = false
           <span style="font-size:12px;font-weight:800;color:var(--text2);">${escapeHtml(entry.order_id || '—')}</span>
           <span style="font-size:10px;font-weight:900;color:var(--accent);background:rgba(29,233,182,.12);border:1px solid rgba(29,233,182,.22);border-radius:999px;padding:2px 6px;">${getSalaryEntryKindLabel(entry)}</span>
         </div>
-        ${orderCar ? `<div style="font-size:12px;color:var(--text3);margin-top:4px;">${escapeHtml(orderCar)}</div>` : ''}
+        ${orderMeta.client ? `<div style="font-size:12px;color:var(--text);margin-top:4px;font-weight:700;">${escapeHtml(orderMeta.client)}</div>` : ''}
+        ${orderMeta.car ? `<div style="font-size:12px;color:var(--text3);margin-top:4px;">${escapeHtml(orderMeta.car)}</div>` : ''}
+        ${orderMeta.services ? `<div style="font-size:11px;color:var(--accent);margin-top:4px;">${escapeHtml(orderMeta.services)}</div>` : ''}
         ${entry.comment ? `<div style="font-size:12px;color:var(--text2);margin-top:5px;">${escapeHtml(entry.comment)}</div>` : ''}
         ${history.length ? `<div style="font-size:11px;color:var(--text3);margin-top:4px;">Отредактировано владельцем: ${history.length}</div>` : ''}
       </div>
@@ -832,7 +832,7 @@ function renderOwnerPendingSalaryPanel() {
       const amount = Number(entry.amount) || 0;
       const typeLabel = isOwnerManualSalaryEntry(entry) ? 'Ручная' : (entry.entry_type === 'auto' || entry.order_id ? 'Авто' : 'Начисление');
       const history = getSalaryEditHistory(entry);
-      const orderCar = getSalaryEntryOrderCar(entry);
+      const orderMeta = getSalaryEntryOrderMeta(entry);
       const latestEdit = history[history.length - 1] || null;
       const latestEditHtml = latestEdit
         ? `<div style="font-size:11px;color:var(--text3);margin-top:4px;">Отредактировано владельцем: ${Number(latestEdit.amount_before || 0).toLocaleString('ru')} → ${Number(latestEdit.amount_after || 0).toLocaleString('ru')} ₴</div>`
@@ -845,7 +845,9 @@ function renderOwnerPendingSalaryPanel() {
               <span style="font-size:10px;font-weight:900;color:var(--accent);background:rgba(29,233,182,.12);border:1px solid rgba(29,233,182,.22);border-radius:999px;padding:2px 6px;">${typeLabel}</span>
             </div>
             <div style="font-size:12px;color:var(--text3);margin-top:3px;">${formatDate(entry.date)} · ${escapeHtml(entry.order_id || '—')}</div>
-            ${orderCar ? `<div style="font-size:12px;color:var(--text3);margin-top:4px;">${escapeHtml(orderCar)}</div>` : ''}
+            ${orderMeta.client ? `<div style="font-size:12px;color:var(--text);margin-top:4px;font-weight:700;">${escapeHtml(orderMeta.client)}</div>` : ''}
+            ${orderMeta.car ? `<div style="font-size:12px;color:var(--text3);margin-top:4px;">${escapeHtml(orderMeta.car)}</div>` : ''}
+            ${orderMeta.services ? `<div style="font-size:11px;color:var(--accent);margin-top:4px;">${escapeHtml(orderMeta.services)}</div>` : ''}
             ${entry.comment ? `<div style="font-size:12px;color:var(--text2);margin-top:5px;">${escapeHtml(entry.comment)}</div>` : ''}
             ${latestEditHtml}
           </div>

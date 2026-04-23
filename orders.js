@@ -223,11 +223,11 @@ function getOrderClientTotal(order) {
 }
 
 function getEffectivePaymentStatus(order) {
-  return calcClientPaymentStatus(Number(order?.debt) || 0, getOrderClientTotal(order));
+  return calcClientPaymentStatus(getOrderClientPaidAmount(order), getOrderClientTotal(order));
 }
 
 function getEffectiveSupplierStatus(order) {
-  return calcSupplierPaymentStatus(Number(order?.check) || 0, Number(order?.purchase) || 0);
+  return calcSupplierPaymentStatus(getOrderSupplierPaidAmount(order), Number(order?.purchase) || 0);
 }
 
 async function confirmSeniorOrderAmounts(orderId) {
@@ -268,10 +268,10 @@ async function confirmSeniorOrderAmounts(orderId) {
     });
   }
 
-  const totalSupplierPaid = nextSupplierPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-  const totalClientPaid = nextClientPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  const totalSupplierPaid = sumConfirmedOrderPayments(order, nextSupplierPayments, 'supplier');
+  const totalClientPaid = sumConfirmedOrderPayments(order, nextClientPayments, 'client');
   const checkDiff = totalSupplierPaid - oldCheck;
-  const oldClientPaid = Number(order.debt) || 0;
+  const oldClientPaid = getOrderClientPaidAmount(order);
   const clientDiff = totalClientPaid - oldClientPaid;
   const cashEntries = [];
   const totalClientAmount = (Number(order.total) || 0) + (Number(order.income) || 0) + (Number(order.delivery) || 0);
@@ -424,9 +424,11 @@ function renderOrderCard(o) {
   const cardClickAction = canOpenModal ? `openOrderModal('${escapeAttr(o.id)}')` : '';
   const primaryTitle = o.client || '—';
   const clientTotal = getOrderClientTotal(o);
-  const clientPaidInlineHtml = `<span class="order-meta-inline-money" title="Клиент оплатил / общая сумма заказа"><span>${(Number(o.debt) || 0).toLocaleString('ru')}</span><span class="order-meta-money-separator">/</span><span>${clientTotal.toLocaleString('ru')} ₴</span></span>`;
-  const supplierPaidInlineHtml = (Number(o.check) > 0 || Number(o.purchase) > 0)
-    ? `<span class="order-meta-inline-money"><span>${(Number(o.check) || 0).toLocaleString('ru')}</span><span class="order-meta-money-separator">/</span><span>${(Number(o.purchase) || 0).toLocaleString('ru')} ₴</span></span>`
+  const clientPaidAmount = getOrderClientPaidAmount(o);
+  const supplierPaidAmount = getOrderSupplierPaidAmount(o);
+  const clientPaidInlineHtml = `<span class="order-meta-inline-money" title="Клиент оплатил / общая сумма заказа"><span>${clientPaidAmount.toLocaleString('ru')}</span><span class="order-meta-money-separator">/</span><span>${clientTotal.toLocaleString('ru')} ₴</span></span>`;
+  const supplierPaidInlineHtml = (supplierPaidAmount > 0 || Number(o.purchase) > 0)
+    ? `<span class="order-meta-inline-money"><span>${supplierPaidAmount.toLocaleString('ru')}</span><span class="order-meta-money-separator">/</span><span>${(Number(o.purchase) || 0).toLocaleString('ru')} ₴</span></span>`
     : '';
   const warehouseCodeInlineHtml = (currentRole === 'owner' || currentWorkerName === 'Sasha Manager') && o.warehouseCode
     ? `<span style="margin-left:6px;color:var(--accent);font-weight:900;">${escapeHtml(o.warehouseCode)}</span>`
@@ -502,11 +504,13 @@ function orderHasDebtTabFinancialMeaning(order) {
 function renderManagerOrderCardMeta(order) {
   if (currentRole !== 'manager' || !order) return '';
   const clientTotal = getOrderClientTotal(order);
+  const clientPaidAmount = getOrderClientPaidAmount(order);
+  const supplierPaidAmount = getOrderSupplierPaidAmount(order);
   const clientPaidInlineHtml = clientTotal > 0
-    ? `<span class="order-meta-inline-money" title="Клиент оплатил / общая сумма заказа"><span>${(Number(order.debt) || 0).toLocaleString('ru')}</span><span class="order-meta-money-separator">/</span><span>${clientTotal.toLocaleString('ru')} ₴</span></span>`
+    ? `<span class="order-meta-inline-money" title="Клиент оплатил / общая сумма заказа"><span>${clientPaidAmount.toLocaleString('ru')}</span><span class="order-meta-money-separator">/</span><span>${clientTotal.toLocaleString('ru')} ₴</span></span>`
     : '';
-  const supplierPaidInlineHtml = (Number(order.check) > 0 || Number(order.purchase) > 0)
-    ? `<span class="order-meta-inline-money"><span>${(Number(order.check) || 0).toLocaleString('ru')}</span><span class="order-meta-money-separator">/</span><span>${(Number(order.purchase) || 0).toLocaleString('ru')} ₴</span></span>`
+  const supplierPaidInlineHtml = (supplierPaidAmount > 0 || Number(order.purchase) > 0)
+    ? `<span class="order-meta-inline-money"><span>${supplierPaidAmount.toLocaleString('ru')}</span><span class="order-meta-money-separator">/</span><span>${(Number(order.purchase) || 0).toLocaleString('ru')} ₴</span></span>`
     : '';
   const warehouseCodeInlineHtml = order.warehouseCode
     ? `<span style="margin-left:6px;color:var(--accent);font-weight:900;">${escapeHtml(order.warehouseCode)}</span>`
@@ -1088,9 +1092,9 @@ function openOrderDetail(id) {
 
   const el = document.getElementById('order-detail-content');
   const fullOrderTotal = getOrderClientTotal(o);
-  const clientPaid = Number(o.debt) || 0;
+  const clientPaid = getOrderClientPaidAmount(o);
   const clientLeft = Math.max(0, fullOrderTotal - clientPaid);
-  const supplierPaid = Number(o.check) || 0;
+  const supplierPaid = getOrderSupplierPaidAmount(o);
   const supplierLeft = Math.max(0, (Number(o.purchase) || 0) - supplierPaid);
   const dropshipperPaid = (o.dropshipperPayments || []).reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
   const dropshipperLeft = Math.max(0, (Number(o.dropshipperPayout) || 0) - dropshipperPaid);
@@ -1848,7 +1852,8 @@ function renderSupplierPayments() {
 function syncClientPaidFromPayments() {
   const debtEl = document.getElementById('f-debt');
   if (!debtEl) return;
-  const totalPaid = currentClientPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  const draftOrder = editingOrderId ? (orders.find(item => item.id === editingOrderId) || { id: editingOrderId }) : null;
+  const totalPaid = sumConfirmedOrderPayments(draftOrder, currentClientPayments, 'client');
   debtEl.value = String(totalPaid || 0);
   syncClientLeftFromPayments();
 }
@@ -1867,7 +1872,8 @@ function syncClientLeftFromPayments(totalAll = null) {
 
 function syncSupplierPaidFromPayments() {
   const checkEl = document.getElementById('f-check');
-  const totalPaid = currentSupplierPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  const draftOrder = editingOrderId ? (orders.find(item => item.id === editingOrderId) || { id: editingOrderId }) : null;
+  const totalPaid = sumConfirmedOrderPayments(draftOrder, currentSupplierPayments, 'supplier');
   if (checkEl) checkEl.value = String(totalPaid || 0);
   syncSupplierLeftFromPayments();
 }
@@ -1876,7 +1882,8 @@ function syncSupplierLeftFromPayments() {
   const leftEl = document.getElementById('f-supplier-left');
   if (!leftEl) return;
   const purchase = Number(document.getElementById('f-purchase')?.value) || 0;
-  const paid = currentSupplierPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  const draftOrder = editingOrderId ? (orders.find(item => item.id === editingOrderId) || { id: editingOrderId }) : null;
+  const paid = sumConfirmedOrderPayments(draftOrder, currentSupplierPayments, 'supplier');
   leftEl.value = String(Math.max(0, purchase - paid));
 }
 
@@ -1952,7 +1959,6 @@ async function persistImmediateOrderPaymentsUpdate() {
   if (!editingOrderId) return;
   const existingOrder = orders.find(item => item.id === editingOrderId);
   if (!existingOrder) throw new Error('Заказ не найден');
-  const sumAmounts = payments => (payments || []).reduce((sum, payment) => sum + (Number(payment?.amount) || 0), 0);
 
   const data = getOrderDraftFromForm(existingOrder);
   data.clientPayments = currentClientPayments;
@@ -2007,8 +2013,8 @@ async function persistImmediateOrderPaymentsUpdate() {
   const saved = await sbPatchOrderFields(editingOrderId, {
     client_payments: data.clientPayments,
     supplier_payments: data.supplierPayments,
-    debt: sumAmounts(data.clientPayments),
-    check_sum: sumAmounts(data.supplierPayments),
+    debt: sumConfirmedOrderPayments({ ...existingOrder, ...data }, data.clientPayments, 'client'),
+    check_sum: sumConfirmedOrderPayments({ ...existingOrder, ...data }, data.supplierPayments, 'supplier'),
   });
   const idx = orders.findIndex(item => item.id === editingOrderId);
   if (idx !== -1 && saved) {
@@ -2683,8 +2689,8 @@ function fillOrderForm(o) {
   const toningStatusEl = document.getElementById('f-toning-status');
   if (toningStatusEl) toningStatusEl.checked = !!o.toningStatus;
   set('f-manager', o.manager || '');
-  set('f-check', o.check);
-  set('f-debt', o.debt);
+  set('f-check', getOrderSupplierPaidAmount(o));
+  set('f-debt', getOrderClientPaidAmount(o));
   set('f-debt-date', o.debtDate);
   set('f-total', o.total);
   set('f-supplier-status', o.supplierStatus);

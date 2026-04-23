@@ -14,12 +14,12 @@ let warehouseDateFilterFrom = '';
 let warehouseDateFilterTo = '';
 
 function getSupplierDebt(order) {
-  return Math.max(0, (Number(order.purchase) || 0) - (Number(order.check) || 0));
+  return Math.max(0, (Number(order.purchase) || 0) - getOrderSupplierPaidAmount(order));
 }
 
 function getWarehouseReturnAmount(order) {
   if (!order?.isCancelled) return 0;
-  return Math.max(0, (Number(order.purchase) || 0) || (Number(order.check) || 0));
+  return Math.max(0, (Number(order.purchase) || 0) || getOrderSupplierPaidAmount(order));
 }
 
 function isWarehouseRelevantOrder(order) {
@@ -408,7 +408,7 @@ function renderWarehouseOrderCard(o) {
         <span class="order-meta-item">${icon('user')} ${o.client || '—'}</span>
         ${o.warehouseCode ? `<span class="order-meta-item mono">${icon('hash')} ${o.warehouseCode}</span>` : ''}
         ${Number(o.purchase) > 0 ? `<span class="order-meta-item">${icon('package')} ${Number(o.purchase).toLocaleString('ru')} ₴</span>` : ''}
-        ${Number(o.check) > 0 ? `<span class="order-meta-item">Оплачено поставщику: ${Number(o.check).toLocaleString('ru')} ₴</span>` : ''}
+        ${getOrderSupplierPaidAmount(o) > 0 ? `<span class="order-meta-item">Оплачено поставщику: ${getOrderSupplierPaidAmount(o).toLocaleString('ru')} ₴</span>` : ''}
       </div>
     </div>
   `;

@@ -1338,6 +1338,41 @@ function isConfirmableCashEntry(entry) {
   return !isCashPaymentMethod(paymentMethod) && !isFopPaymentMethod(paymentMethod);
 }
 
+function isConfirmablePaymentMethod(method) {
+  const normalized = normalizePaymentMethod(method);
+  return !!normalized && !isCashPaymentMethod(normalized) && !isFopPaymentMethod(normalized);
+}
+
+function isOrderPaymentConfirmed(order, payment, paymentType = 'client') {
+  const method = normalizePaymentMethod(payment?.method || '');
+  if (!method) return false;
+  if (!isConfirmablePaymentMethod(method)) return true;
+  const sourceKey = buildPaymentSourceKey(order?.id || '', method, paymentType, payment);
+  return Array.isArray(window.allCashLog) && window.allCashLog.some(entry =>
+    String(entry?.fop_source_key || '') === sourceKey && entry?.fop_confirmed === true
+  );
+}
+
+function sumConfirmedOrderPayments(order, payments = [], paymentType = 'client') {
+  return (payments || []).reduce((sum, payment) => {
+    const amount = Number(payment?.amount) || 0;
+    if (amount <= 0) return sum;
+    return sum + (isOrderPaymentConfirmed(order, payment, paymentType) ? amount : 0);
+  }, 0);
+}
+
+function getOrderClientPaidAmount(order) {
+  const payments = Array.isArray(order?.clientPayments) ? order.clientPayments : [];
+  if (payments.length) return sumConfirmedOrderPayments(order, payments, 'client');
+  return Number(order?.debt) || 0;
+}
+
+function getOrderSupplierPaidAmount(order) {
+  const payments = Array.isArray(order?.supplierPayments) ? order.supplierPayments : [];
+  if (payments.length) return sumConfirmedOrderPayments(order, payments, 'supplier');
+  return Number(order?.check) || 0;
+}
+
 function getPaymentCashRoute(method, fallbackWorkerName = '') {
   const normalized = normalizePaymentMethod(method);
   if (isCashPaymentMethod(normalized)) {
