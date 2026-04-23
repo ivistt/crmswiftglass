@@ -449,7 +449,7 @@ function renderSalaryOrdersList(orderItems) {
             + '</div>').join('')
           + '</div>'
         : '';
-      return '<div style="padding:8px 0;border-bottom:1px solid var(--border);">'
+      return '<div style="padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer;" onclick="openSalaryEntryOrder(\'' + escapeJsString(item.id) + '\', event)">'
         + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;font-size:12px;color:var(--text2);">'
         + '<div style="min-width:0;">'
         + '<div style="font-weight:800;color:var(--text);">' + escapeHtml(item.id) + ' · ' + escapeHtml(item.client || '—') + ' · ' + escapeHtml(item.car || '—') + '</div>'
@@ -521,7 +521,10 @@ function buildWorkerSalaryHistory(workerName, entries) {
               const editedHtml = history.length
                 ? '<div style="font-size:11px;color:var(--text3);margin-top:2px;">Отредактировано владельцем</div>'
                 : '';
-              return '<div style="display:flex;justify-content:space-between;gap:12px;font-size:12px;color:var(--text2);">'
+              const linkedOrderId = typeof resolveSalaryEntryOrderId === 'function' ? resolveSalaryEntryOrderId(entry.order_id) : '';
+              return '<div style="display:flex;justify-content:space-between;gap:12px;font-size:12px;color:var(--text2);' + (linkedOrderId ? 'cursor:pointer;' : '') + '"'
+                + (linkedOrderId ? ' onclick="openSalaryEntryOrder(\'' + escapeJsString(entry.order_id) + '\', event)"' : '')
+                + '>'
                 + '<span>' + escapeHtml(label) + (entry.comment ? '<div style="font-size:11px;color:var(--text3);margin-top:2px;">' + escapeHtml(entry.comment) + '</div>' : '') + editedHtml + '</span>'
                 + '<span style="font-weight:800;color:' + (Number(entry.amount) >= 0 ? 'var(--accent)' : '#ef4444') + ';white-space:nowrap;">' + Number(entry.amount).toLocaleString('ru') + ' ₴</span>'
                 + '</div>';

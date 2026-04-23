@@ -91,6 +91,29 @@ function canCurrentUserOpenOrderModal(order) {
   return currentUserCanActAsSenior();
 }
 
+function resolveSalaryEntryOrderId(rawOrderId) {
+  const raw = String(rawOrderId || '').trim();
+  if (!raw) return '';
+  const direct = (orders || []).find(item => String(item?.id || '') === raw);
+  if (direct) return direct.id;
+  const prefixed = raw.split('·')[0].trim();
+  const matched = (orders || []).find(item => String(item?.id || '') === prefixed);
+  return matched ? matched.id : '';
+}
+
+function openSalaryEntryOrder(rawOrderId, event) {
+  event?.stopPropagation?.();
+  const orderId = resolveSalaryEntryOrderId(rawOrderId);
+  if (!orderId) return;
+  const order = (orders || []).find(item => String(item?.id || '') === orderId);
+  if (!order) return;
+  if (canCurrentUserOpenOrderModal(order)) {
+    openOrderModal(orderId);
+    return;
+  }
+  openOrderDetail(orderId);
+}
+
 function canCurrentUserManageOrderPayments(order) {
   if (!order && editingOrderId !== null) {
     order = getOrderDraftFromForm(editingOrderId ? orders.find(item => item.id === editingOrderId) : null);
@@ -105,6 +128,18 @@ function canCurrentUserEditOrderServices(order) {
   if (!order || !currentUserCanActAsSenior()) return false;
   if (order.responsible !== currentWorkerName) return false;
   return !String(order.serviceType || '').trim();
+}
+
+function canCurrentUserToggleSpecialServiceStatus(order, type) {
+  if (currentRole === 'owner' || currentRole === 'manager') return true;
+  if (!order) return false;
+  if (type === 'tatu') {
+    return currentWorkerName === 'Roma' && Number(order.tatu) > 0;
+  }
+  if (type === 'toning') {
+    return currentWorkerName === 'Lyosha' && Number(order.toning) > 0 && !order.toningExternal;
+  }
+  return false;
 }
 
 function canCurrentUserCompleteOrder(order) {
@@ -492,7 +527,7 @@ function renderOrderCard(o) {
 }
 
 function orderHasDebtTabFinancialMeaning(order) {
-  if (!isOrderFinanciallyActive(order)) return false;
+  if (!order || order.isCancelled) return false;
   if (order.inWork) return false;
   const hasDebt = ['Не оплачено', 'Частично'].includes(getEffectivePaymentStatus(order));
   if (!hasDebt) return false;
@@ -578,10 +613,10 @@ function renderOrderCardCallNotes(order) {
 
 function getSpecialServiceAction(order) {
   if (!order || !isOrderFinanciallyActive(order)) return null;
-  if (currentWorkerName === 'Roma' && !!order.tatuStatus && !order.tatuDone) {
+  if (currentWorkerName === 'Roma' && Number(order.tatu) > 0 && !order.tatuStatus) {
     return { type: 'tatu', label: 'Выполнить тату', title: 'Подтвердить выполнение тату' };
   }
-  if (currentWorkerName === 'Lyosha' && !!order.toningStatus && !order.toningDone && !order.toningExternal) {
+  if (currentWorkerName === 'Lyosha' && Number(order.toning) > 0 && !order.toningStatus && !order.toningExternal) {
     return { type: 'toning', label: 'Выполнить тонировку', title: 'Подтвердить выполнение тонировки' };
   }
   return null;
@@ -595,14 +630,18 @@ async function confirmSpecialServiceDone(orderId, type) {
   if (!confirm(`Отметить ${label} выполненной по заказу ${order.id}? После этого начислится ЗП.`)) return;
 
   try {
-    const patch = isTatu ? { tatu_done: true } : { toning_done: true };
+    const patch = isTatu
+      ? { tatu_status: true, tatu_done: true, tatu_done_by: currentWorkerName }
+      : { toning_status: true, toning_done: true, toning_done_by: currentWorkerName };
     const saved = await sbPatchOrderFields(order.id, patch);
     const idx = orders.findIndex(item => item.id === order.id);
     const updated = {
       ...order,
       ...saved,
+      tatuStatus: isTatu ? true : (saved?.tatuStatus ?? order.tatuStatus),
       tatuDone: isTatu ? true : (saved?.tatuDone ?? order.tatuDone),
       tatuDoneBy: isTatu ? currentWorkerName : (saved?.tatuDoneBy ?? order.tatuDoneBy),
+      toningStatus: !isTatu ? true : (saved?.toningStatus ?? order.toningStatus),
       toningDone: !isTatu ? true : (saved?.toningDone ?? order.toningDone),
       toningDoneBy: !isTatu ? currentWorkerName : (saved?.toningDoneBy ?? order.toningDoneBy),
     };
@@ -804,16 +843,16 @@ function _isCurrentWorkerOrder(order) {
 function _filterSpecialistOrdersByTab(list) {
   const today = todayStr();
   if (currentWorkerName === 'Roma' && currentWorkerTab === 'tatuActual') {
-    return list.filter(o => isOrderFinanciallyActive(o) && !!o.tatuStatus && !o.tatuDone);
+    return list.filter(o => o.inWork && !o.isCancelled && Number(o.tatu) > 0 && !o.tatuStatus);
   }
   if (currentWorkerName === 'Roma' && currentWorkerTab === 'tatuDone') {
-    return list.filter(o => !!o.tatuStatus && o.tatuDone);
+    return list.filter(o => o.inWork && !o.isCancelled && Number(o.tatu) > 0 && !!o.tatuStatus);
   }
   if (currentWorkerName === 'Lyosha' && currentWorkerTab === 'toningActual') {
-    return list.filter(o => isOrderFinanciallyActive(o) && !!o.toningStatus && !o.toningDone && !o.toningExternal);
+    return list.filter(o => o.inWork && !o.isCancelled && Number(o.toning) > 0 && !o.toningStatus && !o.toningExternal);
   }
   if (currentWorkerName === 'Lyosha' && currentWorkerTab === 'toningDone') {
-    return list.filter(o => !!o.toningStatus && o.toningDone);
+    return list.filter(o => o.inWork && !o.isCancelled && Number(o.toning) > 0 && !!o.toningStatus && !o.toningExternal);
   }
   if (currentWorkerName === 'Nastya' && currentWorkerTab === 'ownWarehouse') {
     return list.filter(o => o.ownWarehouse && !o.workerDone && !o.isCancelled);
@@ -2189,10 +2228,16 @@ function openOrderModal(id) {
 
   const tonExtEl = document.getElementById('f-toning-external');
   if (tonExtEl) tonExtEl.addEventListener('change', () => { recalcFullMargins(); recalcTotal(); });
-  ['f-tatu-status', 'f-toning-status'].forEach(id => {
+  [
+    { id: 'f-tatu-status', type: 'tatu' },
+    { id: 'f-toning-status', type: 'toning' },
+  ].forEach(({ id, type }) => {
     const el = document.getElementById(id);
     if (!el) return;
-    el.addEventListener('change', syncSpecialServiceStatusPreview);
+    el.addEventListener('change', () => {
+      syncSpecialServiceStatusPreview();
+      handleSpecialServiceStatusChange(type);
+    });
   });
 
   ['f-responsible','f-assistant','f-manager','f-dropshipper','f-order-status'].forEach(id => {
@@ -2545,6 +2590,8 @@ function updateOrderModalAccess(order = null) {
   const isPrivileged = currentRole === 'owner' || currentRole === 'manager';
   const canManagePayments = canCurrentUserManageOrderPayments(draftOrder);
   const canEditServices = canCurrentUserEditOrderServices(existingOrder);
+  const canToggleTatuStatus = canCurrentUserToggleSpecialServiceStatus(draftOrder, 'tatu');
+  const canToggleToningStatus = canCurrentUserToggleSpecialServiceStatus(draftOrder, 'toning');
   const canComplete = canCurrentUserCompleteOrder(existingOrder);
   const canSave = isPrivileged || (canEditServices && hasSeniorServiceChanges(existingOrder));
   const headerActions = document.getElementById('order-modal-owner-actions');
@@ -2568,14 +2615,29 @@ function updateOrderModalAccess(order = null) {
       ? (document.querySelector('[data-order-modal-tab].active')?.dataset.orderModalTab === 'work' ? '' : 'none')
       : 'none';
   }
+  const specialStatusSection = document.getElementById('order-special-status-section');
+  if (specialStatusSection) {
+    specialStatusSection.style.display = (canToggleTatuStatus || canToggleToningStatus)
+      ? (document.querySelector('[data-order-modal-tab].active')?.dataset.orderModalTab === 'work' ? '' : 'none')
+      : 'none';
+  }
+  const tatuStatusWrap = document.getElementById('f-tatu-status-wrap');
+  if (tatuStatusWrap) tatuStatusWrap.style.display = canToggleTatuStatus ? '' : 'none';
+  const toningStatusWrap = document.getElementById('f-toning-status-wrap');
+  if (toningStatusWrap) toningStatusWrap.style.display = canToggleToningStatus ? '' : 'none';
   ['f-mount','f-molding','f-extra-work','f-tatu','f-toning','f-total','f-delivery','f-dropshipper','f-purchase','f-income','f-debt-date'].forEach(id => {
     const el = document.getElementById(id);
     const allow = isPrivileged || (canManagePayments && id === 'f-debt-date');
     setElementDisabledState(el, !allow);
   });
-  ['f-tatu-status', 'f-toning-status'].forEach(id => {
-    setElementDisabledState(document.getElementById(id), !isPrivileged);
-  });
+  setElementDisabledState(
+    document.getElementById('f-tatu-status'),
+    !canToggleTatuStatus
+  );
+  setElementDisabledState(
+    document.getElementById('f-toning-status'),
+    !canToggleToningStatus
+  );
 
   ['f-new-payment-amount','f-new-payment-date','f-payment-method','f-new-supplier-payment-amount','f-new-supplier-payment-date','f-new-supplier-payment-method'].forEach(id => {
     setElementDisabledState(document.getElementById(id), !canManagePayments);
@@ -2646,6 +2708,75 @@ function syncConfiguration() {
 
 function syncSpecialServiceStatusPreview() {
   renderOrderSummary(editingOrderId ? orders.find(item => item.id === editingOrderId) : null);
+}
+
+function shouldAutoPersistSpecialServiceStatus(type, order) {
+  if (currentRole === 'owner' || currentRole === 'manager') return false;
+  if (!order) return false;
+  if (type === 'tatu') {
+    return currentWorkerName === 'Roma' && canCurrentUserToggleSpecialServiceStatus(order, 'tatu');
+  }
+  if (type === 'toning') {
+    return currentWorkerName === 'Lyosha' && canCurrentUserToggleSpecialServiceStatus(order, 'toning');
+  }
+  return false;
+}
+
+async function handleSpecialServiceStatusChange(type) {
+  if (!editingOrderId) return;
+  const existingOrder = orders.find(item => item.id === editingOrderId);
+  if (!existingOrder) return;
+  if (!shouldAutoPersistSpecialServiceStatus(type, getOrderDraftFromForm(existingOrder))) return;
+
+  const isTatu = type === 'tatu';
+  const input = document.getElementById(isTatu ? 'f-tatu-status' : 'f-toning-status');
+  if (!input) return;
+  const previousValue = isTatu ? !!existingOrder.tatuStatus : !!existingOrder.toningStatus;
+  const nextValue = !!input.checked;
+
+  try {
+    input.disabled = true;
+    const patch = isTatu
+      ? {
+          tatu_status: nextValue,
+          tatu_done: nextValue,
+          tatu_done_by: nextValue ? currentWorkerName : null,
+        }
+      : {
+          toning_status: nextValue,
+          toning_done: nextValue,
+          toning_done_by: nextValue ? currentWorkerName : null,
+        };
+    const saved = await sbPatchOrderFields(editingOrderId, patch);
+    const updatedOrder = {
+      ...existingOrder,
+      ...saved,
+      tatuStatus: isTatu ? nextValue : existingOrder.tatuStatus,
+      tatuDone: isTatu ? nextValue : existingOrder.tatuDone,
+      tatuDoneBy: isTatu ? (nextValue ? currentWorkerName : '') : existingOrder.tatuDoneBy,
+      toningStatus: !isTatu ? nextValue : existingOrder.toningStatus,
+      toningDone: !isTatu ? nextValue : existingOrder.toningDone,
+      toningDoneBy: !isTatu ? (nextValue ? currentWorkerName : '') : existingOrder.toningDoneBy,
+    };
+    const idx = orders.findIndex(item => item.id === editingOrderId);
+    if (idx !== -1) orders[idx] = updatedOrder;
+    await _upsertOrderSalaries(updatedOrder);
+    updateOrderModalAccess(updatedOrder);
+    renderOrderSummary(updatedOrder);
+    if (currentMonthFilter) renderOrdersForMonth(currentMonthFilter);
+    else renderOrders();
+    if (document.getElementById('screen-profile')?.classList.contains('active')) {
+      await loadWorkerSalaries();
+      renderProfile();
+    }
+    showToast((isTatu ? 'Статус тату' : 'Статус тонировки') + ' сохранён ✓');
+  } catch (e) {
+    input.checked = previousValue;
+    syncSpecialServiceStatusPreview();
+    showToast('Ошибка сохранения: ' + e.message, 'error');
+  } finally {
+    updateOrderModalAccess(orders.find(item => item.id === editingOrderId) || existingOrder);
+  }
 }
 
 function applyOrderFormDateTimeDefaults() {
@@ -3603,7 +3734,7 @@ async function _upsertOrderSalaries(order) {
 function getSpecialServiceSalaryEntries(order) {
   const entries = [];
   const tatuAmount = _calcTatuBonus('Roma', order);
-  if (tatuAmount > 0) {
+  if ((Number(order?.tatu) || 0) > 0 || order?.tatuDone || order?.tatuStatus) {
     entries.push({
       workerName: 'Roma',
       date: order.date,
@@ -3614,7 +3745,7 @@ function getSpecialServiceSalaryEntries(order) {
   }
 
   const toningAmount = _calcToningBonus('Lyosha', order);
-  if (toningAmount > 0) {
+  if ((Number(order?.toning) || 0) > 0 || order?.toningDone || order?.toningStatus) {
     entries.push({
       workerName: 'Lyosha',
       date: order.date,

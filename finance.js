@@ -545,7 +545,8 @@ function renderOwnerSalaryEntryRow(entry, { showWorker = false, showEdit = false
   const canEdit = showEdit && !isSalaryWithdrawalEntry(entry) && !isSalaryEntryClosedByWithdrawal(entry);
   const canDelete = showEdit && currentRole === 'owner';
   const orderMeta = getSalaryEntryOrderMeta(entry);
-  return `<div style="padding:10px 0;border-bottom:1px solid var(--border);">
+  const linkedOrderId = typeof resolveSalaryEntryOrderId === 'function' ? resolveSalaryEntryOrderId(entry.order_id) : '';
+  return `<div style="padding:10px 0;border-bottom:1px solid var(--border);${linkedOrderId ? 'cursor:pointer;' : ''}" ${linkedOrderId ? `onclick="openSalaryEntryOrder('${financeEscapeAttr(entry.order_id)}', event)"` : ''}>
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
       <div style="min-width:0;">
         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
@@ -559,10 +560,10 @@ function renderOwnerSalaryEntryRow(entry, { showWorker = false, showEdit = false
         ${entry.comment ? `<div style="font-size:12px;color:var(--text2);margin-top:5px;">${escapeHtml(entry.comment)}</div>` : ''}
         ${history.length ? `<div style="font-size:11px;color:var(--text3);margin-top:4px;">Отредактировано владельцем: ${history.length}</div>` : ''}
       </div>
-      <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
-        <span style="font-size:13px;font-weight:900;color:${amount >= 0 ? 'var(--accent)' : '#ef4444'};white-space:nowrap;">${amount.toLocaleString('ru')} ₴</span>
-        ${canEdit ? `<button class="icon-btn" title="Редактировать" onclick="editPendingSalaryEntry('${entry.id}')" style="width:28px;height:28px;border-radius:7px;"><i data-lucide="pencil" style="width:12px;height:12px;"></i></button>` : ''}
-        ${canDelete ? `<button class="icon-btn icon-action-danger" title="Удалить" onclick="deleteSalaryEntry('${entry.id}')" style="width:28px;height:28px;border-radius:7px;"><i data-lucide="trash-2" style="width:12px;height:12px;"></i></button>` : ''}
+          <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+            <span style="font-size:13px;font-weight:900;color:${amount >= 0 ? 'var(--accent)' : '#ef4444'};white-space:nowrap;">${amount.toLocaleString('ru')} ₴</span>
+        ${canEdit ? `<button class="icon-btn" title="Редактировать" onclick="event.stopPropagation(); editPendingSalaryEntry('${entry.id}')" style="width:28px;height:28px;border-radius:7px;"><i data-lucide="pencil" style="width:12px;height:12px;"></i></button>` : ''}
+        ${canDelete ? `<button class="icon-btn icon-action-danger" title="Удалить" onclick="event.stopPropagation(); deleteSalaryEntry('${entry.id}')" style="width:28px;height:28px;border-radius:7px;"><i data-lucide="trash-2" style="width:12px;height:12px;"></i></button>` : ''}
       </div>
     </div>
   </div>`;
@@ -837,7 +838,8 @@ function renderOwnerPendingSalaryPanel() {
       const latestEditHtml = latestEdit
         ? `<div style="font-size:11px;color:var(--text3);margin-top:4px;">Отредактировано владельцем: ${Number(latestEdit.amount_before || 0).toLocaleString('ru')} → ${Number(latestEdit.amount_after || 0).toLocaleString('ru')} ₴</div>`
         : '';
-      return `<div style="padding:10px 0;border-bottom:1px solid var(--border);">
+      const linkedOrderId = typeof resolveSalaryEntryOrderId === 'function' ? resolveSalaryEntryOrderId(entry.order_id) : '';
+      return `<div style="padding:10px 0;border-bottom:1px solid var(--border);${linkedOrderId ? 'cursor:pointer;' : ''}" ${linkedOrderId ? `onclick="openSalaryEntryOrder('${financeEscapeAttr(entry.order_id)}', event)"` : ''}>
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
           <div style="min-width:0;">
             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
@@ -853,10 +855,10 @@ function renderOwnerPendingSalaryPanel() {
           </div>
           <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
             <span style="font-size:13px;font-weight:900;color:${amount >= 0 ? 'var(--accent)' : '#ef4444'};white-space:nowrap;">${amount.toLocaleString('ru')} ₴</span>
-            <button class="icon-btn" title="Редактировать начисление" onclick="editPendingSalaryEntry('${entry.id}')" style="width:28px;height:28px;border-radius:7px;">
+            <button class="icon-btn" title="Редактировать начисление" onclick="event.stopPropagation(); editPendingSalaryEntry('${entry.id}')" style="width:28px;height:28px;border-radius:7px;">
               <i data-lucide="pencil" style="width:12px;height:12px;"></i>
             </button>
-            <button class="icon-btn icon-action-danger" title="Удалить начисление" onclick="deleteSalaryEntry('${entry.id}')" style="width:28px;height:28px;border-radius:7px;">
+            <button class="icon-btn icon-action-danger" title="Удалить начисление" onclick="event.stopPropagation(); deleteSalaryEntry('${entry.id}')" style="width:28px;height:28px;border-radius:7px;">
               <i data-lucide="trash-2" style="width:12px;height:12px;"></i>
             </button>
           </div>
@@ -892,7 +894,8 @@ function renderOwnerManualSalaryPanel() {
   const entriesHtml = entries.length
     ? entries.map(entry => {
       const amount = Number(entry.amount) || 0;
-      return `<div style="padding:10px 0;border-bottom:1px solid var(--border);">
+      const linkedOrderId = typeof resolveSalaryEntryOrderId === 'function' ? resolveSalaryEntryOrderId(entry.order_id) : '';
+      return `<div style="padding:10px 0;border-bottom:1px solid var(--border);${linkedOrderId ? 'cursor:pointer;' : ''}" ${linkedOrderId ? `onclick="openSalaryEntryOrder('${financeEscapeAttr(entry.order_id)}', event)"` : ''}>
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
           <div style="min-width:0;">
             <div style="font-size:13px;font-weight:800;color:var(--text);">${escapeHtml(getWorkerDisplayName(entry.worker_name))}</div>
@@ -901,10 +904,10 @@ function renderOwnerManualSalaryPanel() {
           </div>
           <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
             <span style="font-size:13px;font-weight:900;color:${amount >= 0 ? 'var(--accent)' : '#ef4444'};white-space:nowrap;">${amount.toLocaleString('ru')} ₴</span>
-            <button class="icon-btn" title="Редактировать" onclick="startEditManualSalary('${entry.id}')" style="width:28px;height:28px;border-radius:7px;">
+            <button class="icon-btn" title="Редактировать" onclick="event.stopPropagation(); startEditManualSalary('${entry.id}')" style="width:28px;height:28px;border-radius:7px;">
               <i data-lucide="pencil" style="width:12px;height:12px;"></i>
             </button>
-            <button class="icon-btn icon-action-danger" title="Удалить" onclick="deleteSalaryEntry('${entry.id}')" style="width:28px;height:28px;border-radius:7px;">
+            <button class="icon-btn icon-action-danger" title="Удалить" onclick="event.stopPropagation(); deleteSalaryEntry('${entry.id}')" style="width:28px;height:28px;border-radius:7px;">
               <i data-lucide="trash-2" style="width:12px;height:12px;"></i>
             </button>
           </div>

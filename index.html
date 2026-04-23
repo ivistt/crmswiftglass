@@ -856,24 +856,37 @@
           <div class="form-group">
             <label class="form-label">*️⃣ Тату ⚫</label>
             <input class="form-input" type="number" id="f-tatu" placeholder="0">
-            <label class="checkbox order-flag-checkbox" style="margin-top:8px;">
-              <input type="checkbox" id="f-tatu-status">
-              <span>Тату статус</span>
-            </label>
           </div>
           <div class="form-group">
             <label class="form-label">Тонировка</label>
             <input class="form-input" type="number" id="f-toning" placeholder="0">
-            <label class="checkbox order-flag-checkbox" style="margin-top:8px;">
-              <input type="checkbox" id="f-toning-status">
-              <span>Тонировка статус</span>
-            </label>
           </div>
 
           <!-- Сумма услуг (видимый инпут) -->
           <div class="form-group">
             <label class="form-label">🔧 Сумма услуг</label>
             <input class="form-input" type="number" id="f-total" placeholder="0" oninput="recalcTotal('manualTotal')">
+          </div>
+        </div>
+      </div>
+
+      <div class="form-section" id="order-special-status-section" data-order-modal-panel="work" style="display:none;">
+        <div class="form-section-title form-section-title--teal">
+          <i data-lucide="badge-check" style="width:13px;height:13px;"></i>
+          Статусы услуг
+        </div>
+        <div class="form-grid">
+          <div class="form-group" id="f-tatu-status-wrap" style="display:none;">
+            <label class="checkbox order-flag-checkbox">
+              <input type="checkbox" id="f-tatu-status">
+              <span>Тату статус</span>
+            </label>
+          </div>
+          <div class="form-group" id="f-toning-status-wrap" style="display:none;">
+            <label class="checkbox order-flag-checkbox">
+              <input type="checkbox" id="f-toning-status">
+              <span>Тонировка статус</span>
+            </label>
           </div>
         </div>
       </div>
