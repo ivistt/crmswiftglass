@@ -231,7 +231,7 @@ function renderCashScreen() {
   const fopCashLog = (workerCashLog || []).filter(isFopCashEntry);
   const olegCardCashLog = (workerCashLog || []).filter(isOlegCardCashEntry);
   const confirmedUnifiedCashLog = nonFopCashLog.filter(entry => {
-    if (isCurrencyCashEntry(entry)) return false;
+    if (isCurrencyCashEntry(entry) && !isCurrencyCashTransferEntry(entry)) return false;
     if (isOlegCardCashEntry(entry)) return entry.fop_confirmed === true;
     return true;
   });
@@ -651,7 +651,7 @@ function renderManagerCashSections() {
   const cardCashLog = (workerCashLog || []).filter(isManagerCardCashEntry);
   const pendingCardCashLog = cardCashLog.filter(entry => entry.fop_confirmed !== true);
   const confirmedUnifiedCashLog = nonFopCashLog.filter(entry => {
-    if (isCurrencyCashEntry(entry)) return false;
+    if (isCurrencyCashEntry(entry) && !isCurrencyCashTransferEntry(entry)) return false;
     if (isManagerCardCashEntry(entry)) return entry.fop_confirmed === true;
     return true;
   });

@@ -405,6 +405,11 @@ function isCurrencyCashEntry(entry) {
   return !!parseCurrencyCashEntry(entry);
 }
 
+function isCurrencyCashTransferEntry(entry) {
+  const parsed = parseCurrencyCashEntry(entry);
+  return !!parsed && Math.abs(Number(parsed.uahAmount) || 0) > 0;
+}
+
 function getCashEntryDisplayComment(entry) {
   const parsed = parseCurrencyCashEntry(entry);
   if (!parsed) return String(entry?.comment || '—');
