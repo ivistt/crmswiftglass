@@ -92,120 +92,66 @@ function getSalaryAnomalies(entries = allSalaries) {
 }
 
 function getSalaryAnalytics(entries = allSalaries) {
-  const reports = getManualSalaryReports(entries);
+  const salaryEntries = getOwnerSalaryEntries(entries);
   const byWorker = {};
+  const linkedOrderIdsByWorker = {};
 
-  for (const entry of reports) {
+  salaryEntries.forEach(entry => {
     const workerName = entry.worker_name;
-    const manualAmount = Number(entry.amount) || 0;
-    const autoAmount = calcDaySalary(workerName, entry.date);
-    const summary = getWorkerCompletedOrdersSummary(workerName, entry.date);
-    const deviationPct = getSalaryDeviationPct(manualAmount, autoAmount);
-
+    if (!workerName) return;
     if (!byWorker[workerName]) {
       byWorker[workerName] = {
         workerName,
-        manualTotal: 0,
-        autoTotal: 0,
-        revenueTotal: 0,
-        ordersCount: 0,
-        reportDays: 0,
-        overclaimTotal: 0,
-        anomalyDays: 0,
-        maxDeviationPct: 0,
+        salaryTotal: 0,
       };
     }
+    byWorker[workerName].salaryTotal += Number(entry.amount) || 0;
 
-    byWorker[workerName].manualTotal += manualAmount;
-    byWorker[workerName].autoTotal += autoAmount;
-    byWorker[workerName].revenueTotal += summary.totalAmount;
-    byWorker[workerName].ordersCount += summary.count;
-    byWorker[workerName].reportDays += 1;
-    byWorker[workerName].overclaimTotal += Math.max(0, manualAmount - autoAmount);
-    byWorker[workerName].anomalyDays += deviationPct > 0.10 ? 1 : 0;
-    byWorker[workerName].maxDeviationPct = Math.max(byWorker[workerName].maxDeviationPct, deviationPct);
-  }
+    const resolvedOrderId = typeof resolveSalaryEntryOrderId === 'function'
+      ? resolveSalaryEntryOrderId(entry.order_id)
+      : String(entry.order_id || '').trim();
+    if (!resolvedOrderId) return;
+    if (!linkedOrderIdsByWorker[workerName]) linkedOrderIdsByWorker[workerName] = new Set();
+    linkedOrderIdsByWorker[workerName].add(resolvedOrderId);
+  });
 
-  const workersAnalytics = Object.values(byWorker);
-  const sortDesc = (key) => [...workersAnalytics].sort((a, b) => (b[key] || 0) - (a[key] || 0)).slice(0, 5);
+  const workersAnalytics = Object.values(byWorker).map(item => ({
+    ...item,
+    ordersCount: linkedOrderIdsByWorker[item.workerName]?.size || 0,
+  }));
+
+  const topOrders = [...workersAnalytics]
+    .sort((a, b) => (b.ordersCount || 0) - (a.ordersCount || 0))
+    .slice(0, 5);
+
+  const topSalary = [...workersAnalytics]
+    .sort((a, b) => (b.salaryTotal || 0) - (a.salaryTotal || 0))
+    .slice(0, 5);
+
+  const biggestOrders = (orders || [])
+    .filter(order => !order?.isCancelled)
+    .map(order => ({
+      id: order.id,
+      client: order.client || '',
+      car: order.car || '',
+      date: order.date || '',
+      totalAmount: typeof getOrderClientTotalAmount === 'function'
+        ? getOrderClientTotalAmount(order)
+        : ((Number(order?.total) || 0) + (Number(order?.income) || 0) + (Number(order?.delivery) || 0)),
+    }))
+    .sort((a, b) => (b.totalAmount || 0) - (a.totalAmount || 0))
+    .slice(0, 5);
 
   return {
-    workers: workersAnalytics,
-    topOrders: sortDesc('ordersCount'),
-    topManualSalary: sortDesc('manualTotal'),
-    topAutoSalary: sortDesc('autoTotal'),
-    topRevenue: sortDesc('revenueTotal'),
-    topOverclaim: sortDesc('overclaimTotal'),
-    topAvgPerOrder: [...workersAnalytics]
-      .map(item => ({ ...item, avgPerOrder: item.ordersCount ? item.manualTotal / item.ordersCount : 0 }))
-      .sort((a, b) => (b.avgPerOrder || 0) - (a.avgPerOrder || 0))
-      .slice(0, 5),
+    topOrders,
+    topSalary,
+    biggestOrders,
   };
-}
-
-function getSalaryPeriodAnalytics(entries = allSalaries, mode = 'year') {
-  const reports = getManualSalaryReports(entries);
-  const map = {};
-
-  for (const entry of reports) {
-    const key = mode === 'year'
-      ? entry.date.slice(0, 4)
-      : entry.date.slice(0, 7);
-    if (!map[key]) {
-      map[key] = {
-        key,
-        manualTotal: 0,
-        autoTotal: 0,
-        overclaimTotal: 0,
-        anomaliesCount: 0,
-        reportsCount: 0,
-      };
-    }
-    const manualAmount = Number(entry.amount) || 0;
-    const autoAmount = calcDaySalary(entry.worker_name, entry.date);
-    const deviationPct = getSalaryDeviationPct(manualAmount, autoAmount);
-
-    map[key].manualTotal += manualAmount;
-    map[key].autoTotal += autoAmount;
-    map[key].overclaimTotal += Math.max(0, manualAmount - autoAmount);
-    map[key].anomaliesCount += deviationPct > 0.10 ? 1 : 0;
-    map[key].reportsCount += 1;
-  }
-
-  return Object.values(map).sort((a, b) => b.key.localeCompare(a.key));
 }
 
 function renderSalaryAnalyticsSection(entries = allSalaries) {
   const analytics = getSalaryAnalytics(entries);
-  const anomalies = getSalaryAnomalies(entries);
-  const byYear = getSalaryPeriodAnalytics(entries, 'year');
-  const byMonth = getSalaryPeriodAnalytics(entries, 'month');
-  const totalManual = analytics.workers.reduce((sum, item) => sum + item.manualTotal, 0);
-  const totalAuto = analytics.workers.reduce((sum, item) => sum + item.autoTotal, 0);
-  const totalOverclaim = analytics.workers.reduce((sum, item) => sum + item.overclaimTotal, 0);
-
-  const summaryCards = `
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px;">
-      <div style="padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface2);">
-        <div style="font-size:11px;color:var(--text3);margin-bottom:4px;">Заявлено ЗП</div>
-        <div style="font-size:20px;font-weight:800;color:var(--yellow);">${totalManual.toLocaleString('ru')} ₴</div>
-      </div>
-      <div style="padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface2);">
-        <div style="font-size:11px;color:var(--text3);margin-bottom:4px;">Ориентир по формулам</div>
-        <div style="font-size:20px;font-weight:800;color:var(--accent);">${totalAuto.toLocaleString('ru')} ₴</div>
-      </div>
-      <div style="padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface2);">
-        <div style="font-size:11px;color:var(--text3);margin-bottom:4px;">Потенциальная переплата</div>
-        <div style="font-size:20px;font-weight:800;color:${totalOverclaim > 0 ? '#ef4444' : 'var(--accent)'};">${totalOverclaim.toLocaleString('ru')} ₴</div>
-      </div>
-      <div style="padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface2);">
-        <div style="font-size:11px;color:var(--text3);margin-bottom:4px;">Аномалии</div>
-        <div style="font-size:20px;font-weight:800;color:${anomalies.length ? '#ef4444' : 'var(--accent)'};">${anomalies.length}</div>
-      </div>
-    </div>
-  `;
-
-  const renderRanking = (title, items, valueFn, subtitleFn = null, color = 'var(--text)') => `
+  const renderWorkerRanking = (title, items, valueFn, subtitleFn = null, color = 'var(--text)') => `
     <div style="padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface2);">
       <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:10px;letter-spacing:0.04em;">${title}</div>
       ${items.length ? items.map(item => `
@@ -222,52 +168,32 @@ function renderSalaryAnalyticsSection(entries = allSalaries) {
       `).join('') : '<div style="font-size:13px;color:var(--text3);">Нет данных</div>'}
     </div>
   `;
-
-  const renderPeriodCards = (title, items, formatter, mode = '') => `
-    <div style="margin-top:12px;">
+  const renderOrderRanking = (title, items) => `
+    <div style="padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface2);">
       <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:10px;letter-spacing:0.04em;">${title}</div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;">
-        ${items.length ? items.map(item => `
-          <div
-            style="padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface2);${mode === 'month' ? 'cursor:pointer;' : ''}"
-            ${mode === 'month' ? `onclick="salaryNavPush({periodMonth:'${financeEscapeAttr(item.key)}'})"` : ''}
-          >
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;">
-              <div style="font-size:14px;font-weight:800;color:var(--text);">${formatter(item.key)}</div>
-              <div style="font-size:12px;font-weight:700;color:${item.anomaliesCount ? '#ef4444' : 'var(--text3)'};">${item.anomaliesCount ? `Аномалий: ${item.anomaliesCount}` : 'Без аномалий'}</div>
-            </div>
-            <div style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--text3);">
-              <div>Заявлено: <span style="font-weight:700;color:var(--yellow);">${item.manualTotal.toLocaleString('ru')} ₴</span></div>
-              <div>Ориентир: <span style="font-weight:700;color:var(--accent);">${item.autoTotal.toLocaleString('ru')} ₴</span></div>
-              <div>Переплата: <span style="font-weight:700;color:${item.overclaimTotal > 0 ? '#ef4444' : 'var(--text3)'};">${item.overclaimTotal.toLocaleString('ru')} ₴</span></div>
-              <div>Дней с ЗП: <span style="font-weight:700;color:var(--text2);">${item.reportsCount}</span></div>
+      ${items.length ? items.map(item => `
+        <div class="sal-nav-row" onclick="openSalaryEntryOrder('${financeEscapeAttr(item.id)}', event)" style="padding:10px 0;">
+          <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+            <div class="worker-avatar" style="width:34px;height:34px;font-size:11px;border-radius:10px;">${escapeHtml(String(item.id || '—').replace('SG-', ''))}</div>
+            <div style="min-width:0;">
+              <div style="font-size:14px;font-weight:700;">${escapeHtml(item.id || '—')}</div>
+              <div style="font-size:12px;color:var(--text3);margin-top:2px;">${escapeHtml(item.client || item.car || '—')}${item.date ? ' · ' + escapeHtml(formatDate(item.date)) : ''}</div>
             </div>
           </div>
-        `).join('') : '<div style="font-size:13px;color:var(--text3);">Нет данных</div>'}
-      </div>
+          <div style="font-size:14px;font-weight:800;color:var(--accent);margin-left:12px;">${(Number(item.totalAmount) || 0).toLocaleString('ru')} ₴</div>
+        </div>
+      `).join('') : '<div style="font-size:13px;color:var(--text3);">Нет данных</div>'}
     </div>
   `;
-
-  const formatMonthKey = (key) => {
-    const [year, month] = key.split('-');
-    const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
-    return `${monthNames[Number(month) - 1] || key} ${year}`;
-  };
 
   return `
     <div style="margin-bottom:16px;">
       <div style="font-size:13px;font-weight:700;color:var(--text3);margin-bottom:8px;letter-spacing:0.04em;">АНАЛИТИКА</div>
-      ${summaryCards}
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;">
-        ${renderRanking('Больше всего заказов', analytics.topOrders, item => item.ordersCount, item => `Заявлено: ${item.manualTotal.toLocaleString('ru')} ₴`, 'var(--accent)')}
-        ${renderRanking('Больше всего заявлено ЗП', analytics.topManualSalary, item => item.manualTotal.toLocaleString('ru') + ' ₴', item => `Заказов: ${item.ordersCount}`, 'var(--yellow)')}
-        ${renderRanking('Больше всего по формулам', analytics.topAutoSalary, item => item.autoTotal.toLocaleString('ru') + ' ₴', item => `Заявлено: ${item.manualTotal.toLocaleString('ru')} ₴`, 'var(--accent)')}
-        ${renderRanking('Самые крупные суммы заказов', analytics.topRevenue, item => item.revenueTotal.toLocaleString('ru') + ' ₴', item => `Заказов: ${item.ordersCount}`, 'var(--text)')}
-        ${renderRanking('Риск переплаты', analytics.topOverclaim, item => item.overclaimTotal.toLocaleString('ru') + ' ₴', item => `Макс. отклонение: ${Math.round(item.maxDeviationPct * 100)}%`, '#ef4444')}
-        ${renderRanking('ЗП за заказ', analytics.topAvgPerOrder, item => Math.round(item.avgPerOrder).toLocaleString('ru') + ' ₴', item => `Заказов: ${item.ordersCount}`, 'var(--yellow)')}
+        ${renderWorkerRanking('Больше всего заказов', analytics.topOrders, item => item.ordersCount, item => `ЗП: ${(Number(item.salaryTotal) || 0).toLocaleString('ru')} ₴`, 'var(--accent)')}
+        ${renderWorkerRanking('Больше всего ЗП', analytics.topSalary, item => (Number(item.salaryTotal) || 0).toLocaleString('ru') + ' ₴', item => `Заказов: ${item.ordersCount}`, 'var(--yellow)')}
+        ${renderOrderRanking('Самый большой заказ', analytics.biggestOrders)}
       </div>
-      ${renderPeriodCards('По годам', byYear, key => key)}
-      ${renderPeriodCards('По месяцам', byMonth, formatMonthKey, 'month')}
     </div>
   `;
 }
@@ -728,64 +654,20 @@ function renderOwnerSalaryScreen() {
   const container = document.getElementById('owner-salary-content');
   if (!container) return;
 
-  const manualReports = getManualSalaryReports();
   const salaryEntries = getOwnerSalaryEntries();
-  const anomalies = getSalaryAnomalies(manualReports);
   const salaryOverviewHtml = renderOwnerSalaryOverview(salaryEntries);
   const selectedWorkerHistoryHtml = ownerSalarySelectedWorker
     ? renderOwnerEmployeeSalaryHistory(ownerSalarySelectedWorker, salaryEntries)
     : '';
   const pendingSalaryHtml = renderOwnerPendingSalaryPanel();
   const manualSalaryHtml = renderOwnerManualSalaryPanel();
-  const analyticsHtml = renderSalaryAnalyticsSection(manualReports);
-  const anomaliesHtml = `
-    <div class="sal-nav-row" style="
-      margin-bottom:10px;
-      padding:16px 18px;
-      border:1px solid ${anomalies.length ? 'rgba(239,68,68,0.24)' : 'var(--border)'};
-      background:${anomalies.length ? 'linear-gradient(180deg, rgba(239,68,68,0.10), rgba(239,68,68,0.04))' : 'var(--surface2)'};
-      box-shadow:${anomalies.length ? 'inset 0 1px 0 rgba(255,255,255,0.03)' : 'none'};
-    ">
-      <div style="display:flex;align-items:center;gap:12px;">
-        <div class="worker-avatar" style="
-          width:40px;
-          height:40px;
-          font-size:14px;
-          border-radius:12px;
-          background:${anomalies.length ? 'rgba(239,68,68,0.18)' : 'var(--surface3)'};
-          color:${anomalies.length ? '#ff5f5f' : 'var(--text3)'};
-          border:${anomalies.length ? '1px solid rgba(239,68,68,0.22)' : '1px solid var(--border)'};
-        ">!</div>
-        <div>
-          <div style="font-weight:700;font-size:15px;">Аномалии</div>
-          <div style="font-size:12px;color:${anomalies.length ? 'rgba(255,255,255,0.72)' : 'var(--text3)'};">${anomalies.length ? `${anomalies.length} несостыковок` : 'Несостыковок нет'}</div>
-        </div>
-      </div>
-      <div style="display:flex;align-items:center;gap:10px;">
-        <span style="
-          min-width:34px;
-          height:34px;
-          display:inline-flex;
-          align-items:center;
-          justify-content:center;
-          padding:0 10px;
-          border-radius:999px;
-          background:${anomalies.length ? 'rgba(239,68,68,0.16)' : 'var(--surface3)'};
-          color:${anomalies.length ? '#ff5f5f' : 'var(--accent)'};
-          font-weight:800;
-          font-size:15px;
-        ">${anomalies.length}</span>
-        <i data-lucide="chevron-right" style="width:16px;height:16px;color:${anomalies.length ? 'rgba(255,255,255,0.55)' : 'var(--text3)'};"></i>
-      </div>
-    </div>
-  `;
+  const analyticsHtml = renderSalaryAnalyticsSection(salaryEntries);
 
   container.innerHTML = salaryOverviewHtml
     + selectedWorkerHistoryHtml
     + pendingSalaryHtml
     + manualSalaryHtml
     + analyticsHtml
-    + anomaliesHtml
     + '<button class="subtle-reload-btn" style="margin-top:12px;" onclick="clearCacheAndReload()">Очистить кеш и перезагрузить</button>';
   initIcons();
 }
@@ -977,61 +859,18 @@ function renderSalaryScreen() {
 
   if (!state) {
     title.textContent = 'Зарплаты сотрудников';
-    const anomalies = getSalaryAnomalies(manualReports);
     const salaryOverviewHtml = renderOwnerSalaryOverview(salaryEntries);
     const selectedWorkerHistoryHtml = ownerSalarySelectedWorker
       ? renderOwnerEmployeeSalaryHistory(ownerSalarySelectedWorker, salaryEntries)
       : '';
     const manualSalaryHtml = renderOwnerManualSalaryPanel();
     const pendingSalaryHtml = renderOwnerPendingSalaryPanel();
-    const anomaliesHtml = `
-      <div class="sal-nav-row" onclick="salaryNavPush({anomalies:true})" style="
-        margin-bottom:10px;
-        padding:16px 18px;
-        border:1px solid ${anomalies.length ? 'rgba(239,68,68,0.24)' : 'var(--border)'};
-        background:${anomalies.length ? 'linear-gradient(180deg, rgba(239,68,68,0.10), rgba(239,68,68,0.04))' : 'var(--surface2)'};
-        box-shadow:${anomalies.length ? 'inset 0 1px 0 rgba(255,255,255,0.03)' : 'none'};
-      ">
-        <div style="display:flex;align-items:center;gap:12px;">
-          <div class="worker-avatar" style="
-            width:40px;
-            height:40px;
-            font-size:14px;
-            border-radius:12px;
-            background:${anomalies.length ? 'rgba(239,68,68,0.18)' : 'var(--surface3)'};
-            color:${anomalies.length ? '#ff5f5f' : 'var(--text3)'};
-            border:${anomalies.length ? '1px solid rgba(239,68,68,0.22)' : '1px solid var(--border)'};
-          ">!</div>
-          <div>
-            <div style="font-weight:700;font-size:15px;">Аномалии</div>
-            <div style="font-size:12px;color:${anomalies.length ? 'rgba(255,255,255,0.72)' : 'var(--text3)'};">${anomalies.length ? `${anomalies.length} несостыковок` : 'Несостыковок нет'}</div>
-          </div>
-        </div>
-        <div style="display:flex;align-items:center;gap:10px;">
-          <span style="
-            min-width:34px;
-            height:34px;
-            display:inline-flex;
-            align-items:center;
-            justify-content:center;
-            padding:0 10px;
-            border-radius:999px;
-            background:${anomalies.length ? 'rgba(239,68,68,0.16)' : 'var(--surface3)'};
-            color:${anomalies.length ? '#ff5f5f' : 'var(--accent)'};
-            font-weight:800;
-            font-size:15px;
-          ">${anomalies.length}</span>
-          <i data-lucide="chevron-right" style="width:16px;height:16px;color:${anomalies.length ? 'rgba(255,255,255,0.55)' : 'var(--text3)'};"></i>
-        </div>
-      </div>
-    `;
-    const analyticsHtml = renderSalaryAnalyticsSection(manualReports);
+    const analyticsHtml = renderSalaryAnalyticsSection(salaryEntries);
     container.innerHTML = salaryOverviewHtml
       + selectedWorkerHistoryHtml
       + pendingSalaryHtml
       + manualSalaryHtml
-      + analyticsHtml
-      + anomaliesHtml;
+      + analyticsHtml;
 
   } else if (state.anomalies) {
     title.textContent = 'Аномалии ЗП';
