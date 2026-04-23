@@ -5,7 +5,7 @@
 let editingOrderId  = null;      // null = новый, иначе id редактируемого
 let currentOrderTab = 'selection';  // 'selection' | 'call' | 'planner' | 'done' — для owner/manager
 let currentWorkerTab = 'actual'; // 'actual' | 'today' | 'done' | 'future' | 'past' | 'all' — для специалистов
-let ordersFiltersOpen = false;
+let ordersFiltersOpen = true;
 let currentOrderDetailId = null;
 let orderDateFilterExact = '';
 let orderDateFilterFrom = '';
@@ -1772,7 +1772,7 @@ let currentClientPayments = [];
 let currentSupplierPayments = [];
 
 function resetOrdersFilters() {
-  ordersFiltersOpen = false;
+  ordersFiltersOpen = true;
   orderDateFilterExact = '';
   orderDateFilterFrom = '';
   orderDateFilterTo = '';

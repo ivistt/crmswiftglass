@@ -1133,6 +1133,7 @@ body {
   flex-direction: column;
   gap: 8px;
   margin-top: 10px;
+  margin-bottom: 10px;
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1141,6 +1142,29 @@ body {
 
 .order-card-primary-meta {
   margin-top: 0;
+}
+
+.order-card-primary-group + .order-card-meta {
+  margin-top: 10px;
+}
+
+@media (min-width: 900px) {
+  .order-card-primary-group {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+  }
+
+  .order-card-primary-group .order-card-title-row {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  .order-card-primary-group .order-card-primary-meta {
+    flex: 1 1 auto;
+    justify-content: flex-end;
+  }
 }
 
 .order-card-actions {
