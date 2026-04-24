@@ -627,7 +627,7 @@ async function confirmSpecialServiceDone(orderId, type) {
   if (!order) return;
   const isTatu = type === 'tatu';
   const label = isTatu ? 'тату' : 'тонировку';
-  if (!confirm(`Отметить ${label} выполненной по заказу ${order.id}? После этого начислится ЗП.`)) return;
+  if (!confirm(`Отметить ${label} выполненной по заказу ${order.id}?`)) return;
 
   try {
     const patch = isTatu
@@ -646,11 +646,9 @@ async function confirmSpecialServiceDone(orderId, type) {
       toningDoneBy: !isTatu ? currentWorkerName : (saved?.toningDoneBy ?? order.toningDoneBy),
     };
     if (idx !== -1) orders[idx] = updated;
-    await _upsertOrderSalaries(updated);
     currentMonthFilter ? renderOrdersForMonth(currentMonthFilter) : renderOrders();
     showToast('Услуга выполнена ✓');
     if (document.getElementById('screen-profile')?.classList.contains('active')) {
-      await loadWorkerSalaries();
       renderProfile();
     }
   } catch (e) {
@@ -2760,13 +2758,11 @@ async function handleSpecialServiceStatusChange(type) {
     };
     const idx = orders.findIndex(item => item.id === editingOrderId);
     if (idx !== -1) orders[idx] = updatedOrder;
-    await _upsertOrderSalaries(updatedOrder);
     updateOrderModalAccess(updatedOrder);
     renderOrderSummary(updatedOrder);
     if (currentMonthFilter) renderOrdersForMonth(currentMonthFilter);
     else renderOrders();
     if (document.getElementById('screen-profile')?.classList.contains('active')) {
-      await loadWorkerSalaries();
       renderProfile();
     }
     showToast((isTatu ? 'Статус тату' : 'Статус тонировки') + ' сохранён ✓');
@@ -3668,13 +3664,6 @@ async function _upsertOrderSalaries(order) {
     }
   }
 
-  const specialSalaryEntries = getSpecialServiceSalaryEntries(order);
-  for (const entry of specialSalaryEntries) {
-    await upsertSpecialServiceSalaryEntry(entry);
-    affectedWorkers.add(entry.workerName);
-  }
-
-
   // Всегда берём актуальные записи ЗП по этому заказу из БД
   let existingInDb = [];
   try {
@@ -3696,6 +3685,12 @@ async function _upsertOrderSalaries(order) {
       } catch (e) { /* не критично */ }
     }
     return;
+  }
+
+  const specialSalaryEntries = getSpecialServiceSalaryEntries(order);
+  for (const entry of specialSalaryEntries) {
+    await upsertSpecialServiceSalaryEntry(entry);
+    affectedWorkers.add(entry.workerName);
   }
 
   const workerNamesToProcess = new Set([...Object.keys(amounts), ...automaticEntriesInDb.map(s => s.worker_name)]);
@@ -3733,8 +3728,9 @@ async function _upsertOrderSalaries(order) {
 
 function getSpecialServiceSalaryEntries(order) {
   const entries = [];
+  if (!order?.workerDone) return entries;
   const tatuAmount = _calcTatuBonus('Roma', order);
-  if ((Number(order?.tatu) || 0) > 0 || order?.tatuDone || order?.tatuStatus) {
+  if (((Number(order?.tatu) || 0) > 0 || order?.tatuDone || order?.tatuStatus) && (order?.tatuDone || order?.tatuStatus)) {
     entries.push({
       workerName: 'Roma',
       date: order.date,
@@ -3745,7 +3741,7 @@ function getSpecialServiceSalaryEntries(order) {
   }
 
   const toningAmount = _calcToningBonus('Lyosha', order);
-  if ((Number(order?.toning) || 0) > 0 || order?.toningDone || order?.toningStatus) {
+  if (((Number(order?.toning) || 0) > 0 || order?.toningDone || order?.toningStatus) && (order?.toningDone || order?.toningStatus)) {
     entries.push({
       workerName: 'Lyosha',
       date: order.date,
