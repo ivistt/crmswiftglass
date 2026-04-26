@@ -652,6 +652,7 @@
         <div class="order-modal-owner-actions" id="order-modal-owner-actions" style="display:none;">
           <button type="button" class="icon-action-btn" id="order-modal-copy-btn" title="Скопировать" onclick="if (editingOrderId) copyOrderSummary(editingOrderId)"><span class="svg-icon" style="--icon-url:url('images/ico/clipboard-list.svg');" aria-hidden="true"></span></button>
           <button type="button" class="icon-action-btn" id="order-modal-duplicate-btn" title="Продублировать" onclick="if (editingOrderId) duplicateOrder(editingOrderId)"><span class="svg-icon" style="--icon-url:url('images/ico/plus.svg');" aria-hidden="true"></span></button>
+          <button type="button" class="icon-action-btn" id="order-modal-restore-btn" title="Восстановить" onclick="if (editingOrderId) restoreOrder(editingOrderId, event)" style="display:none;"><span class="svg-icon" style="--icon-url:url('images/ico/refresh-cw.svg');" aria-hidden="true"></span></button>
           <button type="button" class="icon-action-btn icon-action-danger" id="order-modal-delete-btn" title="Удалить" onclick="if (editingOrderId) deleteOrder(editingOrderId, event)"><span class="svg-icon" style="--icon-url:url('images/ico/trash-2.svg');" aria-hidden="true"></span></button>
         </div>
         <button class="modal-close" onclick="closeOrderModal()">
@@ -687,6 +688,12 @@
               <label class="checkbox order-flag-checkbox">
                 <input type="checkbox" id="f-toning-external">
                 <span>Не начислять ЗП Лёше</span>
+              </label>
+            </div>
+            <div class="form-group">
+              <label class="checkbox order-flag-checkbox">
+                <input type="checkbox" id="f-priority-task">
+                <span>🔥 Приоритетная задача</span>
               </label>
             </div>
           </div>
@@ -843,29 +850,29 @@
         <div class="form-grid">
           <div class="form-group">
             <label class="form-label">🔩 Монтаж</label>
-            <input class="form-input" type="number" id="f-mount" placeholder="0">
+            <input class="form-input" type="text" inputmode="numeric" id="f-mount" placeholder="0">
           </div>
           <div class="form-group">
             <label class="form-label">*️⃣ Молдинг (Резинка)</label>
-            <input class="form-input" type="number" id="f-molding" placeholder="0">
+            <input class="form-input" type="text" inputmode="numeric" id="f-molding" placeholder="0">
           </div>
           <div class="form-group">
             <label class="form-label">⚙️ Доп. работы</label>
-            <input class="form-input" type="number" id="f-extra-work" placeholder="0">
+            <input class="form-input" type="text" inputmode="numeric" id="f-extra-work" placeholder="0">
           </div>
           <div class="form-group">
             <label class="form-label">*️⃣ Тату ⚫</label>
-            <input class="form-input" type="number" id="f-tatu" placeholder="0">
+            <input class="form-input" type="text" inputmode="numeric" id="f-tatu" placeholder="0">
           </div>
           <div class="form-group">
             <label class="form-label">Тонировка</label>
-            <input class="form-input" type="number" id="f-toning" placeholder="0">
+            <input class="form-input" type="text" inputmode="numeric" id="f-toning" placeholder="0">
           </div>
 
           <!-- Сумма услуг (видимый инпут) -->
           <div class="form-group">
             <label class="form-label">🔧 Сумма услуг</label>
-            <input class="form-input" type="number" id="f-total" placeholder="0" oninput="recalcTotal('manualTotal')">
+            <input class="form-input" type="text" inputmode="numeric" id="f-total" placeholder="0" oninput="recalcTotal('manualTotal')">
           </div>
         </div>
       </div>
@@ -903,7 +910,7 @@
             <!-- Строка 0: доставка -->
             <div class="form-group">
               <label class="form-label">🚛 Доставка</label>
-              <input class="form-input" type="number" id="f-delivery" placeholder="0">
+              <input class="form-input" type="text" inputmode="numeric" id="f-delivery" placeholder="0">
             </div>
             <div class="form-group">
               <label class="form-label">Дропшиппер</label>
@@ -918,18 +925,18 @@
               <div class="form-grid" style="margin-bottom:16px;">
                 <div class="form-group">
                   <label class="form-label">Сумма покупки стекла</label>
-                  <input class="form-input" type="number" id="f-purchase" placeholder="0" oninput="recalcMargin()">
+                  <input class="form-input" type="text" inputmode="numeric" id="f-purchase" placeholder="0" oninput="recalcMargin()">
                 </div>
                 <div class="form-group">
                   <label class="form-label">Сумма продажи стекла</label>
-                  <input class="form-input" type="number" id="f-income" placeholder="0" oninput="recalcMargin()">
+                  <input class="form-input" type="text" inputmode="numeric" id="f-income" placeholder="0" oninput="recalcMargin()">
                 </div>
               </div>
               <div id="supplier-payments-list" style="margin-bottom:12px;display:flex;flex-direction:column;gap:8px;"></div>
               <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;margin-bottom:16px;padding:10px;background:var(--surface2);border-radius:8px;border:1px solid var(--border);">
                 <div style="min-width:0;">
                   <label class="form-label" style="font-size:11px;">Сумма поставщику</label>
-                  <input class="form-input" type="number" id="f-new-supplier-payment-amount" placeholder="0">
+                  <input class="form-input" type="text" inputmode="numeric" id="f-new-supplier-payment-amount" placeholder="0">
                 </div>
                 <div style="min-width:0;">
                   <label class="form-label" style="font-size:11px;">Дата</label>
@@ -954,15 +961,15 @@
               <div class="form-grid">
                 <div class="form-group">
                   <label class="form-label">Сумма поставщику</label>
-                  <input class="form-input" type="number" id="f-check" placeholder="0" disabled style="background-color:var(--surface2);cursor:not-allowed;">
+                  <input class="form-input" type="text" inputmode="numeric" id="f-check" placeholder="0" disabled style="background-color:var(--surface2);cursor:not-allowed;">
                 </div>
                 <div class="form-group">
                   <label class="form-label">Сумма поставщику осталось</label>
-                  <input class="form-input" type="number" id="f-supplier-left" placeholder="0" disabled style="background-color:var(--surface2);cursor:not-allowed;">
+                  <input class="form-input" type="text" inputmode="numeric" id="f-supplier-left" placeholder="0" disabled style="background-color:var(--surface2);cursor:not-allowed;">
                 </div>
                 <div class="form-group">
                   <label class="form-label">Маржа стекло</label>
-                  <input class="form-input" type="number" id="f-remainder" placeholder="0" readonly>
+                  <input class="form-input" type="text" inputmode="numeric" id="f-remainder" placeholder="0" readonly>
                 </div>
                 <div class="form-group span-full">
                   <label class="form-label">📦 Статус оплаты поставщику</label>
@@ -986,7 +993,7 @@
               <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;margin-bottom:16px;padding:10px;background:var(--surface2);border-radius:8px;border:1px solid var(--border);">
                 <div style="min-width:0;">
                   <label class="form-label" style="font-size:11px;">Сумма платежа</label>
-                  <input class="form-input" type="number" id="f-new-payment-amount" placeholder="0">
+                  <input class="form-input" type="text" inputmode="numeric" id="f-new-payment-amount" placeholder="0">
                 </div>
                 <div style="min-width:0;">
                   <label class="form-label" style="font-size:11px;">Дата</label>
@@ -1020,11 +1027,11 @@
                 </div>
                 <div class="form-group">
                   <label class="form-label">Клиент уже оплатил</label>
-                  <input class="form-input" type="number" id="f-debt" placeholder="0" readonly disabled style="background-color: var(--surface2); cursor: not-allowed; opacity:0.75;">
+                  <input class="form-input" type="text" inputmode="numeric" id="f-debt" placeholder="0" readonly disabled style="background-color: var(--surface2); cursor: not-allowed; opacity:0.75;">
                 </div>
                 <div class="form-group">
                   <label class="form-label">Клиенту осталось оплатить</label>
-                  <input class="form-input" type="number" id="f-client-left" placeholder="0" readonly disabled style="background-color: var(--surface2); cursor: not-allowed; opacity:0.75;">
+                  <input class="form-input" type="text" inputmode="numeric" id="f-client-left" placeholder="0" readonly disabled style="background-color: var(--surface2); cursor: not-allowed; opacity:0.75;">
                 </div>
                 <div class="form-group">
                   <label class="form-label">Дата расчёта долга</label>

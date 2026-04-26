@@ -323,17 +323,19 @@ async function sbDeleteWorkerSalary(id) {
 
 // ── CASH LOG ─────────────────────────────────────────────────
 
-async function sbFetchCashLog(workerName) {
+async function sbFetchCashLog(workerName, deletedMode = 'active') {
+  const mode = deletedMode === 'only' ? 'only' : deletedMode === 'all' ? 'all' : 'active';
   const res = await fetch(
-    `${WORKER_URL}/api/cash?worker=${encodeURIComponent(workerName)}`,
+    `${WORKER_URL}/api/cash?worker=${encodeURIComponent(workerName)}&deleted=${encodeURIComponent(mode)}`,
     { headers: getHeaders() }
   );
   if (!res.ok) await throwApiError(res);
   return res.json();
 }
 
-async function sbFetchAllCashLog() {
-  const res = await fetch(`${WORKER_URL}/api/cash/all`, { headers: getHeaders() });
+async function sbFetchAllCashLog(deletedMode = 'active') {
+  const mode = deletedMode === 'only' ? 'only' : deletedMode === 'all' ? 'all' : 'active';
+  const res = await fetch(`${WORKER_URL}/api/cash/all?deleted=${encodeURIComponent(mode)}`, { headers: getHeaders() });
   if (!res.ok) await throwApiError(res);
   return res.json();
 }
@@ -695,12 +697,18 @@ function rowToOrder(r) {
     manager:         r.manager || '',
     onlySale:        r.only_sale || false,
     reworkData:      r.rework_data || {},
+    priorityTask:    !!r.rework_data?.priorityTask,
     clientPayments:  r.client_payments || [],
     supplierPayments:r.supplier_payments || [],
+    deletedAt:       r.deleted_at || '',
+    deletedBy:       r.deleted_by || '',
   };
 }
 
 function orderToRow(o) {
+  const reworkData = { ...(o.reworkData || {}) };
+  if (o.priorityTask) reworkData.priorityTask = true;
+  else delete reworkData.priorityTask;
   return {
     id:               o.id,
     date:             o.date,
@@ -768,7 +776,7 @@ function orderToRow(o) {
     is_cancelled:     o.isCancelled || false,
     manager:          o.manager    || null,
     only_sale:        o.onlySale || false,
-    rework_data:      o.reworkData || {},
+    rework_data:      reworkData,
     client_payments:  o.clientPayments || [],
     supplier_payments:o.supplierPayments || [],
   };
@@ -1154,12 +1162,17 @@ function getOrderClientTotalAmount(order) {
        + (Number(order?.delivery) || 0);
 }
 
+function isOrderDeleted(order) {
+  return !!String(order?.deletedAt || '').trim();
+}
+
 function isOrderFinanciallyActive(order) {
-  return !!order && order.inWork === true && !order.isCancelled;
+  return !!order && order.inWork === true && !order.isCancelled && !isOrderDeleted(order);
 }
 
 function getOrderCardStateClass(order) {
   if (!order) return '';
+  if (order.priorityTask && !order.workerDone) return 'order-card-state-priority';
   if (order.isCancelled) return 'order-card-state-cancelled';
   if (order.ownWarehouse && !order.workerDone) return 'order-card-state-own-warehouse';
   if (order.callStatus && !order.workerDone) return 'order-card-state-call';
@@ -1193,6 +1206,33 @@ function getSalaryWithdrawalActor(entry) {
   const prefix = `${SALARY_WITHDRAWAL_ORDER_ID} · снял `;
   if (!raw.startsWith(prefix)) return '';
   return raw.slice(prefix.length).trim();
+}
+
+function getSalaryEntryTimestamp(entry) {
+  const createdAt = String(entry?.created_at || '').trim();
+  if (createdAt) {
+    const time = new Date(createdAt).getTime();
+    if (!Number.isNaN(time)) return time;
+  }
+  const date = String(entry?.date || '').trim();
+  if (date) {
+    const time = new Date(`${date}T00:00:00`).getTime();
+    if (!Number.isNaN(time)) return time;
+  }
+  return 0;
+}
+
+function getLatestSalaryWithdrawalEntry(workerName, entries = []) {
+  return (entries || [])
+    .filter(entry => entry?.worker_name === workerName && isSalaryWithdrawalEntry(entry))
+    .sort((a, b) => getSalaryEntryTimestamp(b) - getSalaryEntryTimestamp(a))[0] || null;
+}
+
+function isSalaryEntryOpenForCurrentAccumulation(entry, entries = []) {
+  if (!entry || isSalaryWithdrawalEntry(entry)) return false;
+  const latestWithdrawal = getLatestSalaryWithdrawalEntry(entry.worker_name, entries);
+  if (!latestWithdrawal) return true;
+  return getSalaryEntryTimestamp(entry) > getSalaryEntryTimestamp(latestWithdrawal);
 }
 
 function getWorkerCompletedOrdersSummary(workerName, date) {

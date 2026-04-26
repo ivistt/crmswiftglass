@@ -478,6 +478,9 @@ function renderOrderCard(o) {
   const callNotesHtml = renderOrderCardCallNotes(o);
   const managerMetaHtml = renderManagerOrderCardMeta(o);
   const specialistBonusFlags = [
+    (o.priorityTask && !o.workerDone)
+      ? `<span class="status-badge status-priority" title="Приоритетная задача">Приоритет</span>`
+      : '',
     currentWorkerName === 'Roma' && Number(o.tatu) > 0
       ? `<span class="status-badge status-call" title="В заказе есть тату">Тату ${(Number(o.tatu) || 0).toLocaleString('ru')} ₴</span>`
       : '',
@@ -485,8 +488,11 @@ function renderOrderCard(o) {
       ? `<span class="status-badge status-own-warehouse" title="В заказе есть тонировка">Тонировка ${(Number(o.toning) || 0).toLocaleString('ru')} ₴</span>`
       : '',
   ].filter(Boolean).join('');
+  const specialistPriorityClass = (currentRole !== 'owner' && currentRole !== 'manager' && o.priorityTask && !o.workerDone)
+    ? ' order-card-priority-highlight'
+    : '';
   return `
-    <div class="order-card ${getOrderCardStateClass(o)}" ${canOpenModal ? `onclick="${cardClickAction}" style="cursor:pointer;"` : 'style="cursor:default;"'}>
+    <div class="order-card ${getOrderCardStateClass(o)}${specialistPriorityClass}" ${canOpenModal ? `onclick="${cardClickAction}" style="cursor:pointer;"` : 'style="cursor:default;"'}>
       <div class="order-card-top">
         <div class="order-card-left">
           <div class="order-card-status-row">
@@ -527,7 +533,7 @@ function renderOrderCard(o) {
 }
 
 function orderHasDebtTabFinancialMeaning(order) {
-  if (!order || order.isCancelled) return false;
+  if (!order || order.isCancelled || isOrderDeleted(order)) return false;
   if (order.inWork) return false;
   const hasDebt = ['Не оплачено', 'Частично'].includes(getEffectivePaymentStatus(order));
   if (!hasDebt) return false;
@@ -592,6 +598,16 @@ function renderManagerOrderCardMeta(order) {
       `).join('')}
     </div>
   `;
+}
+
+function compareOrdersForList(a, b, sort = 'desc', prioritize = false) {
+  if (prioritize) {
+    const priorityDelta = Number(!!b?.priorityTask) - Number(!!a?.priorityTask);
+    if (priorityDelta) return priorityDelta;
+  }
+  const ad = String(a?.date || '');
+  const bd = String(b?.date || '');
+  return sort === 'asc' ? ad.localeCompare(bd) : bd.localeCompare(ad);
 }
 
 function renderOrderCardServices(order) {
@@ -821,7 +837,9 @@ document.addEventListener('click', closeOrderActionMenus);
 
 function renderOrderStatusBadges(o) {
   const badges = [];
-  if (o.isCancelled) {
+  if (isOrderDeleted(o)) {
+    badges.push('<span class="status-badge" style="background:#6B7280;color:#fff;">Удален</span>');
+  } else if (o.isCancelled) {
     badges.push('<span class="status-badge" style="background:var(--red,#DC2626);color:#fff;">Отменен</span>');
   } else {
     if (o.ownWarehouse && !o.workerDone) badges.push('<span class="status-badge status-own-warehouse">Наш склад</span>');
@@ -840,6 +858,7 @@ function _isCurrentWorkerOrder(order) {
 
 function _filterSpecialistOrdersByTab(list) {
   const today = todayStr();
+  list = list.filter(o => !isOrderDeleted(o));
   if (currentWorkerName === 'Roma' && currentWorkerTab === 'tatuActual') {
     return list.filter(o => o.inWork && !o.isCancelled && Number(o.tatu) > 0 && !o.tatuStatus);
   }
@@ -1042,22 +1061,25 @@ function renderOrders() {
   let list = [...orders];
 
   if (currentRole === 'owner' || currentRole === 'manager') {
-    if (currentOrderTab === 'all') {
+    if (currentOrderTab === 'deleted') {
+      list = list.filter(isOrderDeleted);
+    } else if (currentOrderTab === 'all') {
+      list = list.filter(o => !isOrderDeleted(o));
       // без дополнительной фильтрации
     } else if (currentOrderTab === 'planner') {
-      list = list.filter(o => o.inWork && !o.ownWarehouse && !o.workerDone && !o.isCancelled);
+      list = list.filter(o => !isOrderDeleted(o) && o.inWork && !o.ownWarehouse && !o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'call') {
-      list = list.filter(_isCallOrderVisibleInCurrentContext);
+      list = list.filter(o => !isOrderDeleted(o)).filter(_isCallOrderVisibleInCurrentContext);
     } else if (currentOrderTab === 'ownWarehouse') {
-      list = list.filter(o => o.ownWarehouse && !o.workerDone && !o.isCancelled);
+      list = list.filter(o => !isOrderDeleted(o) && o.ownWarehouse && !o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'selection') {
-      list = list.filter(o => !o.callStatus && !o.inWork && !o.ownWarehouse && !o.workerDone && !o.isCancelled);
+      list = list.filter(o => !isOrderDeleted(o) && !o.callStatus && !o.inWork && !o.ownWarehouse && !o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'done') {
-      list = list.filter(o => o.workerDone && !o.isCancelled);
+      list = list.filter(o => !isOrderDeleted(o) && o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'debt') {
       list = list.filter(orderHasDebtTabFinancialMeaning);
     } else if (currentOrderTab === 'cancelled') {
-      list = list.filter(o => o.isCancelled);
+      list = list.filter(o => !isOrderDeleted(o) && o.isCancelled);
     }
   } else {
     list = _filterSpecialistOrdersByTab(list);
@@ -1068,11 +1090,7 @@ function renderOrders() {
   if (statF) list = list.filter(o => getEffectivePaymentStatus(o) === statF);
   if (workerF) list = list.filter(o => o.responsible === workerF || o.assistant === workerF || o.manager === workerF);
 
-  list.sort((a, b) => {
-    const ad = a.date || '';
-    const bd = b.date || '';
-    return sort === 'asc' ? ad.localeCompare(bd) : bd.localeCompare(ad);
-  });
+  list.sort((a, b) => compareOrdersForList(a, b, sort, currentRole !== 'owner' && currentRole !== 'manager'));
 
   const container = document.getElementById('orders-list');
 
@@ -1149,8 +1167,9 @@ function openOrderDetail(id) {
     actionsEl.innerHTML = `
       <button class="icon-action-btn" title="Скопировать данные" onclick="copyOrderSummary('${o.id}')">${icon('clipboard-list')}</button>
       ${canEdit ? `<button class="icon-action-btn" title="Создать дубликат" onclick="duplicateOrder('${o.id}')">${icon('plus')}</button>` : ''}
+      ${canEdit && isOrderDeleted(o) ? `<button class="icon-action-btn" title="Восстановить" onclick="restoreOrder('${escapeAttr(o.id)}', event)">${icon('refresh-cw')}</button>` : ''}
       ${canEdit   ? `<button class="icon-action-btn" title="Редактировать" onclick="openOrderModal('${o.id}')">${icon('pencil')}</button>` : ''}
-        ${canDelete ? `<button class="icon-action-btn icon-action-danger" title="Полностью удалить заказ" onclick="deleteOrder('${escapeAttr(o.id)}', event)">${icon('trash-2')}</button>` : ''}
+        ${canDelete ? `<button class="icon-action-btn icon-action-danger" title="${isOrderDeleted(o) ? 'Удалить безвозвратно' : 'Удалить'}" onclick="deleteOrder('${escapeAttr(o.id)}', event)">${icon('trash-2')}</button>` : ''}
     `;
   }
 
@@ -1297,12 +1316,35 @@ async function deleteOrder(id, event) {
   event?.stopPropagation?.();
   closeOrderActionMenus();
   if (deletingOrderIds.has(id)) return;
-  if (!confirm('Полностью удалить этот заказ из базы? Это действие нельзя отменить.')) return;
+  const existingOrder = orders.find(o => o.id === id);
+  const hardDelete = isOrderDeleted(existingOrder);
+  const message = hardDelete
+    ? 'Удалить этот заказ безвозвратно? Архив кассы и ЗП останется, но сам заказ восстановить уже нельзя.'
+    : 'Переместить этот заказ в удаленные? Его можно будет восстановить позже.';
+  if (!confirm(message)) return;
   deletingOrderIds.add(id);
   try {
-    await sbDeleteOrder(id);
-    orders = orders.filter(o => o.id !== id);
-    showToast('Запись удалена');
+    if (hardDelete) {
+      await sbDeleteOrder(id);
+      orders = orders.filter(o => o.id !== id);
+      showToast('Заказ удален безвозвратно');
+    } else {
+      const deletedAt = new Date().toISOString();
+      const saved = await sbPatchOrderFields(id, {
+        deleted_at: deletedAt,
+        deleted_by: currentWorkerName || currentRole || 'system',
+      });
+      const idx = orders.findIndex(o => o.id === id);
+      if (idx !== -1) {
+        orders[idx] = {
+          ...orders[idx],
+          ...saved,
+          deletedAt: saved?.deletedAt || deletedAt,
+          deletedBy: saved?.deletedBy || currentWorkerName || currentRole || 'system',
+        };
+      }
+      showToast('Заказ перемещен в удаленные');
+    }
     if (document.getElementById('screen-order-detail')?.classList.contains('active') && currentOrderDetailId === id) {
       currentOrderDetailId = null;
       openOrdersScreen();
@@ -1321,12 +1363,54 @@ async function deleteOrder(id, event) {
   }
 }
 
+async function restoreOrder(id, event) {
+  event?.preventDefault?.();
+  event?.stopPropagation?.();
+  closeOrderActionMenus();
+  if (deletingOrderIds.has(id)) return;
+  const existingOrder = orders.find(o => o.id === id);
+  if (!existingOrder || !isOrderDeleted(existingOrder)) return;
+  deletingOrderIds.add(id);
+  try {
+    const saved = await sbPatchOrderFields(id, {
+      deleted_at: null,
+      deleted_by: null,
+    });
+    const idx = orders.findIndex(o => o.id === id);
+    if (idx !== -1) {
+      orders[idx] = {
+        ...orders[idx],
+        ...saved,
+        deletedAt: '',
+        deletedBy: '',
+      };
+    }
+    showToast('Заказ восстановлен ✓');
+    if (document.getElementById('screen-order-detail')?.classList.contains('active') && currentOrderDetailId === id) {
+      currentOrderDetailId = null;
+      openOrdersScreen();
+    } else if (typeof refreshActiveOrdersViews === 'function') {
+      refreshActiveOrdersViews();
+    } else if (currentMonthFilter) {
+      renderOrdersForMonth(currentMonthFilter);
+    } else {
+      renderOrders();
+    }
+    renderHome();
+  } catch (e) {
+    showToast('Ошибка восстановления: ' + e.message, 'error');
+  } finally {
+    deletingOrderIds.delete(id);
+  }
+}
+
 // ---------- КОПИРОВАНИЕ ДАННЫХ ЗАКАЗА ----------
 function copyOrderSummary(id) {
   const o = orders.find(x => x.id === id);
   if (!o) return;
 
-  const lines = [];
+  const textLines = [];
+  const htmlParts = [];
   const fullTotal = getOrderClientTotal(o);
   const fmt = value => `${Number(value).toLocaleString('ru')} ₴`;
   const services = [
@@ -1338,24 +1422,84 @@ function copyOrderSummary(id) {
     ['Доставка', o.delivery],
   ].filter(([, amount]) => Number(amount) > 0);
   const listedServicesTotal = services.reduce((sum, [, amount]) => sum + (Number(amount) || 0), 0);
+  const appendTextLine = line => textLines.push(line);
+  const appendTextSpacer = () => { if (textLines.length && textLines[textLines.length - 1] !== '') textLines.push(''); };
+  const appendHtmlLine = line => htmlParts.push(`<div>${line}</div>`);
+  const appendHtmlSpacer = () => htmlParts.push('<div style="height:14px;"></div>');
+  const appendHtmlServiceLine = line => htmlParts.push(`<div style="margin-top:4px;">${line}</div>`);
+  const appendBlockSpacer = () => {
+    appendTextSpacer();
+    appendHtmlSpacer();
+  };
 
-  if (o.car) lines.push(`Авто: ${o.car}`);
-  if (o.phone) lines.push(`Телефон: ${o.phone}`);
-  if (o.notes) lines.push(`Заметки: ${o.notes}`);
+  if (o.car) {
+    appendTextLine(`Авто: ${o.car}`);
+    appendHtmlLine(`Авто: ${escapeHtml(o.car)}`);
+  }
+  if (o.phone) {
+    appendTextSpacer();
+    appendTextLine(`Телефон: ${o.phone}`);
+    appendHtmlSpacer();
+    appendHtmlLine(`Телефон: ${escapeHtml(o.phone)}`);
+  }
+  if (o.notes) {
+    appendBlockSpacer();
+    appendTextLine(`Заметки: ${o.notes}`);
+    appendHtmlLine(`Заметки: ${escapeHtml(o.notes)}`);
+  }
   const manufacturerText = getGlassManufacturerCopyText(o.glassManufacturer);
-  if (manufacturerText) lines.push(manufacturerText);
-  services.forEach(([label, amount]) => lines.push(`${label}: ${fmt(amount)}`));
-  if (services.length === 0 && Number(o.total) > 0) lines.push(`Услуги: ${fmt(o.total)}`);
-  if (services.length > 0 && Number(o.total) > listedServicesTotal) lines.push(`Сумма услуг: ${fmt(o.total)}`);
-  if (Number(o.income) > 0) lines.push(`Цена продажи стекла: ${fmt(o.income)}`);
+  if (manufacturerText) {
+    appendBlockSpacer();
+    manufacturerText.split('\n').forEach(line => {
+      appendTextLine(line);
+      appendHtmlLine(escapeHtml(line));
+    });
+  }
+  if (services.length || Number(o.total) > 0 || Number(o.income) > 0) {
+    appendBlockSpacer();
+    services.forEach(([label, amount]) => {
+      const line = `${label}: ${fmt(amount)}`;
+      appendTextLine(line);
+      appendHtmlServiceLine(escapeHtml(line));
+    });
+    if (services.length === 0 && Number(o.total) > 0) {
+      const line = `Услуги: ${fmt(o.total)}`;
+      appendTextLine(line);
+      appendHtmlServiceLine(escapeHtml(line));
+    }
+    if (services.length > 0 && Number(o.total) > listedServicesTotal) {
+      const line = `Сумма услуг: ${fmt(o.total)}`;
+      appendTextLine(line);
+      appendHtmlServiceLine(escapeHtml(line));
+    }
+    if (Number(o.income) > 0) {
+      const line = `Цена продажи стекла: ${fmt(o.income)}`;
+      appendTextLine(line);
+      appendHtmlLine(escapeHtml(line));
+    }
+  }
   if (fullTotal > 0) {
-    if (lines.length) lines.push('');
-    lines.push(`Общая сумма: ${fmt(fullTotal)}`);
+    appendBlockSpacer();
+    const totalLine = `Общая сумма: ${fmt(fullTotal)}`;
+    appendTextLine(totalLine);
+    appendHtmlLine(`<strong>${escapeHtml(totalLine)}</strong>`);
   }
 
-  const text = lines.join('\n');
+  const text = textLines.join('\n');
+  const html = `<div style="font-family:Arial,sans-serif;font-size:16px;line-height:1.45;">${htmlParts.join('')}</div>`;
 
-  if (navigator.clipboard && navigator.clipboard.writeText) {
+  if (navigator.clipboard && window.ClipboardItem && navigator.clipboard.write) {
+    navigator.clipboard.write([
+      new ClipboardItem({
+        'text/plain': new Blob([text], { type: 'text/plain' }),
+        'text/html': new Blob([html], { type: 'text/html' }),
+      }),
+    ]).then(() => {
+      showToast('Дані скопійовано');
+    }).catch(() => {
+      _fallbackCopy(text);
+    });
+  } else if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(text).then(() => {
       showToast('Дані скопійовано');
     }).catch(() => {
@@ -1628,7 +1772,7 @@ async function rememberClientAddressFromOrder(order) {
 async function rememberCarDirectoryFromOrder(order) {
   const model = String(order?.car || '').trim();
   const eurocode = String(order?.code || '').trim();
-  if (!model || !eurocode || typeof sbUpsertCarDirectory !== 'function') return;
+  if (!model || typeof sbUpsertCarDirectory !== 'function') return;
 
   try {
     const saved = await sbUpsertCarDirectory(model, eurocode);
@@ -1644,6 +1788,17 @@ async function rememberCarDirectoryFromOrder(order) {
       carDirectory[idx] = { ...carDirectory[idx], ...nextRow, model, eurocode };
     } else {
       carDirectory.push(nextRow);
+    }
+    if (Array.isArray(refCars)) {
+      const refIdx = refCars.findIndex(item =>
+        (savedId && item.id === savedId) ||
+        String(item.model || '').trim().toLowerCase() === model.toLowerCase()
+      );
+      if (refIdx !== -1) {
+        refCars[refIdx] = { ...refCars[refIdx], ...nextRow, model, eurocode };
+      } else {
+        refCars.push(nextRow);
+      }
     }
   } catch (e) {
     console.warn('Failed to remember car directory row:', e);
@@ -2327,6 +2482,7 @@ function getOrderDraftFromForm(baseOrder = null) {
   order.tatu = getN('f-tatu');
   order.tatuStatus = document.getElementById('f-tatu-status')?.checked || false;
   order.toningStatus = document.getElementById('f-toning-status')?.checked || false;
+  order.priorityTask = document.getElementById('f-priority-task')?.checked || false;
   order.total = getN('f-total');
   order.income = getN('f-income');
   order.purchase = getN('f-purchase');
@@ -2337,6 +2493,7 @@ function getOrderDraftFromForm(baseOrder = null) {
   order.inWork = document.getElementById('f-order-status')?.value === 'inWork';
   order.ownWarehouse = document.getElementById('f-order-status')?.value === 'ownWarehouse';
   order.isCancelled = document.getElementById('f-order-status')?.value === 'cancelled';
+  order.reworkData = { ...(baseOrder?.reworkData || {}), priorityTask: order.priorityTask };
   return order;
 }
 
@@ -2466,6 +2623,7 @@ function renderOrderSummary(order = null) {
       rows: [
         ['ID', formatOrderSummaryValue(draftOrder.id)],
         ['Статус', statusLabel],
+        ['Приоритетная задача', draftOrder.priorityTask ? 'Да' : '—'],
         ['Дата', formatOrderSummaryValue(draftOrder.date)],
         ['Время', formatOrderSummaryValue(draftOrder.time)],
         ['Ответственный', formatOrderSummaryValue(getWorkerDisplayName(draftOrder.responsible || ''))],
@@ -2596,13 +2754,21 @@ function updateOrderModalAccess(order = null) {
   if (headerActions) {
     headerActions.style.display = (isPrivileged && !!editingOrderId && !!existingOrder) ? 'inline-flex' : 'none';
   }
+  const restoreBtn = document.getElementById('order-modal-restore-btn');
+  if (restoreBtn) {
+    restoreBtn.style.display = (isPrivileged && !!editingOrderId && !!existingOrder && isOrderDeleted(existingOrder)) ? 'inline-flex' : 'none';
+  }
+  const deleteBtn = document.getElementById('order-modal-delete-btn');
+  if (deleteBtn) {
+    deleteBtn.title = (isPrivileged && !!existingOrder && isOrderDeleted(existingOrder)) ? 'Удалить безвозвратно' : 'Удалить';
+  }
 
   updateOrderModalTabsAccess(existingOrder);
 
   const basicFieldIds = [
     'f-date','f-time','f-responsible','f-assistant','f-manager','f-client','f-phone','f-address',
     'f-vin','f-extra-note','f-car','f-code','f-glass-manufacturer','f-new-post','f-warehouse',
-    'f-warehouse-code','f-notes','f-order-status','f-only-sale','f-toning-external','f-configuration'
+    'f-warehouse-code','f-notes','f-order-status','f-only-sale','f-toning-external','f-priority-task','f-configuration'
   ];
   basicFieldIds.forEach(id => setElementDisabledState(document.getElementById(id), !isPrivileged));
   document.querySelectorAll('#f-configuration-checkboxes input[type="checkbox"]').forEach(input => setElementDisabledState(input, !isPrivileged));
@@ -2828,6 +2994,8 @@ function fillOrderForm(o) {
   set('f-dropshipper', o.dropshipper);
   const tonExtEl = document.getElementById('f-toning-external');
   if (tonExtEl) tonExtEl.checked = !!o.toningExternal;
+  const priorityTaskEl = document.getElementById('f-priority-task');
+  if (priorityTaskEl) priorityTaskEl.checked = !!o.priorityTask;
   // услуги — чекбоксы
   const svcHidden = document.getElementById('f-service-type');
   if (svcHidden) {
@@ -2898,6 +3066,8 @@ function clearOrderForm() {
   if (newPostEl) newPostEl.checked = false;
   const tonExtEl = document.getElementById('f-toning-external');
   if (tonExtEl) tonExtEl.checked = false;
+  const priorityTaskEl = document.getElementById('f-priority-task');
+  if (priorityTaskEl) priorityTaskEl.checked = false;
   const tatuStatusEl = document.getElementById('f-tatu-status');
   if (tatuStatusEl) tatuStatusEl.checked = false;
   const toningStatusEl = document.getElementById('f-toning-status');
@@ -3073,6 +3243,9 @@ async function saveOrder() {
     toning:          getN('f-toning'),
     tatuStatus:      document.getElementById('f-tatu-status')?.checked || false,
     toningStatus:    document.getElementById('f-toning-status')?.checked || false,
+    priorityTask:    (currentRole === 'owner' || currentRole === 'manager')
+      ? (document.getElementById('f-priority-task')?.checked || false)
+      : !!existingOrder?.priorityTask,
     delivery:        getN('f-delivery'),
     warehouse:       get('f-warehouse'),
     warehouseCode:   get('f-warehouse-code'),
@@ -3120,7 +3293,9 @@ async function saveOrder() {
     payoutMoldingResp:     getN('f-payout-molding-resp'),
     payoutMoldingAssist:   getN('f-payout-molding-assist'),
     onlySale:        document.getElementById('f-only-sale')?.checked || false,
-    reworkData: {},
+    reworkData: { ...(existingOrder?.reworkData || {}), priorityTask: (currentRole === 'owner' || currentRole === 'manager')
+      ? (document.getElementById('f-priority-task')?.checked || false)
+      : !!existingOrder?.priorityTask },
     clientPayments: currentClientPayments,
     supplierPayments: currentSupplierPayments,
   };
@@ -3377,6 +3552,7 @@ const MONTH_NAMES_RU = [
 function renderYears() {
   const map = {};
   for (const o of orders) {
+    if (isOrderDeleted(o)) continue;
     if (!o.date) continue;
     const year = o.date.slice(0, 4);
     if (!map[year]) map[year] = [];
@@ -3465,6 +3641,7 @@ function openYear(year) {
 function renderMonths() {
   const map = {};
   for (const o of orders) {
+    if (isOrderDeleted(o)) continue;
     if (!o.date) continue;
     const year = o.date.slice(0, 4);
     if (window.currentYearFilter && year !== window.currentYearFilter) continue;
@@ -3531,22 +3708,25 @@ function renderOrdersForMonth(ym) {
   let list = orders.filter(o => o.date && o.date.slice(0, 7) === ym);
 
   if (currentRole === 'owner' || currentRole === 'manager') {
-    if (currentOrderTab === 'all') {
+    if (currentOrderTab === 'deleted') {
+      list = list.filter(isOrderDeleted);
+    } else if (currentOrderTab === 'all') {
+      list = list.filter(o => !isOrderDeleted(o));
       // без дополнительной фильтрации
     } else if (currentOrderTab === 'planner') {
-      list = list.filter(o => o.inWork && !o.ownWarehouse && !o.workerDone && !o.isCancelled);
+      list = list.filter(o => !isOrderDeleted(o) && o.inWork && !o.ownWarehouse && !o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'call') {
-      list = list.filter(_isCallOrderVisibleInCurrentContext);
+      list = list.filter(o => !isOrderDeleted(o)).filter(_isCallOrderVisibleInCurrentContext);
     } else if (currentOrderTab === 'ownWarehouse') {
-      list = list.filter(o => o.ownWarehouse && !o.workerDone && !o.isCancelled);
+      list = list.filter(o => !isOrderDeleted(o) && o.ownWarehouse && !o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'selection') {
-      list = list.filter(o => !o.callStatus && !o.inWork && !o.ownWarehouse && !o.workerDone && !o.isCancelled);
+      list = list.filter(o => !isOrderDeleted(o) && !o.callStatus && !o.inWork && !o.ownWarehouse && !o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'done') {
-      list = list.filter(o => o.workerDone && !o.isCancelled);
+      list = list.filter(o => !isOrderDeleted(o) && o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'debt') {
       list = list.filter(orderHasDebtTabFinancialMeaning);
     } else if (currentOrderTab === 'cancelled') {
-      list = list.filter(o => o.isCancelled);
+      list = list.filter(o => !isOrderDeleted(o) && o.isCancelled);
     }
   } else {
     list = _filterSpecialistOrdersByTab(list);
@@ -3556,11 +3736,7 @@ function renderOrdersForMonth(ym) {
   if (orderDateFilterExact || orderDateFilterFrom || orderDateFilterTo) list = list.filter(orderMatchesDateFilter);
   if (statF) list = list.filter(o => getEffectivePaymentStatus(o) === statF);
   if (workerF) list = list.filter(o => o.responsible === workerF || o.assistant === workerF || o.manager === workerF);
-  list.sort((a, b) => {
-    const ad = a.date || '';
-    const bd = b.date || '';
-    return sort === 'asc' ? ad.localeCompare(bd) : bd.localeCompare(ad);
-  });
+  list.sort((a, b) => compareOrdersForList(a, b, sort, currentRole !== 'owner' && currentRole !== 'manager'));
 
   const container = document.getElementById('orders-list');
 
@@ -3643,14 +3819,14 @@ async function _upsertOrderSalaries(order) {
 
   if (order.workerDone) {
     // 1. Основные участники
-    [order.responsible, order.assistant].filter(Boolean).forEach(w => {
+    [...new Set([order.responsible, order.assistant].filter(Boolean))].forEach(w => {
       affectedWorkers.add(w);
       amounts[w] = (amounts[w] || 0) + calcOrderSalary(w, order);
     });
 
     // 2. Участники доработки
     if (order.reworkData) {
-      [order.reworkData.responsible, order.reworkData.assistant].filter(Boolean).forEach(w => {
+      [...new Set([order.reworkData.responsible, order.reworkData.assistant].filter(Boolean))].forEach(w => {
         affectedWorkers.add(w);
         amounts[w] = (amounts[w] || 0) + calcReworkSalary(w, order.reworkData);
       });
@@ -3811,6 +3987,7 @@ function initOrderTabs() {
         <button class="orders-tab" id="tab-done"      onclick="setOrderTab('done')">Выполненные</button>
         <button class="orders-tab" id="tab-debt"      onclick="setOrderTab('debt')">Долг</button>
         <button class="orders-tab" id="tab-cancelled" onclick="setOrderTab('cancelled')">Отмененные</button>
+        <button class="orders-tab" id="tab-deleted" onclick="setOrderTab('deleted')">Удаленные</button>
       `;
     }
     setOrderTab('selection');

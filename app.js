@@ -785,7 +785,7 @@ function getOwnerCashLogs(confirmFilter = ownerCashConfirmFilter) {
     .filter(entry => seniorNames.includes(entry.worker_name))
     .filter(entry => {
       const account = String(entry?.cash_account || 'cash').toLowerCase();
-      if (account === 'fop') return entry.worker_name === 'Oleg Starshiy';
+      if (account === 'fop') return false;
       if (entry.worker_name === OWNER_PENDING_CASH_WORKER_NAME) {
         return account === 'cash' && !!getPaymentMethodFromSourceKey(entry?.fop_source_key);
       }
@@ -1047,18 +1047,119 @@ async function saveOwnerCashEntry() {
 
 async function deleteOwnerCashEntry(id) {
   if (currentRole !== 'owner' || !id) return;
-  if (!confirm('Удалить эту запись кассы? Это действие нельзя отменить.')) return;
+  const entry = (window.allCashLog || []).find(item => String(item.id) === String(id));
+  const hardDelete = !!String(entry?.deleted_at || '').trim();
+  const message = hardDelete
+    ? 'Удалить эту запись кассы безвозвратно? Восстановить ее уже не получится.'
+    : 'Переместить эту запись кассы в удаленные? Ее можно будет восстановить позже.';
+  if (!confirm(message)) return;
   try {
-    await sbDeleteCashEntry(id);
-    if (Array.isArray(window.allCashLog)) {
-      window.allCashLog = window.allCashLog.filter(entry => String(entry.id) !== String(id));
+    if (hardDelete) {
+      await sbDeleteCashEntry(id);
+      if (Array.isArray(window.allCashLog)) {
+        window.allCashLog = window.allCashLog.filter(entry => String(entry.id) !== String(id));
+      }
+    } else {
+      const deletedAt = new Date().toISOString();
+      const saved = await sbUpdateCashEntry(id, {
+        deleted_at: deletedAt,
+        deleted_by: currentWorkerName || currentRole || 'owner',
+      });
+      if (Array.isArray(window.allCashLog)) {
+        window.allCashLog = window.allCashLog.map(item =>
+          String(item.id) === String(id)
+            ? { ...item, ...saved, deleted_at: saved?.deleted_at || deletedAt, deleted_by: saved?.deleted_by || currentWorkerName || currentRole || 'owner' }
+            : item
+        );
+      }
     }
     renderOwnerCashScreen();
     renderHome();
-    showToast('Запись кассы удалена');
+    showToast(hardDelete ? 'Запись кассы удалена безвозвратно' : 'Запись кассы перемещена в удаленные');
   } catch (e) {
     showToast('Ошибка удаления кассы: ' + e.message, 'error');
   }
+}
+
+async function restoreOwnerCashEntry(id) {
+  if (currentRole !== 'owner' || !id) return;
+  try {
+    const saved = await sbUpdateCashEntry(id, {
+      deleted_at: null,
+      deleted_by: null,
+    });
+    if (Array.isArray(window.allCashLog)) {
+      window.allCashLog = window.allCashLog.map(item =>
+        String(item.id) === String(id)
+          ? { ...item, ...saved, deleted_at: null, deleted_by: null }
+          : item
+      );
+    }
+    closeOwnerDeletedCashModal();
+    renderOwnerCashScreen();
+    renderHome();
+    showToast('Запись кассы восстановлена ✓');
+  } catch (e) {
+    showToast('Ошибка восстановления кассы: ' + e.message, 'error');
+  }
+}
+
+function openOwnerDeletedCashModal() {
+  if (currentRole !== 'owner') return;
+  let modal = document.getElementById('owner-deleted-cash-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'owner-deleted-cash-modal';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  const deletedEntries = (window.allCashLog || [])
+    .filter(entry => !!String(entry?.deleted_at || '').trim())
+    .sort((a, b) => new Date(b.deleted_at || b.created_at || 0) - new Date(a.deleted_at || a.created_at || 0));
+  const rowsHtml = deletedEntries.length
+    ? deletedEntries.map(entry => {
+        const amount = Number(entry.amount) || 0;
+        const deletedAt = entry.deleted_at ? new Date(entry.deleted_at).toLocaleString('ru-RU') : '—';
+        return `
+          <div class="owner-cash-entry-row">
+            <div class="owner-cash-entry-main">
+              <div class="owner-cash-entry-comment">${escapeHtml(getWorkerDisplayName(entry.worker_name) || entry.worker_name || '—')} · ${escapeHtml(getCashEntryDisplayComment(entry) || 'Без комментария')}</div>
+              <div class="owner-cash-entry-meta">Удалено: ${escapeHtml(deletedAt)}${entry.deleted_by ? ' · ' + escapeHtml(entry.deleted_by) : ''}</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <div class="owner-cash-entry-amount" style="color:${amount >= 0 ? 'var(--accent)' : '#ef4444'};">${amount.toLocaleString('ru')} ₴</div>
+              <button class="icon-btn" title="Восстановить" onclick="event.stopPropagation(); restoreOwnerCashEntry('${escapeAttr(entry.id)}')">${icon('refresh-cw')}</button>
+              <button class="icon-btn icon-action-danger" title="Удалить безвозвратно" onclick="event.stopPropagation(); deleteOwnerCashEntry('${escapeAttr(entry.id)}')">${icon('trash-2')}</button>
+            </div>
+          </div>
+        `;
+      }).join('')
+    : '<div class="empty-state" style="padding:24px 12px;"><div class="empty-state-icon">' + icon('trash-2') + '</div><h3>Удаленных записей нет</h3></div>';
+  modal.innerHTML = `
+    <div class="modal" style="max-width:760px;max-height:88vh;display:flex;flex-direction:column;">
+      <div class="modal-header" style="flex-shrink:0;">
+        <div class="modal-title">Удаленные записи кассы</div>
+        <button class="modal-close" onclick="closeOwnerDeletedCashModal()">${icon('x')}</button>
+      </div>
+      <div class="modal-body" style="overflow-y:auto;flex:1;">
+        <div class="fin-month-card owner-cash-history-card">
+          <div class="owner-cash-history-title">
+            <div>
+              <div class="fin-month-name">Корзина кассы</div>
+              <div class="fin-month-sub">${deletedEntries.length} зап.</div>
+            </div>
+          </div>
+          <div style="padding:12px;">${rowsHtml}</div>
+        </div>
+      </div>
+    </div>
+  `;
+  modal.classList.add('active');
+  initIcons();
+}
+
+function closeOwnerDeletedCashModal() {
+  document.getElementById('owner-deleted-cash-modal')?.classList.remove('active');
 }
 
 function renderOwnerEmployeeCashHistory(workerName, logs) {
@@ -2136,7 +2237,7 @@ function renderOwnerCashScreen() {
             </div>
             <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
               <div style="font-size:22px;font-weight:900;color:${total >= 0 ? 'var(--accent)' : '#ef4444'};white-space:nowrap;">${total.toLocaleString('ru')} ${isUahView ? '₴' : '$'}</div>
-              ${isUahView ? `<button class="btn-secondary" style="font-size:12px;padding:6px 10px;" onclick="openOwnerCashEntryModal()">+ Запись</button>` : ''}
+              ${isUahView ? `<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;"><button class="btn-secondary" style="font-size:12px;padding:6px 10px;" onclick="openOwnerCashEntryModal()">+ Запись</button><button class="btn-secondary" style="font-size:12px;padding:6px 10px;" onclick="openOwnerDeletedCashModal()">Корзина</button></div>` : ''}
             </div>
           </div>
         </div>

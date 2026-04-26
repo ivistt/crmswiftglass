@@ -4,7 +4,13 @@
 
 // Зарплаты из БД: массив { id, worker_name, date, amount }
 let allSalaries = [];
+let ownerPendingSalaryOpen = false;
+let ownerSalarySelectedWorker = '';
 
+function toggleOwnerPendingSalaryPanel() {
+  ownerPendingSalaryOpen = !ownerPendingSalaryOpen;
+  renderOwnerSalaryScreen();
+}
 function getFinanceSalaryEntries(entries = allSalaries) {
   return (entries || [])
     .filter(isRelevantSalaryEntry)
@@ -410,7 +416,6 @@ function renderSalaryRowsCompact(ym) {
 // Стек навигации: 'workers' | { anomalies: true } | { worker: name } | { worker, year } | { worker, year, month } | { periodMonth } | { periodMonth, periodDay }
 let salaryNavStack = [];
 let editingManualSalaryId = '';
-let ownerSalarySelectedWorker = '';
 
 function getOwnerManualSalaryEntries(entries = allSalaries) {
   return (entries || []).filter(isOwnerManualSalaryEntry);
@@ -435,13 +440,66 @@ function getOwnerSalaryWorkerNames(entries = getOwnerSalaryEntries()) {
 function getOwnerSalaryBalance(workerName, entries = getOwnerSalaryEntries()) {
   return (entries || [])
     .filter(entry => entry.worker_name === workerName)
+    .filter(entry => isSalaryEntryOpenForCurrentAccumulation(entry, entries))
     .reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
 }
 
 function setOwnerSalarySelectedWorker(workerName) {
-  ownerSalarySelectedWorker = ownerSalarySelectedWorker === workerName ? '' : workerName;
+  ownerSalarySelectedWorker = workerName || '';
   salaryNavStack = [];
-  renderOwnerSalaryScreen();
+  openOwnerSalaryHistoryModal(ownerSalarySelectedWorker);
+}
+
+function getOwnerSalaryHistoryTitle(workerName) {
+  return escapeHtml(getWorkerDisplayName(workerName) || workerName || 'История ЗП');
+}
+
+function getOwnerSalaryHistoryHtml(workerName) {
+  const salaryEntries = getOwnerSalaryEntries();
+  if (!workerName) {
+    return `
+      <div class="fin-month-card owner-cash-history-card">
+        <div class="owner-cash-history-title">
+          <div>
+            <div class="fin-month-name">История ЗП</div>
+            <div class="fin-month-sub">Выберите сотрудника сверху</div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+  return renderOwnerEmployeeSalaryHistory(workerName, salaryEntries);
+}
+
+function openOwnerSalaryHistoryModal(workerName) {
+  ownerSalarySelectedWorker = workerName || '';
+  let modal = document.getElementById('owner-salary-history-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'owner-salary-history-modal';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  modal.innerHTML = `
+    <div class="modal" style="max-width:720px;">
+      <div class="modal-header">
+        <div>
+          <div class="modal-title">${getOwnerSalaryHistoryTitle(workerName)}</div>
+          <div style="font-size:12px;color:var(--text3);margin-top:2px;">История ЗП сотрудника</div>
+        </div>
+        <button class="modal-close" onclick="closeOwnerSalaryHistoryModal()">${icon('x')}</button>
+      </div>
+      <div class="modal-body" style="padding-top:0;">
+        ${getOwnerSalaryHistoryHtml(workerName)}
+      </div>
+    </div>
+  `;
+  modal.classList.add('active');
+  initIcons();
+}
+
+function closeOwnerSalaryHistoryModal() {
+  document.getElementById('owner-salary-history-modal')?.classList.remove('active');
 }
 
 function getSalaryEntryKindLabel(entry) {
@@ -469,7 +527,7 @@ function renderOwnerSalaryEntryRow(entry, { showWorker = false, showEdit = false
   const amount = Number(entry.amount) || 0;
   const history = getSalaryEditHistory(entry);
   const canEdit = showEdit && !isSalaryWithdrawalEntry(entry) && !isSalaryEntryClosedByWithdrawal(entry);
-  const canDelete = showEdit && currentRole === 'owner';
+  const canDelete = showEdit && currentRole === 'owner' && !isSalaryWithdrawalEntry(entry) && !isSalaryEntryClosedByWithdrawal(entry);
   const orderMeta = getSalaryEntryOrderMeta(entry);
   const linkedOrderId = typeof resolveSalaryEntryOrderId === 'function' ? resolveSalaryEntryOrderId(entry.order_id) : '';
   return `<div style="padding:10px 0;border-bottom:1px solid var(--border);${linkedOrderId ? 'cursor:pointer;' : ''}" ${linkedOrderId ? `onclick="openSalaryEntryOrder('${financeEscapeAttr(entry.order_id)}', event)"` : ''}>
@@ -517,7 +575,7 @@ function renderOwnerSalaryOverview(entries = getOwnerSalaryEntries()) {
       </div>
       <div style="padding:12px 16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;">
         ${rows.length ? rows.map(row => `
-          <div class="owner-cash-worker-row ${ownerSalarySelectedWorker === row.workerName ? 'active' : ''}" onclick="setOwnerSalarySelectedWorker('${financeEscapeAttr(row.workerName)}')">
+          <div class="owner-cash-worker-row" onclick="setOwnerSalarySelectedWorker('${financeEscapeAttr(row.workerName)}')">
             <div>
               <div class="owner-cash-worker-name">${escapeHtml(getWorkerDisplayName(row.workerName) || row.workerName)}</div>
               <div style="font-size:11px;color:var(--text3);margin-top:3px;">${row.recordsCount} зап.</div>
@@ -537,7 +595,7 @@ function renderOwnerEmployeeSalaryHistory(workerName, entries = getOwnerSalaryEn
     .filter(entry => entry.worker_name === workerName)
     .slice()
     .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || String(b.created_at || '').localeCompare(String(a.created_at || '')));
-  const total = rows.reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
+  const total = getSalaryAccumulatedForWithdraw(workerName, rows);
   const workerKey = String(workerName || '').replace(/[^a-zA-Z0-9_-]+/g, '-');
 
   if (!rows.length) {
@@ -563,38 +621,50 @@ function renderOwnerEmployeeSalaryHistory(workerName, entries = getOwnerSalaryEn
     const date = entry.date || 'Без даты';
     const year = date === 'Без даты' ? 'Без даты' : date.slice(0, 4);
     const month = date === 'Без даты' ? 'Без даты' : date.slice(0, 7);
-    if (!tree[year]) tree[year] = { total: 0, months: {} };
-    tree[year].total += Number(entry.amount) || 0;
-    if (!tree[year].months[month]) tree[year].months[month] = { total: 0, days: {} };
-    tree[year].months[month].total += Number(entry.amount) || 0;
-    if (!tree[year].months[month].days[date]) tree[year].months[month].days[date] = { total: 0, entries: [] };
-    tree[year].months[month].days[date].total += Number(entry.amount) || 0;
-    tree[year].months[month].days[date].entries.push(entry);
+    if (!tree[year]) tree[year] = {};
+    if (!tree[year][month]) tree[year][month] = {};
+    if (!tree[year][month][date]) tree[year][month][date] = [];
+    tree[year][month][date].push(entry);
   }
 
   const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
   const yearsHtml = Object.keys(tree).sort((a, b) => b.localeCompare(a)).map(year => {
-    const yearData = tree[year];
+    const months = Object.keys(tree[year]).sort((a, b) => b.localeCompare(a));
+    const yearSum = months.reduce((sum, monthKey) => sum + Object.values(tree[year][monthKey]).flat().reduce((acc, entry) => {
+      if (isSalaryWithdrawalEntry(entry)) return acc;
+      return acc + (Number(entry.amount) || 0);
+    }, 0), 0);
     const yearKey = `owner-salary-worker-${workerKey}-year-${year}`;
-    const monthsHtml = Object.keys(yearData.months).sort((a, b) => b.localeCompare(a)).map(monthKey => {
-      const monthData = yearData.months[monthKey];
+    const monthsHtml = months.map(monthKey => {
+      const days = Object.keys(tree[year][monthKey]).sort((a, b) => b.localeCompare(a));
+      const monthSum = days.reduce((sum, day) => sum + tree[year][monthKey][day].reduce((acc, entry) => {
+        if (isSalaryWithdrawalEntry(entry)) return acc;
+        return acc + (Number(entry.amount) || 0);
+      }, 0), 0);
       const monthToggleKey = `${yearKey}-month-${monthKey}`;
       const monthName = monthKey === 'Без даты' ? 'Без даты' : `${monthNames[Number(monthKey.slice(5, 7)) - 1] || monthKey} ${monthKey.slice(0, 4)}`;
-      const daysHtml = Object.keys(monthData.days).sort((a, b) => b.localeCompare(a)).map(day => {
-        const dayData = monthData.days[day];
+      const daysHtml = days.map(day => {
+        const dayEntries = tree[year][monthKey][day];
+        const withdrawals = dayEntries.filter(isSalaryWithdrawalEntry);
+        const accruals = dayEntries.filter(entry => !isSalaryWithdrawalEntry(entry));
+        const dayTotal = accruals.reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
         const dayKey = `${monthToggleKey}-day-${day}`;
+        const renderedRows = [
+          ...accruals.map(entry => renderOwnerSalaryEntryRow(entry, { showEdit: true })),
+          ...withdrawals.map(entry => renderOwnerSalaryEntryRow(entry, { showEdit: true })),
+        ].join('');
         return `
           <div style="border-bottom:1px solid var(--border);">
             <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;cursor:pointer;" onclick="toggleProfileMonth('${dayKey}')">
               <div style="display:flex;align-items:center;gap:8px;">
                 <i data-lucide="chevron-right" style="width:13px;height:13px;color:var(--text3);transition:transform 0.2s;" id="pchevron-${dayKey}"></i>
                 <div style="font-size:13px;color:var(--text2);font-weight:600;">${day === 'Без даты' ? day : formatDate(day)}</div>
-                <div style="font-size:11px;color:var(--text3);">${dayData.entries.length} зап.</div>
+                <div style="font-size:11px;color:var(--text3);">${dayEntries.length} зап.</div>
               </div>
-              <div style="font-size:13px;font-weight:800;color:${dayData.total >= 0 ? 'var(--accent)' : '#ef4444'};">${dayData.total.toLocaleString('ru')} ₴</div>
+              <div style="font-size:13px;font-weight:800;color:${dayTotal >= 0 ? 'var(--accent)' : '#ef4444'};">${dayTotal.toLocaleString('ru')} ₴</div>
             </div>
             <div id="profile-month-body-${dayKey}" style="display:none;padding:0 12px 10px 28px;">
-              ${dayData.entries.map(entry => renderOwnerSalaryEntryRow(entry, { showEdit: true })).join('')}
+              ${renderedRows}
             </div>
           </div>
         `;
@@ -606,9 +676,9 @@ function renderOwnerEmployeeSalaryHistory(workerName, entries = getOwnerSalaryEn
             <div style="display:flex;align-items:center;gap:8px;">
               <i data-lucide="chevron-right" style="width:14px;height:14px;color:var(--text3);transition:transform 0.2s;" id="pchevron-${monthToggleKey}"></i>
               <div style="font-size:14px;font-weight:700;color:var(--text2);">${monthName}</div>
-              <div style="font-size:11px;color:var(--text3);">${Object.keys(monthData.days).length} дн.</div>
+              <div style="font-size:11px;color:var(--text3);">${days.length} дн.</div>
             </div>
-            <div style="font-size:14px;font-weight:800;color:${monthData.total >= 0 ? 'var(--accent)' : '#ef4444'};">${monthData.total.toLocaleString('ru')} ₴</div>
+            <div style="font-size:14px;font-weight:800;color:${monthSum >= 0 ? 'var(--accent)' : '#ef4444'};">${monthSum.toLocaleString('ru')} ₴</div>
           </div>
           <div id="profile-month-body-${monthToggleKey}" style="display:none;background:var(--surface2);border-radius:0 0 8px 8px;">
             ${daysHtml}
@@ -623,9 +693,9 @@ function renderOwnerEmployeeSalaryHistory(workerName, entries = getOwnerSalaryEn
           <div style="display:flex;align-items:center;gap:8px;">
             <i data-lucide="chevron-right" style="width:14px;height:14px;color:var(--text3);transition:transform 0.2s;" id="pchevron-${yearKey}"></i>
             <div style="font-size:14px;font-weight:800;color:var(--text);">${year}</div>
-            <div style="font-size:11px;color:var(--text3);">${Object.keys(yearData.months).length} мес.</div>
+            <div style="font-size:11px;color:var(--text3);">${months.length} мес.</div>
           </div>
-          <div style="font-size:14px;font-weight:900;color:${yearData.total >= 0 ? 'var(--accent)' : '#ef4444'};">${yearData.total.toLocaleString('ru')} ₴</div>
+          <div style="font-size:14px;font-weight:900;color:${yearSum >= 0 ? 'var(--accent)' : '#ef4444'};">${yearSum.toLocaleString('ru')} ₴</div>
         </div>
         <div id="profile-month-body-${yearKey}" style="display:none;">
           ${monthsHtml}
@@ -656,15 +726,11 @@ function renderOwnerSalaryScreen() {
 
   const salaryEntries = getOwnerSalaryEntries();
   const salaryOverviewHtml = renderOwnerSalaryOverview(salaryEntries);
-  const selectedWorkerHistoryHtml = ownerSalarySelectedWorker
-    ? renderOwnerEmployeeSalaryHistory(ownerSalarySelectedWorker, salaryEntries)
-    : '';
   const pendingSalaryHtml = renderOwnerPendingSalaryPanel();
   const manualSalaryHtml = renderOwnerManualSalaryPanel();
   const analyticsHtml = renderSalaryAnalyticsSection(salaryEntries);
 
   container.innerHTML = salaryOverviewHtml
-    + selectedWorkerHistoryHtml
     + pendingSalaryHtml
     + manualSalaryHtml
     + analyticsHtml
@@ -673,11 +739,14 @@ function renderOwnerSalaryScreen() {
 }
 
 function rerenderOwnerSalaryViews() {
-  if (document.getElementById('screen-owner-salary')?.classList.contains('active')) {
+  const ownerScreenActive = document.getElementById('screen-owner-salary')?.classList.contains('active');
+  if (ownerScreenActive) {
     renderOwnerSalaryScreen();
-    return;
   }
-  renderSalaryScreen();
+  if (document.getElementById('owner-salary-history-modal')?.classList.contains('active') && ownerSalarySelectedWorker) {
+    openOwnerSalaryHistoryModal(ownerSalarySelectedWorker);
+  }
+  if (!ownerScreenActive) renderSalaryScreen();
 }
 
 function getSalaryEditHistory(entry) {
@@ -692,12 +761,8 @@ function getSalaryEditHistory(entry) {
 }
 
 function isSalaryEntryClosedByWithdrawal(entry, entries = allSalaries) {
-  if (!entry?.worker_name || !entry?.date) return false;
-  return (entries || []).some(row =>
-    row.worker_name === entry.worker_name &&
-    isSalaryWithdrawalEntry(row) &&
-    String(row.date || '') >= String(entry.date || '')
-  );
+  if (!entry?.worker_name) return false;
+  return !isSalaryEntryOpenForCurrentAccumulation(entry, entries);
 }
 
 function getPendingOwnerSalaryEntries(entries = allSalaries) {
@@ -710,6 +775,7 @@ function getPendingOwnerSalaryEntries(entries = allSalaries) {
 
 function renderOwnerPendingSalaryPanel() {
   const entries = getPendingOwnerSalaryEntries().slice(0, 80);
+  const isOpen = ownerPendingSalaryOpen;
   const html = entries.length
     ? entries.map(entry => {
       const amount = Number(entry.amount) || 0;
@@ -750,9 +816,14 @@ function renderOwnerPendingSalaryPanel() {
     : '<div style="font-size:12px;color:var(--text3);padding:8px 0;">Ожидающих начислений нет</div>';
 
   return `<div class="profile-today-card" style="margin-bottom:12px;">
-    <div class="profile-today-label"><i data-lucide="clock" style="width:15px;height:15px;"></i> Ожидающие начисления</div>
-    <div style="font-size:11px;color:var(--text3);margin-top:6px;">Можно редактировать до снятия ЗП сотрудником или старшим.</div>
-    <div style="margin-top:8px;">${html}</div>
+    <button type="button" onclick="toggleOwnerPendingSalaryPanel()" style="width:100%;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;background:none;border:none;padding:0;color:inherit;text-align:left;cursor:pointer;">
+      <div>
+        <div class="profile-today-label"><i data-lucide="clock" style="width:15px;height:15px;"></i> Ожидающие начисления</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:6px;">Можно редактировать до снятия ЗП сотрудником или старшим.</div>
+      </div>
+      <i data-lucide="${isOpen ? 'chevron-up' : 'chevron-down'}" style="width:16px;height:16px;color:var(--text3);margin-top:2px;flex-shrink:0;"></i>
+    </button>
+    <div style="display:${isOpen ? 'block' : 'none'};margin-top:8px;">${html}</div>
   </div>`;
 }
 
@@ -1276,6 +1347,15 @@ function finMetric(label, value, color) {
 // Зарплаты добавляются сотрудниками самостоятельно через экран профиля
 
 async function deleteSalaryEntry(id, ym) {
+  const entry = (allSalaries || []).find(s => s.id === id);
+  if (!entry) {
+    showToast('Запись ЗП не найдена', 'error');
+    return;
+  }
+  if (isSalaryWithdrawalEntry(entry) || isSalaryEntryClosedByWithdrawal(entry)) {
+    showToast('Архивную запись ЗП удалять нельзя', 'error');
+    return;
+  }
   if (!confirm('Удалить запись о зарплате?')) return;
   try {
     await sbDeleteWorkerSalary(id);
