@@ -623,7 +623,6 @@ function getOrderIdSortValue(order) {
 }
 
 function renderOrderCardServices(order) {
-  if (currentRole !== 'owner' && currentRole !== 'manager') return '';
   const services = getOrderServiceSelections(order?.serviceType);
   if (!services.length) return '';
   return '<div class="order-card-services">'
