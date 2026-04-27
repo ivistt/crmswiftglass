@@ -522,6 +522,7 @@ function renderOrderCard(o) {
       </div>
       <div class="order-card-meta">
         <span class="order-meta-item order-meta-pill">${icon('calendar')} ${formatDate(o.date)}</span>
+        ${o.time ? `<span class="order-meta-item order-meta-pill">${icon('clock-3')} ${escapeHtml(o.time)}</span>` : ''}
         <span class="order-meta-item order-meta-pill">${getWorkerDisplayPair(o.responsible, o.assistant)}</span>
         ${o.manager ? `<span class="order-meta-item order-meta-pill">${getWorkerDisplayName(o.manager)}</span>` : ''}
         ${warehousePillHtml}
@@ -560,7 +561,7 @@ function renderManagerOrderCardMeta(order) {
     [
       { iconLabel: icon('car'), value: order.car || '—' },
       { iconLabel: icon('phone'), value: order.phone || '—' },
-      { iconLabel: icon('calendar'), value: formatDate(order.date) },
+      { iconLabel: icon('calendar'), value: order.time ? `${formatDate(order.date)} / ${order.time}` : formatDate(order.date) },
       { iconLabel: icon('users'), value: getWorkerDisplayPair(order.responsible, order.assistant) || '—' },
     ],
     [
@@ -631,10 +632,8 @@ function renderOrderCardServices(order) {
 }
 
 function renderOrderCardCallNotes(order) {
-  if (currentRole !== 'owner' && currentRole !== 'manager') return '';
   if (currentRole === 'manager') return '';
   if (!order?.notes) return '';
-  if (!order?.callStatus) return '';
   return `<div class="order-card-note">${escapeHtml(order.notes)}</div>`;
 }
 
@@ -1679,7 +1678,7 @@ async function duplicateOrder(id) {
   if (!confirm(`Создать дубликат записи ${source.id}?`)) return;
 
   const duplicate = JSON.parse(JSON.stringify(source));
-  duplicate.id = generateOrderId();
+  delete duplicate.id;
   duplicate.statusDone = false;
   duplicate.workerDone = false;
   duplicate.priceLocked = false;
@@ -1689,10 +1688,7 @@ async function duplicateOrder(id) {
   duplicate.isCancelled = false;
 
   try {
-    const saved = await saveNewOrderWithNextIdOnConflict(
-      duplicate,
-      () => sbInsertOrder(duplicate)
-    );
+    const saved = await sbInsertOrder(duplicate);
     const nextOrder = saved || duplicate;
     orders.unshift(nextOrder);
     await addCashEntriesForDuplicatedOrder(nextOrder);
