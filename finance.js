@@ -5,10 +5,16 @@
 // Зарплаты из БД: массив { id, worker_name, date, amount }
 let allSalaries = [];
 let ownerPendingSalaryOpen = false;
+let ownerManualSalaryEntriesOpen = false;
 let ownerSalarySelectedWorker = '';
 
 function toggleOwnerPendingSalaryPanel() {
   ownerPendingSalaryOpen = !ownerPendingSalaryOpen;
+  renderOwnerSalaryScreen();
+}
+
+function toggleOwnerManualSalaryEntriesPanel() {
+  ownerManualSalaryEntriesOpen = !ownerManualSalaryEntriesOpen;
   renderOwnerSalaryScreen();
 }
 function getFinanceSalaryEntries(entries = allSalaries) {
@@ -897,8 +903,11 @@ function renderOwnerManualSalaryPanel() {
       <button class="btn-primary" id="manual-salary-save-btn" onclick="saveOwnerManualSalary()">Добавить запись</button>
       <button class="btn-secondary" id="manual-salary-cancel-btn" onclick="cancelEditManualSalary()" style="display:none;">Отмена</button>
     </div>
-    <div style="margin-top:16px;font-size:12px;font-weight:800;color:var(--text3);letter-spacing:0.04em;">РУЧНЫЕ ЗАПИСИ</div>
-    <div style="margin-top:6px;">${entriesHtml}</div>
+    <div style="margin-top:16px;display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;" onclick="toggleOwnerManualSalaryEntriesPanel()">
+      <div style="font-size:12px;font-weight:800;color:var(--text3);letter-spacing:0.04em;">РУЧНЫЕ ЗАПИСИ</div>
+      <i data-lucide="${ownerManualSalaryEntriesOpen ? 'chevron-down' : 'chevron-right'}" style="width:14px;height:14px;color:var(--text3);"></i>
+    </div>
+    ${ownerManualSalaryEntriesOpen ? `<div style="margin-top:6px;">${entriesHtml}</div>` : ''}
   </div>`;
 }
 
