@@ -7,6 +7,7 @@ let currentOrderTab = 'selection';  // 'selection' | 'call' | 'planner' | 'done'
 let currentWorkerTab = 'actual'; // 'actual' | 'today' | 'done' | 'future' | 'past' | 'all' — для специалистов
 let ordersFiltersOpen = true;
 let currentOrderDetailId = null;
+let orderModalInitialSnapshot = '';
 let orderDateFilterExact = '';
 let orderDateFilterFrom = '';
 let orderDateFilterTo = '';
@@ -2480,13 +2481,90 @@ function openOrderModal(id) {
 
   document.getElementById('order-modal').classList.add('active');
 
-  // Начальный пересчёт итогов (при редактировании)
-  setTimeout(recalcTotal, 50);
+  // Начальный пересчёт итогов (при редактировании) и фиксация исходного состояния формы
+  orderModalInitialSnapshot = '';
+  setTimeout(() => {
+    recalcTotal();
+    orderModalInitialSnapshot = getOrderModalStateSnapshot();
+  }, 50);
 }
 
-function closeOrderModal() {
+function closeOrderModal(force = false) {
+  if (!force && hasUnsavedOrderModalChanges()) {
+    openOrderCloseConfirmModal();
+    return;
+  }
   document.getElementById('order-modal').classList.remove('active');
+  closeOrderCloseConfirmModal();
   editingOrderId = null;
+  orderModalInitialSnapshot = '';
+}
+
+function getOrderModalStateSnapshot() {
+  const modal = document.getElementById('order-modal');
+  if (!modal) return '';
+  const fieldState = {};
+  modal.querySelectorAll('input[id], select[id], textarea[id]').forEach(el => {
+    if (!el.id) return;
+    if (el.type === 'checkbox' || el.type === 'radio') {
+      fieldState[el.id] = !!el.checked;
+    } else {
+      fieldState[el.id] = el.value ?? '';
+    }
+  });
+  return JSON.stringify({
+    editingOrderId: editingOrderId || null,
+    fields: fieldState,
+    clientPayments: JSON.parse(JSON.stringify(currentClientPayments || [])),
+    supplierPayments: JSON.parse(JSON.stringify(currentSupplierPayments || [])),
+  });
+}
+
+function hasUnsavedOrderModalChanges() {
+  const modal = document.getElementById('order-modal');
+  if (!modal?.classList.contains('active')) return false;
+  if (editingOrderId) return false;
+  const currentSnapshot = getOrderModalStateSnapshot();
+  if (!orderModalInitialSnapshot) return currentSnapshot !== '';
+  return currentSnapshot !== orderModalInitialSnapshot;
+}
+
+function openOrderCloseConfirmModal() {
+  let modal = document.getElementById('order-close-confirm-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'order-close-confirm-modal';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  modal.innerHTML = `
+    <div class="modal" style="max-width:360px;">
+      <div class="modal-header">
+        <div class="modal-title">Удалить изменения?</div>
+        <button class="modal-close" onclick="closeOrderCloseConfirmModal()">${icon('x')}</button>
+      </div>
+      <div class="modal-body">
+        <div style="font-size:14px;color:var(--text2);line-height:1.5;">
+          В заказе есть несохраненные изменения. Если удалить, форма закроется и изменения пропадут.
+        </div>
+      </div>
+      <div class="modal-footer" style="display:flex;gap:8px;">
+        <button class="btn-secondary" style="flex:1;" onclick="closeOrderCloseConfirmModal()">Отмена</button>
+        <button class="btn-primary icon-action-danger" style="flex:1;" onclick="confirmCloseOrderModalDiscard()">Удалить</button>
+      </div>
+    </div>
+  `;
+  modal.classList.add('active');
+  initIcons();
+}
+
+function closeOrderCloseConfirmModal() {
+  document.getElementById('order-close-confirm-modal')?.classList.remove('active');
+}
+
+function confirmCloseOrderModalDiscard() {
+  closeOrderCloseConfirmModal();
+  closeOrderModal(true);
 }
 
 function setOrderModalPanel(panel) {
@@ -3489,7 +3567,7 @@ async function saveOrder() {
       }
     }
 
-    closeOrderModal();
+    closeOrderModal(true);
     if (typeof refreshActiveOrdersViews === 'function') {
       refreshActiveOrdersViews();
     } else {
@@ -3854,7 +3932,7 @@ async function completeOrderFromModal() {
   if (!editingOrderId) return;
   await toggleWorkerDone(editingOrderId);
   const order = orders.find(item => item.id === editingOrderId);
-  if (order?.workerDone) closeOrderModal();
+  if (order?.workerDone) closeOrderModal(true);
 }
 
 // Начислить / удалить записи ЗП для всех участников заказа
