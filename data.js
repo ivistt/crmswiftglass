@@ -601,6 +601,7 @@ function ensureBuiltInDropshippers(rows = []) {
   const list = Array.isArray(rows) ? [...rows] : [];
   const builtIns = [
     { name: 'Саша Менеджер', worker_name: 'Sasha Manager' },
+    { name: 'Паша Литовченко', worker_name: '' },
   ];
 
   builtIns.forEach(entry => {
