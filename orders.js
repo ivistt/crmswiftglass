@@ -534,7 +534,7 @@ function renderOrderCard(o) {
 
 function orderHasDebtTabFinancialMeaning(order) {
   if (!order || order.isCancelled || isOrderDeleted(order)) return false;
-  if (order.inWork) return false;
+  if (!order.workerDone) return false;
   const hasDebt = ['Не оплачено', 'Частично'].includes(getEffectivePaymentStatus(order));
   if (!hasDebt) return false;
   if (order.onlySale) return true;
