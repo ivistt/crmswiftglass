@@ -606,7 +606,7 @@ function ensureBuiltInDropshippers(rows = []) {
 
   builtIns.forEach(entry => {
     const exists = list.some(row =>
-      String(row?.worker_name || '').trim() === String(entry.worker_name).trim()
+      (entry.worker_name && String(row?.worker_name || '').trim() === String(entry.worker_name).trim())
       || String(row?.name || '').trim() === String(entry.name).trim()
     );
     if (!exists) list.push(entry);
