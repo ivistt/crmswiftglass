@@ -1935,7 +1935,7 @@ function renderOwnerTodayScreen() {
         <div class="fin-month-card" style="margin-bottom:14px;">
           <div class="fin-month-header" onclick="toggleProfileMonth('${key}')">
             <div style="min-width:0;display:flex;align-items:center;gap:10px;">
-              <i data-lucide="chevron-down" style="width:16px;height:16px;color:var(--text3);transition:transform 0.2s;flex-shrink:0;" id="pchevron-${key}"></i>
+              <i data-lucide="chevron-right" style="width:16px;height:16px;color:var(--text3);transition:transform 0.2s;flex-shrink:0;" id="pchevron-${key}"></i>
               <div style="min-width:0;">
                 <div class="fin-month-name" style="white-space:normal;word-break:break-word;">${_ownerTodayGroupLabel(group)}</div>
                 <div class="fin-month-sub">${group.orders.length} заказов</div>
@@ -1943,7 +1943,7 @@ function renderOwnerTodayScreen() {
             </div>
             <div style="font-size:18px;font-weight:800;color:var(--accent);white-space:nowrap;">${group.total.toLocaleString('ru')} ₴</div>
           </div>
-          <div id="profile-month-body-${key}" style="display:block;padding:0 12px 12px;">
+          <div id="profile-month-body-${key}" style="display:none;padding:0 12px 12px;">
             ${ordersHtml}
           </div>
         </div>
