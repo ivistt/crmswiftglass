@@ -1424,6 +1424,39 @@ function copyOrderSummary(id) {
   const o = orders.find(x => x.id === id);
   if (!o) return;
 
+  if (o.workerDone) {
+    const completedOrderClientText = `Спасибо за заказ!
+
+📋 Рекомендации по эксплуатации после замены стекла
+Чтобы герметик правильно кристаллизовался и стекло сохранило герметичность на долгие годы, пожалуйста, соблюдайте следующие правила в первые 24-48 часов:
+
+1. Основные ограничения:
+• Не снимайте фиксирующий скотч в течение суток.
+• Избегайте моек высокого давления.
+• Паркуйтесь на ровной поверхности.
+
+2. Важные нюансы:
+• Закрывайте двери плавно. При закрытии двери в салоне создается скачок давления.
+• Соблюдайте спокойный темп езды.
+
+3. Рекомендация по уходу:
+• Оптимально будет заменить щетки стеклоочистителя на новые. Старые дворники часто имеют износ и накопившуюся пыль.
+
+Будем благодарны за обратную связь!
+https://share.google/EKtUDPReA8dCuWp4z`;
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(completedOrderClientText).then(() => {
+        showToast('Дані скопійовано');
+      }).catch(() => {
+        _fallbackCopy(completedOrderClientText);
+      });
+    } else {
+      _fallbackCopy(completedOrderClientText);
+    }
+    return;
+  }
+
   const textLines = [];
   const htmlParts = [];
   const fullTotal = getOrderClientTotal(o);
