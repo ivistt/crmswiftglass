@@ -605,9 +605,20 @@ function compareOrdersForList(a, b, sort = 'desc', prioritize = false) {
     const priorityDelta = Number(!!b?.priorityTask) - Number(!!a?.priorityTask);
     if (priorityDelta) return priorityDelta;
   }
+  const av = getOrderIdSortValue(a);
+  const bv = getOrderIdSortValue(b);
+  if (av !== bv) return sort === 'asc' ? av - bv : bv - av;
   const ad = String(a?.date || '');
   const bd = String(b?.date || '');
-  return sort === 'asc' ? ad.localeCompare(bd) : bd.localeCompare(ad);
+  const dateCompare = sort === 'asc' ? ad.localeCompare(bd) : bd.localeCompare(ad);
+  if (dateCompare) return dateCompare;
+  return String(a?.time || '').localeCompare(String(b?.time || ''));
+}
+
+function getOrderIdSortValue(order) {
+  const raw = String(order?.id || '').trim().toUpperCase();
+  const match = raw.match(/SG-(\d+)/);
+  return match ? Number(match[1]) || 0 : 0;
 }
 
 function renderOrderCardServices(order) {

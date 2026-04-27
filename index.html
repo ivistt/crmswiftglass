@@ -278,8 +278,8 @@
               placeholder="Поиск по клиенту, авто..." oninput="refreshOrdersView()" style="width:100%;padding-left:38px;">
           </div>
           <select class="filter-select" id="filter-sort" onchange="refreshOrdersView()" style="width:auto;min-width:150px;flex:0 0 150px;">
-            <option value="desc">Сначала новые</option>
-            <option value="asc">Сначала старые</option>
+            <option value="desc">Сначала большие айди</option>
+            <option value="asc">Сначала мелкие айди</option>
           </select>
         </div>
         <div style="display:flex;gap:8px;width:100%;">
@@ -451,7 +451,7 @@
       <div class="page-header" style="margin-top:-10px;">
         <div class="page-title" style="display:flex;align-items:center;gap:10px;">
           <span class="ico page-title-icon"><i data-lucide="calendar-days" style="width:22px;height:22px;"></i></span>
-          Сегодня
+          Группы
         </div>
       </div>
       <div id="owner-today-content"></div>

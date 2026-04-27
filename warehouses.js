@@ -12,6 +12,7 @@ let warehouseSortFilter = 'desc';
 let warehouseDateFilterExact = '';
 let warehouseDateFilterFrom = '';
 let warehouseDateFilterTo = '';
+let warehouseNewPostOnly = false;
 
 function getSupplierDebt(order) {
   return Math.max(0, (Number(order.purchase) || 0) - getOrderSupplierPaidAmount(order));
@@ -110,6 +111,7 @@ function openWarehouseDetail(w) {
   warehouseDateFilterExact = '';
   warehouseDateFilterFrom = '';
   warehouseDateFilterTo = '';
+  warehouseNewPostOnly = false;
   const titleEl = document.getElementById('warehouse-detail-title');
   if (titleEl) titleEl.textContent = `Склад: ${w}`;
   renderWarehouseDetail();
@@ -147,7 +149,11 @@ function renderWarehouseDetail() {
   });
   if (warehouseStatusFilter) filteredList = filteredList.filter(o => getEffectivePaymentStatus(o) === warehouseStatusFilter);
   if (warehouseWorkerFilter) filteredList = filteredList.filter(o => o.responsible === warehouseWorkerFilter || o.assistant === warehouseWorkerFilter || o.manager === warehouseWorkerFilter);
+  if (warehouseNewPostOnly) filteredList = filteredList.filter(o => !!o.newPost);
   filteredList.sort((a, b) => {
+    const av = typeof getOrderIdSortValue === 'function' ? getOrderIdSortValue(a) : 0;
+    const bv = typeof getOrderIdSortValue === 'function' ? getOrderIdSortValue(b) : 0;
+    if (av !== bv) return warehouseSortFilter === 'asc' ? av - bv : bv - av;
     const ad = a.date || '';
     const bd = b.date || '';
     return warehouseSortFilter === 'asc' ? ad.localeCompare(bd) : bd.localeCompare(ad);
@@ -202,10 +208,14 @@ function renderWarehouseOrderFilters() {
         ${workerOptions.map(name => `<option value="${escapeAttr(name)}" ${warehouseWorkerFilter === name ? 'selected' : ''}>${escapeHtml(getWorkerDisplayName(name))}</option>`).join('')}
       </select>
       <select class="filter-select" onchange="setWarehouseSortFilter(this.value)">
-        <option value="desc" ${warehouseSortFilter === 'desc' ? 'selected' : ''}>Сначала новые</option>
-        <option value="asc" ${warehouseSortFilter === 'asc' ? 'selected' : ''}>Сначала старые</option>
+        <option value="desc" ${warehouseSortFilter === 'desc' ? 'selected' : ''}>Сначала большие айди</option>
+        <option value="asc" ${warehouseSortFilter === 'asc' ? 'selected' : ''}>Сначала мелкие айди</option>
       </select>
       <button class="filter-select" type="button" onclick="openWarehouseDateFilterModal()">${escapeHtml(getWarehouseDateFilterLabel())}</button>
+      <label class="orders-tab ${warehouseNewPostOnly ? 'active' : ''}" style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+        <input type="checkbox" ${warehouseNewPostOnly ? 'checked' : ''} onchange="setWarehouseNewPostOnly(this.checked)">
+        Новая почта
+      </label>
     </div>
   `;
 }
@@ -227,6 +237,11 @@ function setWarehouseWorkerFilter(value) {
 
 function setWarehouseSortFilter(value) {
   warehouseSortFilter = value || 'desc';
+  renderWarehouseDetail();
+}
+
+function setWarehouseNewPostOnly(value) {
+  warehouseNewPostOnly = !!value;
   renderWarehouseDetail();
 }
 

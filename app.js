@@ -10,6 +10,7 @@ let ownerCashConfirmFilter = 'all';
 const OWNER_FOP_SELECTION_KEY = 'Oleg Starshiy__fop';
 let calendarCursorDate = new Date();
 let calendarWorkerFilters = [];
+let ownerTodayDateFilter = '';
 const THEME_STORAGE_KEY = 'crm_theme';
 
 // Fallback если data.js старой версии (без carDirectory)
@@ -210,8 +211,14 @@ async function openOwnerPaymentsScreen() {
 
 function openOwnerTodayScreen() {
   if (!canViewOwnerToday()) return;
+  ownerTodayDateFilter = ownerTodayDateFilter || getLocalDateString();
   renderOwnerTodayScreen();
   showScreen('owner-today');
+}
+
+function setOwnerTodayDateFilter(value) {
+  ownerTodayDateFilter = value || getLocalDateString();
+  renderOwnerTodayScreen();
 }
 
 function openCalendarScreen() {
@@ -590,7 +597,7 @@ function renderHome() {
         <div class="home-card-icon-wrap home-card-icon-dim">
           <i data-lucide="calendar-days" style="width:22px;height:22px;"></i>
         </div>
-        <h3>Сегодня</h3>
+        <h3>Группы</h3>
         <p>${todayOrders.length} заказов</p>
         <div class="home-card-count" style="font-size:22px; color: var(--accent);">${todayTotal.toLocaleString('ru')} ₴</div>
       </div>
@@ -1862,17 +1869,20 @@ function renderOwnerTodayScreen() {
   const container = document.getElementById('owner-today-content');
   if (!container) return;
 
-  const today = getLocalDateString();
+  const selectedDate = ownerTodayDateFilter || getLocalDateString();
   const dayOrders = (orders || [])
-    .filter(o => isOrderFinanciallyActive(o) && o.date === today)
+    .filter(o => isOrderFinanciallyActive(o) && o.date === selectedDate)
     .sort((a, b) => String(a.time || '').localeCompare(String(b.time || '')));
 
   if (!dayOrders.length) {
     container.innerHTML = `
+      <div class="filters-bar" style="margin-bottom:14px;">
+        <input class="form-input" type="date" value="${selectedDate}" onchange="setOwnerTodayDateFilter(this.value)">
+      </div>
       <div class="empty-state">
         <div class="empty-state-icon">${icon('calendar')}</div>
-        <h3>На сегодня заказов нет</h3>
-        <p>Когда на ${formatDate(today)} появятся заказы, они будут собраны по группам сотрудников</p>
+        <h3>На эту дату заказов нет</h3>
+        <p>Когда на ${formatDate(selectedDate)} появятся заказы, они будут собраны по группам сотрудников</p>
       </div>
     `;
     initIcons();
@@ -1897,11 +1907,14 @@ function renderOwnerTodayScreen() {
   const totalAmount = dayOrders.reduce((sum, order) => sum + getOrderClientTotalAmount(order), 0);
 
   container.innerHTML = `
+    <div class="filters-bar" style="margin-bottom:14px;">
+      <input class="form-input" type="date" value="${selectedDate}" onchange="setOwnerTodayDateFilter(this.value)">
+    </div>
     <div class="owner-today-summary">
       <div class="owner-today-summary-item">
         <span class="owner-today-summary-label">Заказы</span>
         <strong>${dayOrders.length}</strong>
-        <small>${formatDate(today)}</small>
+        <small>${formatDate(selectedDate)}</small>
       </div>
       <div class="owner-today-summary-item">
         <span class="owner-today-summary-label">Группы</span>

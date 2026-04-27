@@ -4,6 +4,43 @@
 
 let currentClientDetailKey = null;
 
+function buildClientDebtCopyText(client) {
+  const debtOrders = (client?.orders || []).filter(order => getOrderDebtLeft(order) > 0);
+  if (!debtOrders.length) return '';
+  const lines = debtOrders.map(order => {
+    const services = formatOrderServiceTypeText(order?.serviceType || '') || '—';
+    const total = getOrderClientTotalAmount(order);
+    const debtLeft = getOrderDebtLeft(order);
+    return [
+      formatDate(order.date),
+      `Авто: ${order.car || '—'}`,
+      `Услуги: ${services}`,
+      `Общая сумма: ${total.toLocaleString('ru')} ₴`,
+      `Остаток долга: ${debtLeft.toLocaleString('ru')} ₴`,
+    ].join('\n');
+  });
+  const totalAmount = debtOrders.reduce((sum, order) => sum + getOrderClientTotalAmount(order), 0);
+  const totalDebt = debtOrders.reduce((sum, order) => sum + getOrderDebtLeft(order), 0);
+  return `${client.name || 'Клиент'}\n\n${lines.join('\n\n')}\n\nИтого по заказам: ${totalAmount.toLocaleString('ru')} ₴\nИтого долг: ${totalDebt.toLocaleString('ru')} ₴`;
+}
+
+async function copyClientDebtSummary(key) {
+  const decoded = decodeURIComponent(key || '');
+  const client = getClients().find(item => (item.phone || item.name) === decoded);
+  if (!client) return;
+  const text = buildClientDebtCopyText(client);
+  if (!text) {
+    showToast('У клиента нет заказов с долгом', 'error');
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast('Сводка долга скопирована ✓');
+  } catch (e) {
+    showToast('Не удалось скопировать', 'error');
+  }
+}
+
 function renderClients() {
   const search = (document.getElementById('filter-client-search')?.value || '').toLowerCase();
   const sort = document.getElementById('filter-client-sort')?.value || 'debt-desc';
@@ -91,7 +128,10 @@ function openClientDetail(key) {
             <div class="detail-title">${c.name}</div>
             <div class="detail-subtitle">${c.phone || '—'}${c.address ? ' · ' + c.address : ''}</div>
           </div>
+        <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;">
+          ${debtOrders.length ? `<button class="btn-secondary" onclick="event.stopPropagation(); copyClientDebtSummary('${encodeURIComponent(c.phone || c.name)}')">${icon('copy')} Скопировать</button>` : ''}
         ${clientTotalsHtml}
+        </div>
       </div>
     </div>
 
