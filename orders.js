@@ -27,6 +27,8 @@ const SERVICE_TYPE_OPTIONS = [
   { group: 'Вклейка', name: 'Вклейка заднего', rate: 200, salaryCategory: 'glue' },
   { group: 'Вклейка', name: 'Вклейка лобового бус', rate: 250, salaryCategory: 'glue' },
   { group: 'Вклейка', name: 'Вклейка лобового грузовик', rate: 350, salaryCategory: 'glue' },
+  { group: 'Дополнительно', name: 'Тату', rate: 0, salaryCategory: 'special' },
+  { group: 'Дополнительно', name: 'Тонировка', rate: 0, salaryCategory: 'special' },
   { group: 'Нестандартные работы', name: 'Нестандартные работы', rate: 0, salaryCategory: 'custom' },
 ];
 const CUSTOM_SERVICE_TYPE_NAME = 'Нестандартные работы';
@@ -208,6 +210,10 @@ function serializeOrderServiceSelections(items) {
 function formatOrderServiceLabel(name, qty = 1) {
   const safeQty = Math.max(1, Number(qty) || 1);
   return safeQty > 1 ? `${name} ×${safeQty}` : name;
+}
+
+function serviceOptionUsesQty(item) {
+  return item?.salaryCategory !== 'special';
 }
 
 function formatOrderServiceTypeText(value) {
@@ -705,7 +711,7 @@ function openOrderServicesModal(orderId) {
                 <input type="checkbox" value="${escapeAttr(item.name)}" ${selectedMap.has(item.name) ? 'checked' : ''} onchange="syncOrderServicesModalSelection(this)">
                 <span class="service-option-label">${escapeHtml(item.name)}</span>
               </span>
-              <span class="service-option-qty">
+              <span class="service-option-qty" ${serviceOptionUsesQty(item) ? '' : 'style="display:none;"'}>
                 <input
                   type="text"
                   inputmode="numeric"
@@ -1830,7 +1836,7 @@ function populateRefSelects() {
                 <input type="checkbox" value="${item.name}" ${curMap.has(item.name) ? 'checked' : ''} onchange="syncServiceTypes(this)">
                 <span class="service-option-label">${item.name}</span>
               </span>
-              <span class="service-option-qty">
+              <span class="service-option-qty" ${serviceOptionUsesQty(item) ? '' : 'style="display:none;"'}>
                 <input
                   type="text"
                   inputmode="numeric"
@@ -3844,6 +3850,18 @@ async function _upsertOrderSalaries(order) {
       affectedWorkers.add(managerName);
       amounts[managerName] = (amounts[managerName] || 0) + _calcManagerSalary(order);
     }
+
+    const tatuAmount = _calcTatuBonus('Roma', order);
+    if (tatuAmount > 0) {
+      affectedWorkers.add('Roma');
+      amounts['Roma'] = (amounts['Roma'] || 0) + tatuAmount;
+    }
+
+    const toningAmount = _calcToningBonus('Lyosha', order);
+    if (toningAmount > 0) {
+      affectedWorkers.add('Lyosha');
+      amounts['Lyosha'] = (amounts['Lyosha'] || 0) + toningAmount;
+    }
   }
 
   // Всегда берём актуальные записи ЗП по этому заказу из БД
@@ -3851,12 +3869,25 @@ async function _upsertOrderSalaries(order) {
   try {
     existingInDb = await sbFetchSalariesByOrder(order.id) || [];
   } catch (e) { /* если упало — продолжаем с пустым массивом */ }
-  const automaticEntriesInDb = existingInDb.filter(entry => !isOwnerManualSalaryEntry(entry));
+  const legacySpecialEntriesInDb = existingInDb.filter(isLegacySpecialServiceSalaryEntry);
+  for (const entry of legacySpecialEntriesInDb) {
+    try {
+      await sbDeleteWorkerSalary(entry.id);
+    } catch (e) { /* не критично */ }
+  }
+  const automaticEntriesInDb = existingInDb.filter(entry => !isOwnerManualSalaryEntry(entry) && !isLegacySpecialServiceSalaryEntry(entry));
 
   // После первого выполнения заказа ЗП по этому order_id считается зафиксированной:
   // последующие правки сумм/полей заказа не должны менять уже начисленные записи.
   const salaryFrozen = order.workerDone && automaticEntriesInDb.length;
   if (salaryFrozen) {
+    const missingWorkers = Object.keys(amounts).filter(workerName =>
+      Number(amounts[workerName]) > 0 && !automaticEntriesInDb.some(entry => entry.worker_name === workerName)
+    );
+    for (const workerName of missingWorkers) {
+      await sbInsertWorkerSalary({ worker_name: workerName, date: order.date, amount: amounts[workerName], order_id: order.id, entry_type: 'auto' });
+      affectedWorkers.add(workerName);
+    }
     for (const workerName of affectedWorkers) {
       if (!_canSyncDailyBaseSalaryForWorker(workerName)) continue;
       await _syncDailyBaseSalaryEntry(workerName, order.date);
@@ -3867,12 +3898,6 @@ async function _upsertOrderSalaries(order) {
       } catch (e) { /* не критично */ }
     }
     return;
-  }
-
-  const specialSalaryEntries = getSpecialServiceSalaryEntries(order);
-  for (const entry of specialSalaryEntries) {
-    await upsertSpecialServiceSalaryEntry(entry);
-    affectedWorkers.add(entry.workerName);
   }
 
   const workerNamesToProcess = new Set([...Object.keys(amounts), ...automaticEntriesInDb.map(s => s.worker_name)]);
@@ -3909,31 +3934,7 @@ async function _upsertOrderSalaries(order) {
 }
 
 function getSpecialServiceSalaryEntries(order) {
-  const entries = [];
-  if (!order?.workerDone) return entries;
-  const tatuAmount = _calcTatuBonus('Roma', order);
-  if (((Number(order?.tatu) || 0) > 0 || order?.tatuDone || order?.tatuStatus) && (order?.tatuDone || order?.tatuStatus)) {
-    entries.push({
-      workerName: 'Roma',
-      date: order.date,
-      amount: tatuAmount,
-      orderId: `${order.id} · Тату`,
-      comment: `Тату по заказу ${order.id}`,
-    });
-  }
-
-  const toningAmount = _calcToningBonus('Lyosha', order);
-  if (((Number(order?.toning) || 0) > 0 || order?.toningDone || order?.toningStatus) && (order?.toningDone || order?.toningStatus)) {
-    entries.push({
-      workerName: 'Lyosha',
-      date: order.date,
-      amount: toningAmount,
-      orderId: `${order.id} · Тонировка`,
-      comment: `Тонировка по заказу ${order.id}`,
-    });
-  }
-
-  return entries;
+  return [];
 }
 
 async function upsertSpecialServiceSalaryEntry(entry) {

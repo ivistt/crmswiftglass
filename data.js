@@ -272,13 +272,15 @@ async function sbFetchWorkerSalaries(workerName) {
     { headers: getHeaders() }
   );
   if (!res.ok) await throwApiError(res);
-  return res.json();
+  const rows = await res.json();
+  return (Array.isArray(rows) ? rows : []).filter(entry => !isLegacySpecialServiceSalaryEntry(entry));
 }
 
 async function sbFetchAllSalaries() {
   const res = await fetch(`${WORKER_URL}/api/salaries/all`, { headers: getHeaders() });
   if (!res.ok) await throwApiError(res);
-  return res.json();
+  const rows = await res.json();
+  return (Array.isArray(rows) ? rows : []).filter(entry => !isLegacySpecialServiceSalaryEntry(entry));
 }
 
 async function sbFetchSalariesByOrder(orderId) {
@@ -1188,6 +1190,17 @@ function isManualSalaryReportEntry(entry) {
 
 function isOwnerManualSalaryEntry(entry) {
   return !!entry && entry.entry_type === 'manual';
+}
+
+function isLegacySpecialServiceSalaryEntry(entry) {
+  if (!entry) return false;
+  const orderId = String(entry.order_id || '').trim();
+  const comment = String(entry.comment || '').trim();
+  if (!orderId) return false;
+  return (
+    (orderId.includes('· Тату') && comment.startsWith('Тату по заказу ')) ||
+    (orderId.includes('· Тонировка') && comment.startsWith('Тонировка по заказу '))
+  );
 }
 
 function isSalaryWithdrawalEntry(entry) {

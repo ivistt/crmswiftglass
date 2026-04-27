@@ -299,6 +299,23 @@ function getSalaryAccumulatedForWithdraw(workerName, entries) {
   return relevantEntries.reduce((sum, s) => sum + Number(s.amount), 0);
 }
 
+function getWorkerSalaryVisualDayData(workerName, date, dateEntries) {
+  const withdrawals = (dateEntries || []).filter(isSalaryWithdrawalEntry);
+  const accruals = (dateEntries || []).filter(entry => !isSalaryWithdrawalEntry(entry));
+  const summary = getWorkerCompletedOrdersSummary(workerName, date);
+  const orderIds = new Set((summary.orders || []).map(order => order.id));
+  const otherAccruals = accruals.filter(entry => isOwnerManualSalaryEntry(entry) || !orderIds.has(entry.order_id));
+  const ordersAmount = (summary.orders || []).reduce((sum, order) => sum + (Number(order.amount) || 0), 0);
+  const otherAmount = otherAccruals.reduce((sum, entry) => sum + Number(entry.amount), 0);
+  return {
+    summary,
+    withdrawals,
+    accruals,
+    otherAccruals,
+    visualAmount: ordersAmount + otherAmount,
+  };
+}
+
 function renderWorkerSalarySection({ title, accumulated, todayAmount, todaySummary, withdrawAction, withdrawDisabled, showWithdraw = true, attendanceHtml = '' }) {
   return ''
     + '<div class="profile-today-card" style="margin-top:12px;">'
@@ -495,9 +512,9 @@ function buildWorkerSalaryHistory(workerName, entries) {
 
   return years.map(year => {
     const months = Object.keys(tree[year]).sort((a, b) => b.localeCompare(a));
-    const yearSum = months.reduce((sum, ym) => sum + Object.values(tree[year][ym]).flat().reduce((acc, e) => {
-      if (isSalaryWithdrawalEntry(e)) return acc;
-      return acc + Number(e.amount);
+    const yearSum = months.reduce((sum, ym) => sum + Object.keys(tree[year][ym]).reduce((acc, date) => {
+      const visualDay = getWorkerSalaryVisualDayData(workerName, date, tree[year][ym][date]);
+      return acc + visualDay.visualAmount;
     }, 0), 0);
     const yearKey = 'sal-year-' + year;
 
@@ -505,21 +522,17 @@ function buildWorkerSalaryHistory(workerName, entries) {
       const parts = ym.split('-');
       const monthName = MONTH_NAMES[parseInt(parts[1]) - 1];
       const days = Object.keys(tree[year][ym]).sort((a, b) => b.localeCompare(a));
-      const monthSum = days.reduce((sum, date) => sum + tree[year][ym][date].reduce((acc, e) => {
-        if (isSalaryWithdrawalEntry(e)) return acc;
-        return acc + Number(e.amount);
-      }, 0), 0);
+      const monthSum = days.reduce((sum, date) => {
+        const visualDay = getWorkerSalaryVisualDayData(workerName, date, tree[year][ym][date]);
+        return sum + visualDay.visualAmount;
+      }, 0);
       const monthKey = 'sal-month-' + ym;
 
       const daysHtml = days.map(date => {
         const dateEntries = tree[year][ym][date];
-        const withdrawals = dateEntries.filter(isSalaryWithdrawalEntry);
-        const accruals = dateEntries.filter(entry => !isSalaryWithdrawalEntry(entry));
-        const summary = getWorkerCompletedOrdersSummary(workerName, date);
-        const orderIds = new Set((summary.orders || []).map(order => order.id));
-        const otherAccruals = accruals.filter(entry => isOwnerManualSalaryEntry(entry) || !orderIds.has(entry.order_id));
-        const accrualAmount = accruals.reduce((sum, entry) => sum + Number(entry.amount), 0);
-        const totalForDay = accrualAmount;
+        const { withdrawals, summary, otherAccruals, visualAmount } = getWorkerSalaryVisualDayData(workerName, date, dateEntries);
+        const accrualAmount = visualAmount;
+        const totalForDay = visualAmount;
         const dayKey = 'sal-day-' + date;
         const ordersHtml = renderSalaryOrdersList(summary.orders);
         const accrualsHtml = otherAccruals.length
