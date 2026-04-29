@@ -1311,10 +1311,27 @@ function openCashEntryModal(account = 'cash') {
                 <button class="btn-secondary" id="cash-sign-minus"
                   style="font-size:18px;font-weight:800;padding:8px 16px;"
                   onclick="setCashSign(-1)">−</button>
-                <input class="form-input" type="number" id="cash-amount-input"
-                  placeholder="500" min="0" style="flex:1;">
+                <input class="form-input" type="text" inputmode="decimal" id="cash-amount-input"
+                  placeholder="500" style="flex:1;">
               </div>
               <div style="font-size:11px;color:var(--text3);margin-top:4px;">+ приход &nbsp;·&nbsp; − расход</div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Категория расхода</label>
+              <select class="form-select" id="cash-expense-category" onchange="updateCashExpenseMode()">
+                <option value="">Обычная запись</option>
+                ${getExpenseCategoryOptions().map(category => `<option value="${escapeAttr(category)}">${escapeHtml(category)}</option>`).join('')}
+              </select>
+            </div>
+            <div class="form-group" id="cash-expense-warehouse-group">
+              <label class="form-label">Склад</label>
+              <select class="form-select" id="cash-expense-warehouse">
+                <option value="">— выбрать —</option>
+                ${getWarehouseNameOptions().map(warehouse => `<option value="${escapeAttr(warehouse)}">${escapeHtml(warehouse)}</option>`).join('')}
+              </select>
+            </div>
+            <div id="cash-expense-hint" style="display:none;font-size:11px;color:var(--text3);margin-top:-4px;">
+              Если выбрана категория, запись сохранится как расход автоматически.
             </div>
             <div class="form-group">
               <label class="form-label">Комментарий</label>
@@ -1345,6 +1362,7 @@ function openCashEntryModal(account = 'cash') {
   }
   window._cashSign = 1;
   _updateCashSignButtons();
+  updateCashExpenseMode();
 
   modal.classList.add('active');
   initIcons();
@@ -1354,6 +1372,30 @@ function openCashEntryModal(account = 'cash') {
       : (window._cashAccount === 'currency-entry' ? 'cash-usd-amount-input' : 'cash-amount-input');
     document.getElementById(targetId)?.focus();
   }, 100);
+}
+
+function updateCashExpenseMode() {
+  const category = String(document.getElementById('cash-expense-category')?.value || '').trim();
+  const warehouseGroup = document.getElementById('cash-expense-warehouse-group');
+  const warehouseSelect = document.getElementById('cash-expense-warehouse');
+  const hint = document.getElementById('cash-expense-hint');
+  const plus = document.getElementById('cash-sign-plus');
+  const minus = document.getElementById('cash-sign-minus');
+  const isExpense = !!category;
+  const needsWarehouse = isExpense && isWarehouseExpenseCategory(category);
+
+  if (warehouseGroup) warehouseGroup.style.display = isExpense ? '' : 'none';
+  if (warehouseSelect) {
+    warehouseSelect.disabled = !needsWarehouse;
+    if (!needsWarehouse) warehouseSelect.value = '';
+  }
+  if (hint) hint.style.display = isExpense ? 'block' : 'none';
+  if (plus) plus.disabled = isExpense;
+  if (minus) minus.disabled = isExpense;
+  if (isExpense) {
+    window._cashSign = -1;
+  }
+  _updateCashSignButtons();
 }
 
 function closeCashEntryModal() {
@@ -1458,8 +1500,10 @@ async function saveCashEntry() {
         fop_date: null,
       });
     } else {
-      const rawAmt = Number(document.getElementById('cash-amount-input')?.value);
+      const rawAmt = Number(String(document.getElementById('cash-amount-input')?.value || '').replace(',', '.').trim());
       const comment = document.getElementById('cash-comment-input')?.value.trim();
+      const expenseCategory = String(document.getElementById('cash-expense-category')?.value || '').trim();
+      const expenseWarehouse = String(document.getElementById('cash-expense-warehouse')?.value || '').trim();
       const sign = window._cashSign || 1;
 
       if (!rawAmt || rawAmt <= 0) {
@@ -1471,12 +1515,26 @@ async function saveCashEntry() {
         document.getElementById('cash-comment-input')?.focus();
         return;
       }
+      if (expenseCategory && isWarehouseExpenseCategory(expenseCategory) && !expenseWarehouse) {
+        showToast('Выберите склад', 'error');
+        document.getElementById('cash-expense-warehouse')?.focus();
+        return;
+      }
 
-      const amount = rawAmt * sign;
+      const isExpense = !!expenseCategory;
+      const amount = isExpense ? -Math.abs(rawAmt) : (rawAmt * sign);
+      const finalComment = isExpense
+        ? buildExpenseCashComment({
+            amount: rawAmt,
+            category: expenseCategory,
+            warehouse: expenseWarehouse,
+            note: comment,
+          })
+        : comment;
       entry = await sbInsertCashEntry({
         worker_name: currentWorkerName,
         amount,
-        comment,
+        comment: finalComment,
         cash_account: window._cashAccount === 'fop' ? CASH_ACCOUNT_FOP : CASH_ACCOUNT_CASH,
         fop_confirmed: false,
         fop_date: window._cashAccount === 'fop' ? getLocalDateString() : null,

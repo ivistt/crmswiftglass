@@ -414,7 +414,107 @@ function isCurrencyCashTransferEntry(entry) {
   return !!parsed && Math.abs(Number(parsed.uahAmount) || 0) > 0;
 }
 
+const EXPENSE_CATEGORY_OPTIONS = ['Заправка', 'Химия', 'Молдинг', 'Инструменты', 'Пленка'];
+
+function getExpenseCategoryOptions() {
+  return [...EXPENSE_CATEGORY_OPTIONS];
+}
+
+function isWarehouseExpenseCategory(category) {
+  return String(category || '').trim() !== 'Заправка';
+}
+
+function getWarehouseNameOptions() {
+  const seen = new Set();
+  const result = [];
+  const warehouseSource = Array.isArray(refWarehouses)
+    ? refWarehouses
+    : (refWarehouses && typeof refWarehouses === 'object'
+      ? Object.values(refWarehouses)
+      : []);
+  const push = (value) => {
+    const name = String(value || '').trim();
+    if (!name) return;
+    const key = name.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    result.push(name);
+  };
+
+  warehouseSource.forEach(item => {
+    if (typeof item === 'string') push(item);
+    else if (item && typeof item === 'object') {
+      push(item.name);
+      push(item.title);
+      push(item.label);
+      push(item.warehouse);
+      push(item.value);
+    }
+  });
+  (orders || []).forEach(order => {
+    push(order?.warehouse);
+    push(order?.warehouseName);
+    push(order?.storage);
+  });
+  const cashSources = [
+    ...(Array.isArray(window.allCashLog) ? window.allCashLog : []),
+    ...(Array.isArray(window.cashLog) ? window.cashLog : []),
+    ...(Array.isArray(window.workerCashLog) ? window.workerCashLog : []),
+  ];
+  cashSources.forEach(entry => {
+    const parsedExpense = parseExpenseCashEntry(entry);
+    if (parsedExpense?.warehouse) push(parsedExpense.warehouse);
+  });
+  return result
+    .filter(name => {
+      const normalized = String(name || '').trim();
+      if (!normalized) return false;
+      if (normalized === '—' || normalized === '-') return false;
+      if (/could not find the table|perhaps you meant|pgrst\d+/i.test(normalized)) return false;
+      return true;
+    })
+    .sort((a, b) => a.localeCompare(b, 'ru'));
+}
+
+function buildExpenseCashComment({ amount = 0, category = '', warehouse = '', note = '' } = {}) {
+  const normalizedCategory = String(category || '').trim();
+  const normalizedWarehouse = String(warehouse || '').trim();
+  const normalizedNote = String(note || '').trim();
+  const amountLabel = Math.abs(Number(amount) || 0).toLocaleString('ru');
+  const parts = [`Расход(${amountLabel})`, normalizedCategory];
+  if (normalizedWarehouse && normalizedCategory !== 'Заправка') {
+    parts.push(`склад ${normalizedWarehouse}`);
+  }
+  const head = parts.filter(Boolean).join(' · ');
+  return normalizedNote ? `${head} - ${normalizedNote}` : head;
+}
+
+function parseExpenseCashEntry(entry) {
+  const raw = String(entry?.comment || '').trim();
+  if (!raw.startsWith('Расход(')) return null;
+  const match = raw.match(/^Расход\(([^)]+)\)\s*·\s*([^·-]+?)(?:\s*·\s*склад\s+([^-\n]+?))?(?:\s*-\s*([\s\S]+))?$/);
+  if (!match) return null;
+  const category = String(match[2] || '').trim();
+  if (!EXPENSE_CATEGORY_OPTIONS.includes(category)) return null;
+  return {
+    amountLabel: String(match[1] || '').trim(),
+    category,
+    warehouse: String(match[3] || '').trim(),
+    note: String(match[4] || '').trim(),
+  };
+}
+
+function isExpenseCashEntry(entry) {
+  return !!parseExpenseCashEntry(entry);
+}
+
+function getExpenseCashAmount(entry) {
+  return Math.abs(Number(entry?.amount) || 0);
+}
+
 function getCashEntryDisplayComment(entry) {
+  const expense = parseExpenseCashEntry(entry);
+  if (expense) return String(entry?.comment || '—');
   const parsed = parseCurrencyCashEntry(entry);
   if (!parsed) return String(entry?.comment || '—');
   const base = parsed.uahAmount > 0
@@ -460,7 +560,8 @@ async function sbFetchRef(table) {
 
 async function sbFetchRefOptional(table) {
   try {
-    return await sbFetchRef(table);
+    const data = await sbFetchRef(table);
+    return Array.isArray(data) ? data : [];
   } catch (e) {
     // если таблица ещё не проксируется воркером — молча возвращаем пустой список
     return [];

@@ -103,6 +103,91 @@ function getSalaryAnomalies(entries = allSalaries) {
     });
 }
 
+function getOrderSupplierQuickPaidAmount(order) {
+  const payments = Array.isArray(order?.supplierPayments) ? order.supplierPayments : [];
+  return payments.reduce((sum, payment) => sum + Math.max(0, Number(payment?.amount) || 0), 0);
+}
+
+function getSupplierPaymentAnomalies() {
+  return (orders || [])
+    .filter(order => !order?.isCancelled)
+    .map(order => {
+      const purchase = Math.max(0, Number(order?.purchase) || 0);
+      const paid = getOrderSupplierQuickPaidAmount(order);
+      return {
+        kind: 'supplier-overpay',
+        order,
+        orderId: order?.id || '',
+        client: order?.client || '',
+        car: order?.car || '',
+        date: order?.date || '',
+        purchase,
+        paid,
+        overpay: Math.max(0, paid - purchase),
+      };
+    })
+    .filter(item => item.paid > item.purchase && item.paid > 0)
+    .sort((a, b) => {
+      if (b.overpay !== a.overpay) return b.overpay - a.overpay;
+      return String(b.date || '').localeCompare(String(a.date || ''));
+    });
+}
+
+function getFinanceAnomalies(entries = allSalaries) {
+  const salaryAnomalies = getSalaryAnomalies(entries).map(item => ({
+    kind: 'salary-deviation',
+    severity: item.deviationPct || 0,
+    ...item,
+  }));
+  const supplierAnomalies = getSupplierPaymentAnomalies().map(item => ({
+    ...item,
+    severity: item.overpay || 0,
+  }));
+  return [...supplierAnomalies, ...salaryAnomalies].sort((a, b) => (Number(b.severity) || 0) - (Number(a.severity) || 0));
+}
+
+function renderFinanceAnomaliesPanel(entries = allSalaries) {
+  const anomalies = getFinanceAnomalies(entries);
+  const rowsHtml = anomalies.length
+    ? anomalies.map(item => {
+      if (item.kind === 'supplier-overpay') {
+        return `
+          <div class="sal-nav-row" onclick="openSalaryEntryOrder('${financeEscapeAttr(item.orderId)}', event)" style="padding:10px 0;">
+            <div style="min-width:0;">
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                <span style="font-size:13px;font-weight:800;color:#ef4444;">Поставщик</span>
+                <span style="font-size:12px;font-weight:800;color:var(--text);">${escapeHtml(item.orderId || '—')}</span>
+              </div>
+              <div style="font-size:12px;color:var(--text);margin-top:4px;font-weight:700;">${escapeHtml(item.client || item.car || '—')}</div>
+              ${item.car ? `<div style="font-size:12px;color:var(--text3);margin-top:4px;">${escapeHtml(item.car)}</div>` : ''}
+              <div style="font-size:12px;color:var(--text3);margin-top:4px;">Покупка: ${item.purchase.toLocaleString('ru')} ₴ · Быстрые оплаты: ${item.paid.toLocaleString('ru')} ₴</div>
+            </div>
+            <div style="font-size:14px;font-weight:900;color:#ef4444;white-space:nowrap;">+${item.overpay.toLocaleString('ru')} ₴</div>
+          </div>
+        `;
+      }
+      return `
+        <div class="sal-nav-row" onclick="salaryNavPush({worker:'${financeEscapeAttr(item.workerName)}',year:'${item.date.slice(0,4)}',month:'${item.date.slice(5,7)}'})" style="padding:10px 0;">
+          <div style="min-width:0;">
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+              <span style="font-size:13px;font-weight:800;color:#ef4444;">ЗП</span>
+              <span style="font-size:12px;font-weight:800;color:var(--text);">${escapeHtml(item.workerName || '—')}</span>
+            </div>
+            <div style="font-size:12px;color:var(--text3);margin-top:4px;">${formatDate(item.date)} · Ориентир ${item.autoAmount.toLocaleString('ru')} ₴ · Внесено ${item.manualAmount.toLocaleString('ru')} ₴</div>
+          </div>
+          <div style="font-size:14px;font-weight:900;color:#ef4444;white-space:nowrap;">${Math.round(item.deviationPct * 100)}%</div>
+        </div>
+      `;
+    }).join('')
+    : '<div style="font-size:12px;color:var(--text3);padding:8px 0;">Аномалий нет</div>';
+
+  return `<div class="profile-today-card" style="margin-bottom:12px;">
+    <div class="profile-today-label"><i data-lucide="triangle-alert" style="width:15px;height:15px;"></i> Аномалии</div>
+    <div style="font-size:11px;color:var(--text3);margin-top:6px;">Показываем переплату поставщику и расхождения по ручным ЗП.</div>
+    <div style="margin-top:8px;">${rowsHtml}</div>
+  </div>`;
+}
+
 function getSalaryAnalytics(entries = allSalaries) {
   const salaryEntries = getOwnerSalaryEntries(entries);
   const byWorker = {};
@@ -734,11 +819,13 @@ function renderOwnerSalaryScreen() {
   const salaryOverviewHtml = renderOwnerSalaryOverview(salaryEntries);
   const pendingSalaryHtml = renderOwnerPendingSalaryPanel();
   const manualSalaryHtml = renderOwnerManualSalaryPanel();
+  const anomaliesHtml = renderFinanceAnomaliesPanel(salaryEntries);
   const analyticsHtml = renderSalaryAnalyticsSection(salaryEntries);
 
   container.innerHTML = salaryOverviewHtml
     + pendingSalaryHtml
     + manualSalaryHtml
+    + anomaliesHtml
     + analyticsHtml
     + '<button class="subtle-reload-btn" style="margin-top:12px;" onclick="clearCacheAndReload()">Очистить кеш и перезагрузить</button>';
   initIcons();
@@ -953,29 +1040,49 @@ function renderSalaryScreen() {
       + analyticsHtml;
 
   } else if (state.anomalies) {
-    title.textContent = 'Аномалии ЗП';
-    const anomalies = getSalaryAnomalies(manualReports);
+    title.textContent = 'Аномалии';
+    const anomalies = getFinanceAnomalies(allSalaries);
     if (!anomalies.length) {
-      container.innerHTML = `<div class="empty-state"><div class="empty-state-icon">${icon('check')}</div><h3>Аномалий нет</h3><p>Все внесённые ЗП укладываются в порог 10%</p></div>`;
+      container.innerHTML = `<div class="empty-state"><div class="empty-state-icon">${icon('check')}</div><h3>Аномалий нет</h3><p>Быстрые оплаты поставщику и ручные ЗП выглядят корректно</p></div>`;
       initIcons();
       return;
     }
-    container.innerHTML = anomalies.map(item => `
-      <div class="sal-nav-row" onclick="salaryNavPush({worker:'${financeEscapeAttr(item.workerName)}',year:'${item.date.slice(0,4)}',month:'${item.date.slice(5,7)}'})">
-        <div style="display:flex;align-items:center;gap:12px;min-width:0;">
-          <div class="worker-avatar" style="width:40px;height:40px;font-size:13px;border-radius:12px;background:rgba(239,68,68,0.14);color:#ef4444;">${getInitials(item.workerName)}</div>
-          <div style="min-width:0;">
-            <div style="font-weight:700;font-size:15px;">${item.workerName}</div>
-            <div style="font-size:12px;color:var(--text3);">${formatDate(item.date)} · ${item.summary.count} заказов · ${item.summary.totalAmount.toLocaleString('ru')} ₴</div>
-            <div style="font-size:12px;color:var(--text3);margin-top:2px;">Ориентир ${item.autoAmount.toLocaleString('ru')} ₴ · Внесено ${item.manualAmount.toLocaleString('ru')} ₴</div>
+    container.innerHTML = anomalies.map(item => {
+      if (item.kind === 'supplier-overpay') {
+        return `
+          <div class="sal-nav-row" onclick="openSalaryEntryOrder('${financeEscapeAttr(item.orderId)}', event)">
+            <div style="display:flex;align-items:center;gap:12px;min-width:0;">
+              <div class="worker-avatar" style="width:40px;height:40px;font-size:13px;border-radius:12px;background:rgba(239,68,68,0.14);color:#ef4444;">₴</div>
+              <div style="min-width:0;">
+                <div style="font-weight:700;font-size:15px;">${escapeHtml(item.orderId || '—')}</div>
+                <div style="font-size:12px;color:var(--text3);">${item.date ? formatDate(item.date) : 'Без даты'} · ${escapeHtml(item.client || item.car || '—')}</div>
+                <div style="font-size:12px;color:var(--text3);margin-top:2px;">Покупка ${item.purchase.toLocaleString('ru')} ₴ · Быстрые оплаты ${item.paid.toLocaleString('ru')} ₴</div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <span style="font-weight:800;font-size:15px;color:#ef4444;">+${item.overpay.toLocaleString('ru')} ₴</span>
+              <i data-lucide="chevron-right" style="width:16px;height:16px;color:var(--text3);"></i>
+            </div>
+          </div>
+        `;
+      }
+      return `
+        <div class="sal-nav-row" onclick="salaryNavPush({worker:'${financeEscapeAttr(item.workerName)}',year:'${item.date.slice(0,4)}',month:'${item.date.slice(5,7)}'})">
+          <div style="display:flex;align-items:center;gap:12px;min-width:0;">
+            <div class="worker-avatar" style="width:40px;height:40px;font-size:13px;border-radius:12px;background:rgba(239,68,68,0.14);color:#ef4444;">${getInitials(item.workerName)}</div>
+            <div style="min-width:0;">
+              <div style="font-weight:700;font-size:15px;">${item.workerName}</div>
+              <div style="font-size:12px;color:var(--text3);">${formatDate(item.date)} · ${item.summary.count} заказов · ${item.summary.totalAmount.toLocaleString('ru')} ₴</div>
+              <div style="font-size:12px;color:var(--text3);margin-top:2px;">Ориентир ${item.autoAmount.toLocaleString('ru')} ₴ · Внесено ${item.manualAmount.toLocaleString('ru')} ₴</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span style="font-weight:800;font-size:15px;color:#ef4444;">${Math.round(item.deviationPct * 100)}%</span>
+            <i data-lucide="chevron-right" style="width:16px;height:16px;color:var(--text3);"></i>
           </div>
         </div>
-        <div style="display:flex;align-items:center;gap:10px;">
-          <span style="font-weight:800;font-size:15px;color:#ef4444;">${Math.round(item.deviationPct * 100)}%</span>
-          <i data-lucide="chevron-right" style="width:16px;height:16px;color:var(--text3);"></i>
-        </div>
-      </div>
-    `).join('');
+      `;
+    }).join('');
 
   } else if (state.periodMonth && !state.periodDay) {
     const ym = state.periodMonth;

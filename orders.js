@@ -165,7 +165,11 @@ function _dailyBaseOrderId() {
 }
 
 function _moneyInputValue(value) {
-  return Number(value) || 0;
+  const normalized = String(value ?? '')
+    .replace(/\s+/g, '')
+    .replace(',', '.')
+    .trim();
+  return Number(normalized) || 0;
 }
 
 function _escapeAttr(value) {
@@ -316,7 +320,7 @@ async function confirmSeniorOrderAmounts(orderId) {
   const oldClientPaid = getOrderClientPaidAmount(order);
   const clientDiff = totalClientPaid - oldClientPaid;
   const cashEntries = [];
-  const totalClientAmount = (Number(order.total) || 0) + (Number(order.income) || 0) + (Number(order.delivery) || 0);
+  const totalClientAmount = getOrderClientTotalAmount(order);
   const updatedOrder = {
     ...order,
     check: totalSupplierPaid,
@@ -472,7 +476,7 @@ function renderOrderCard(o) {
   const supplierPaidInlineHtml = (supplierPaidAmount > 0 || Number(o.purchase) > 0)
     ? `<span class="order-meta-inline-money"><span>${supplierPaidAmount.toLocaleString('ru')}</span><span class="order-meta-money-separator">/</span><span>${(Number(o.purchase) || 0).toLocaleString('ru')} ₴</span></span>`
     : '';
-  const warehouseCodeInlineHtml = (currentRole === 'owner' || currentWorkerName === 'Sasha Manager') && o.warehouseCode
+  const warehouseCodeInlineHtml = o.warehouseCode
     ? `<span style="margin-left:6px;color:var(--accent);font-weight:900;">${escapeHtml(o.warehouseCode)}</span>`
     : '';
   const warehousePillHtml = (o.warehouse || warehouseCodeInlineHtml || supplierPaidInlineHtml)
@@ -529,7 +533,7 @@ function renderOrderCard(o) {
       </div>
       <div class="order-card-meta">
         <span class="order-meta-item order-meta-pill">${icon('calendar')} ${formatDate(o.date)}</span>
-        ${o.time ? `<span class="order-meta-item order-meta-pill">${icon('clock-3')} ${escapeHtml(o.time)}</span>` : ''}
+        ${o.time ? `<span class="order-meta-item order-meta-pill">${icon('clock')} ${escapeHtml(o.time)}</span>` : ''}
         <span class="order-meta-item order-meta-pill">${getWorkerDisplayPair(o.responsible, o.assistant)}</span>
         ${o.manager ? `<span class="order-meta-item order-meta-pill">${getWorkerDisplayName(o.manager)}</span>` : ''}
         ${warehousePillHtml}
@@ -2100,11 +2104,11 @@ function syncClientLeftFromPayments(totalAll = null) {
   const leftEl = document.getElementById('f-client-left');
   if (!leftEl) return;
   const total = totalAll ?? (
-    (Number(document.getElementById('f-total')?.value) || 0) +
-    (Number(document.getElementById('f-income')?.value) || 0) +
-    (Number(document.getElementById('f-delivery')?.value) || 0)
+    _moneyInputValue(document.getElementById('f-total')?.value) +
+    _moneyInputValue(document.getElementById('f-income')?.value) +
+    _moneyInputValue(document.getElementById('f-delivery')?.value)
   );
-  const paid = Number(document.getElementById('f-debt')?.value) || 0;
+  const paid = _moneyInputValue(document.getElementById('f-debt')?.value);
   leftEl.value = String(Math.max(0, total - paid));
 }
 
@@ -2590,7 +2594,7 @@ function setElementDisabledState(el, disabled) {
 
 function getOrderDraftFromForm(baseOrder = null) {
   const get = id => document.getElementById(id)?.value?.trim?.() || '';
-  const getN = id => Number(document.getElementById(id)?.value) || 0;
+  const getN = id => _moneyInputValue(document.getElementById(id)?.value);
   const order = { ...(baseOrder || {}) };
   order.id = baseOrder?.id || editingOrderId || 'Новая запись';
   order.date = get('f-date') || baseOrder?.date || '';
@@ -3235,16 +3239,16 @@ function recalcTotal(mode = 'init') {
   let worksSum = 0;
   if (mode === 'fromComponent') {
     worksSum = ['f-mount','f-molding','f-extra-work','f-tatu','f-toning']
-      .reduce((s, id) => s + (Number(document.getElementById(id)?.value) || 0), 0);
+      .reduce((s, id) => s + _moneyInputValue(document.getElementById(id)?.value), 0);
   } else {
     // 'init', 'manualTotal' или любое другое (например, вызов без аргументов из других частей кода)
-    worksSum = Number(document.getElementById('f-total')?.value) || 0;
+    worksSum = _moneyInputValue(document.getElementById('f-total')?.value);
   }
 
   // Сумма продажи стекла из финансового блока
-  const glassSum = Number(document.getElementById('f-income')?.value) || 0;
+  const glassSum = _moneyInputValue(document.getElementById('f-income')?.value);
   // Доставка из финансового блока
-  const deliverySum = Number(document.getElementById('f-delivery')?.value) || 0;
+  const deliverySum = _moneyInputValue(document.getElementById('f-delivery')?.value);
   const totalAll = worksSum + glassSum + deliverySum;
 
   // Скрытое поле (для сохранения — только работы, как было), или видимый инпут
@@ -3252,7 +3256,7 @@ function recalcTotal(mode = 'init') {
   if (totalEl && mode === 'fromComponent') totalEl.value = worksSum;
 
   const fmt = v => v.toLocaleString('ru') + ' \u20B4';
-  const glassPurchase = Number(document.getElementById('f-purchase')?.value) || 0;
+  const glassPurchase = _moneyInputValue(document.getElementById('f-purchase')?.value);
 
   // Обновляем live-счётчик в хедере модала
   const liveTotal = document.getElementById('modal-live-total');
@@ -3336,7 +3340,7 @@ function validateCustomServiceMountAmount(data) {
 // ---------- СОХРАНЕНИЕ ----------
 async function saveOrder() {
   const get  = id => document.getElementById(id)?.value?.trim() || '';
-  const getN = id => Number(document.getElementById(id)?.value) || 0;
+  const getN = id => _moneyInputValue(document.getElementById(id)?.value);
 
   const isNew = !editingOrderId;
   const existingOrder = isNew ? null : orders.find(o => o.id === editingOrderId);

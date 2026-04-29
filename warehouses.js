@@ -14,6 +14,74 @@ let warehouseDateFilterFrom = '';
 let warehouseDateFilterTo = '';
 let warehouseNewPostOnly = false;
 
+function formatWarehouseEntryTime(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) {
+    const timeMatch = raw.match(/(\d{2}:\d{2})/);
+    return timeMatch ? timeMatch[1] : '';
+  }
+  return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+
+function getWarehouseExpenseEntries() {
+  return (Array.isArray(window.allCashLog) ? window.allCashLog : [])
+    .filter(entry => !entry?.deleted_at)
+    .map(entry => ({ entry, parsed: parseExpenseCashEntry(entry) }))
+    .filter(({ parsed }) => parsed?.warehouse)
+    .map(({ entry, parsed }) => ({
+      type: 'expense',
+      id: entry.id,
+      warehouse: parsed.warehouse,
+      date: String(entry.fop_date || entry.date || entry.created_at || '').slice(0, 10) || 'Без даты',
+      time: formatWarehouseEntryTime(entry.created_at) || '—',
+      amount: getExpenseCashAmount(entry),
+      category: parsed.category,
+      comment: parsed.note || '',
+      workerName: entry.worker_name || '',
+      raw: entry,
+    }));
+}
+
+function isWarehouseExpenseRecord(record) {
+  return record?.type === 'expense';
+}
+
+function isWarehouseOrderRecord(record) {
+  return !isWarehouseExpenseRecord(record);
+}
+
+function getWarehouseRecordWarehouse(record) {
+  return isWarehouseExpenseRecord(record) ? (record.warehouse || 'Без склада') : (record?.warehouse || 'Без склада');
+}
+
+function getWarehouseRecordDate(record) {
+  return isWarehouseExpenseRecord(record) ? (record.date || 'Без даты') : (record?.date || 'Без даты');
+}
+
+function getWarehouseRecordTime(record) {
+  return isWarehouseExpenseRecord(record) ? (record.time || '—') : (record?.time || '—');
+}
+
+function getWarehouseRecordIdSortValue(record) {
+  if (isWarehouseExpenseRecord(record)) return 0;
+  return typeof getOrderIdSortValue === 'function' ? getOrderIdSortValue(record) : 0;
+}
+
+function getWarehouseRecordSearchText(record) {
+  if (isWarehouseExpenseRecord(record)) {
+    return [
+      record.category,
+      record.comment,
+      record.workerName,
+      record.warehouse,
+      record.amount,
+    ].join(' ');
+  }
+  return '';
+}
+
 function getSupplierDebt(order) {
   return Math.max(0, (Number(order.purchase) || 0) - getOrderSupplierPaidAmount(order));
 }
@@ -34,7 +102,13 @@ function getWarehouseBalanceAmount(order) {
 }
 
 function getWarehouseTotals(list) {
-  return (list || []).reduce((totals, order) => {
+  return (list || []).reduce((totals, record) => {
+    if (isWarehouseExpenseRecord(record)) {
+      totals.expense += Number(record.amount) || 0;
+      totals.expenseCount += (Number(record.amount) || 0) > 0 ? 1 : 0;
+      return totals;
+    }
+    const order = record;
     if (order.isCancelled) {
       totals.returns += getWarehouseReturnAmount(order);
       totals.returnCount += getWarehouseReturnAmount(order) > 0 ? 1 : 0;
@@ -44,18 +118,20 @@ function getWarehouseTotals(list) {
       totals.debtCount += debt > 0 ? 1 : 0;
     }
     return totals;
-  }, { debt: 0, returns: 0, debtCount: 0, returnCount: 0 });
+  }, { debt: 0, returns: 0, expense: 0, debtCount: 0, returnCount: 0, expenseCount: 0 });
 }
 
 function renderWarehouseTotalsLabel(totals, emptyLabel = 'Без долга') {
   const parts = [];
   if (totals.debt > 0) parts.push(`Долг: ${totals.debt.toLocaleString('ru')} ₴`);
   if (totals.returns > 0) parts.push(`Возврат: ${totals.returns.toLocaleString('ru')} ₴`);
+  if (totals.expense > 0) parts.push(`Расход: ${totals.expense.toLocaleString('ru')} ₴`);
   return parts.join(' · ') || emptyLabel;
 }
 
 function getWarehouseTotalsColor(totals) {
   if (totals.returns > 0) return 'var(--yellow)';
+  if (totals.expense > 0) return 'var(--red)';
   return totals.debt > 0 ? 'var(--red)' : 'var(--accent)';
 }
 
@@ -69,17 +145,20 @@ function renderWarehousesScreen() {
   const container = document.getElementById('warehouses-list');
   if (!container) return;
 
-  const warehouseOrders = orders.filter(isWarehouseRelevantOrder);
-  if (!warehouseOrders.length) {
+  const warehouseRecords = [
+    ...orders.filter(isWarehouseRelevantOrder),
+    ...getWarehouseExpenseEntries(),
+  ];
+  if (!warehouseRecords.length) {
     container.innerHTML = `<div class="empty-state"><div class="empty-state-icon">${icon('package')}</div><h3>Записей нет</h3></div>`;
     return;
   }
 
   const map = {};
-  for (const o of warehouseOrders) {
-    const w = o.warehouse || 'Без склада';
+  for (const record of warehouseRecords) {
+    const w = getWarehouseRecordWarehouse(record);
     if (!map[w]) map[w] = [];
-    map[w].push(o);
+    map[w].push(record);
   }
 
   container.innerHTML = Object.keys(map).sort().map(w => {
@@ -88,7 +167,7 @@ function renderWarehousesScreen() {
     return `
       <div class="home-card" style="display:flex;flex-direction:column;min-height:120px;" onclick="openWarehouseDetail('${escapeAttr(w)}')">
         <div style="font-size:12px;color:var(--text3);font-weight:600;letter-spacing:0.04em;">
-          Записей: ${list.length} · С долгом: ${totals.debtCount} · Возврат: ${totals.returnCount}
+          Записей: ${list.length} · С долгом: ${totals.debtCount} · Возврат: ${totals.returnCount} · Расход: ${totals.expenseCount}
         </div>
         <div style="margin-top:auto;padding-top:12px;">
           <div style="font-size:20px;font-weight:800;line-height:1.2;margin-bottom:6px;">${escapeHtml(w)}</div>
@@ -122,9 +201,10 @@ function renderWarehouseDetail() {
   const container = document.getElementById('warehouse-detail-body');
   if (!container) return;
   const w = currentWarehouseFilter;
-  const list = orders
-    .filter(o => isWarehouseRelevantOrder(o) && (o.warehouse || 'Без склада') === w)
-    .sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.time || '').localeCompare(a.time || ''));
+  const list = [
+    ...orders.filter(o => isWarehouseRelevantOrder(o) && (o.warehouse || 'Без склада') === w),
+    ...getWarehouseExpenseEntries().filter(entry => entry.warehouse === w),
+  ].sort((a, b) => getWarehouseRecordDate(b).localeCompare(getWarehouseRecordDate(a)) || getWarehouseRecordTime(b).localeCompare(getWarehouseRecordTime(a)));
 
   if (!list.length) {
     container.innerHTML = '<div class="empty-state">Записей нет</div>';
@@ -132,30 +212,39 @@ function renderWarehouseDetail() {
   }
 
   let filteredList = list.filter(o => {
+    if (isWarehouseExpenseRecord(o)) return warehousePaymentFilter === 'all';
     if (warehousePaymentFilter === 'all') return true;
     if (warehousePaymentFilter === 'returns') return getWarehouseReturnAmount(o) > 0;
     const hasDebt = getSupplierDebt(o) > 0;
     return warehousePaymentFilter === 'debt' ? (!o.isCancelled && hasDebt) : (!o.isCancelled && !hasDebt);
   });
 
-  if (warehouseSearchFilter) filteredList = filteredList.filter(o => orderMatchesSearch(o, warehouseSearchFilter));
+  if (warehouseSearchFilter) filteredList = filteredList.filter(o => {
+    if (isWarehouseExpenseRecord(o)) {
+      return getWarehouseRecordSearchText(o).toLowerCase().includes(String(warehouseSearchFilter || '').trim().toLowerCase());
+    }
+    return orderMatchesSearch(o, warehouseSearchFilter);
+  });
   if (warehouseDateFilterExact || warehouseDateFilterFrom || warehouseDateFilterTo) filteredList = filteredList.filter(order => {
-    const date = String(order?.date || '').slice(0, 10);
+    const date = String(getWarehouseRecordDate(order) || '').slice(0, 10);
     if (!date) return !(warehouseDateFilterExact || warehouseDateFilterFrom || warehouseDateFilterTo);
     if (warehouseDateFilterExact) return date === warehouseDateFilterExact;
     if (warehouseDateFilterFrom && date < warehouseDateFilterFrom) return false;
     if (warehouseDateFilterTo && date > warehouseDateFilterTo) return false;
     return true;
   });
-  if (warehouseStatusFilter) filteredList = filteredList.filter(o => getEffectivePaymentStatus(o) === warehouseStatusFilter);
-  if (warehouseWorkerFilter) filteredList = filteredList.filter(o => o.responsible === warehouseWorkerFilter || o.assistant === warehouseWorkerFilter || o.manager === warehouseWorkerFilter);
-  if (warehouseNewPostOnly) filteredList = filteredList.filter(o => !!o.newPost);
+  if (warehouseStatusFilter) filteredList = filteredList.filter(o => isWarehouseExpenseRecord(o) ? false : getEffectivePaymentStatus(o) === warehouseStatusFilter);
+  if (warehouseWorkerFilter) filteredList = filteredList.filter(o => {
+    if (isWarehouseExpenseRecord(o)) return o.workerName === warehouseWorkerFilter;
+    return o.responsible === warehouseWorkerFilter || o.assistant === warehouseWorkerFilter || o.manager === warehouseWorkerFilter;
+  });
+  if (warehouseNewPostOnly) filteredList = filteredList.filter(o => !isWarehouseExpenseRecord(o) && !!o.newPost);
   filteredList.sort((a, b) => {
-    const av = typeof getOrderIdSortValue === 'function' ? getOrderIdSortValue(a) : 0;
-    const bv = typeof getOrderIdSortValue === 'function' ? getOrderIdSortValue(b) : 0;
+    const av = getWarehouseRecordIdSortValue(a);
+    const bv = getWarehouseRecordIdSortValue(b);
     if (av !== bv) return warehouseSortFilter === 'asc' ? av - bv : bv - av;
-    const ad = a.date || '';
-    const bd = b.date || '';
+    const ad = getWarehouseRecordDate(a);
+    const bd = getWarehouseRecordDate(b);
     return warehouseSortFilter === 'asc' ? ad.localeCompare(bd) : bd.localeCompare(ad);
   });
 
@@ -190,7 +279,10 @@ function getWarehouseDateFilterLabel() {
 }
 
 function getWarehouseWorkerOptions() {
-  return [...new Set((orders || []).flatMap(o => [o.responsible, o.assistant, o.manager]).filter(Boolean))]
+  return [...new Set([
+    ...(orders || []).flatMap(o => [o.responsible, o.assistant, o.manager]).filter(Boolean),
+    ...getWarehouseExpenseEntries().map(entry => entry.workerName).filter(Boolean),
+  ])]
     .sort((a, b) => getWorkerDisplayName(a).localeCompare(getWorkerDisplayName(b), 'ru'));
 }
 
@@ -308,7 +400,7 @@ function renderWarehouseOrderTree(list) {
   if (!list.length) return '';
   const tree = {};
   list.forEach(o => {
-    const date = o.date || 'Без даты';
+    const date = getWarehouseRecordDate(o) || 'Без даты';
     const year = date === 'Без даты' ? 'Без даты' : date.slice(0, 4);
     const month = date === 'Без даты' ? 'Без даты' : date.slice(0, 7);
     if (!tree[year]) tree[year] = {};
@@ -334,10 +426,10 @@ function renderWarehouseOrderTree(list) {
       const monthTitle = month === 'Без даты' ? 'Без даты' : monthNames[Number(month.slice(5, 7)) - 1];
 
       const daysHtml = days.map(day => {
-        const rows = tree[year][month][day].sort((a, b) => (b.time || '').localeCompare(a.time || ''));
+        const rows = tree[year][month][day].sort((a, b) => getWarehouseRecordTime(b).localeCompare(getWarehouseRecordTime(a)));
         const dayTotals = getWarehouseTotals(rows);
         const dayKey = 'warehouse-day-' + day.replace(/[^a-zA-Z0-9а-яА-Я_-]/g, '-');
-        const ordersHtml = rows.map(o => renderWarehouseOrderCard(o)).join('');
+        const ordersHtml = rows.map(o => isWarehouseExpenseRecord(o) ? renderWarehouseExpenseCard(o) : renderWarehouseOrderCard(o)).join('');
 
         return `
           <div style="border-bottom:1px solid var(--border);">
@@ -424,6 +516,28 @@ function renderWarehouseOrderCard(o) {
         ${o.warehouseCode ? `<span class="order-meta-item mono">${icon('hash')} ${o.warehouseCode}</span>` : ''}
         ${Number(o.purchase) > 0 ? `<span class="order-meta-item">${icon('package')} ${Number(o.purchase).toLocaleString('ru')} ₴</span>` : ''}
         ${getOrderSupplierPaidAmount(o) > 0 ? `<span class="order-meta-item">Оплачено поставщику: ${getOrderSupplierPaidAmount(o).toLocaleString('ru')} ₴</span>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+function renderWarehouseExpenseCard(record) {
+  const comment = record.comment ? ` - ${record.comment}` : '';
+  return `
+    <div class="order-card" onclick="openOwnerCashEntryModal('${escapeAttr(record.id)}', { expenseOnly: true })">
+      <div class="order-card-top">
+        <div class="order-card-left">
+          <span class="order-id">РАСХОД</span>
+          <span class="order-name">${escapeHtml(record.category || '—')}${comment ? `<span style="color:var(--text3);font-weight:500;">${escapeHtml(comment)}</span>` : ''}</span>
+        </div>
+        <div style="font-size:13px;font-weight:800;color:var(--red);">
+          ${Number(record.amount || 0).toLocaleString('ru')} ₴
+        </div>
+      </div>
+      <div class="order-card-meta">
+        <span class="order-meta-item">${icon('clock')} ${escapeHtml(record.time || '—')}</span>
+        <span class="order-meta-item">${icon('user')} ${escapeHtml(getWorkerDisplayName(record.workerName) || record.workerName || '—')}</span>
+        <span class="order-meta-item">${icon('package')} ${escapeHtml(record.warehouse || '—')}</span>
       </div>
     </div>
   `;

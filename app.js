@@ -5,6 +5,7 @@
 let currentMonthFilter = null;
 let ownerPaymentFilters = { client: true, supplier: true, dropshipper: true, fop: true, manual: true };
 let ownerCashSelectedWorker = '';
+let ownerExpenseSelectedWorker = '';
 let ownerCashCurrencyView = 'uah';
 let ownerCashConfirmFilter = 'all';
 const OWNER_FOP_SELECTION_KEY = 'Oleg Starshiy__fop';
@@ -193,6 +194,13 @@ async function openOwnerCashScreen() {
   try { window.allCashLog = await sbFetchAllCashLog(); } catch(e) { window.allCashLog = window.allCashLog || []; }
   renderOwnerCashScreen();
   showScreen('owner-cash');
+}
+
+async function openOwnerExpensesScreen() {
+  if (!canViewOwnerCash()) return;
+  try { window.allCashLog = await sbFetchAllCashLog(); } catch(e) { window.allCashLog = window.allCashLog || []; }
+  renderOwnerExpensesScreen();
+  showScreen('owner-expenses');
 }
 
 async function openOwnerSalaryScreen() {
@@ -480,6 +488,7 @@ function refreshActiveOrdersViews() {
   if (document.getElementById('screen-workers')?.classList.contains('active')) renderWorkers();
   if (document.getElementById('screen-owner-payments')?.classList.contains('active')) renderOwnerPaymentsScreen();
   if (document.getElementById('screen-owner-cash')?.classList.contains('active')) renderOwnerCashScreen();
+  if (document.getElementById('screen-owner-expenses')?.classList.contains('active')) renderOwnerExpensesScreen();
   if (document.getElementById('screen-calendar')?.classList.contains('active')) renderCalendarScreen();
 }
 
@@ -632,6 +641,17 @@ function renderHome() {
         <div class="home-card-count" style="font-size:22px; color: var(--accent);">${totalCash.toLocaleString('ru')} ₴</div>
       </div>
     `;
+    const expenseTotal = getOwnerExpenseLogs().reduce((sum, entry) => sum + getExpenseCashAmount(entry), 0);
+    container.innerHTML += `
+      <div class="home-card" onclick="openOwnerExpensesScreen()">
+        <div class="home-card-icon-wrap home-card-icon-dim">
+          <i data-lucide="receipt" style="width:22px;height:22px;"></i>
+        </div>
+        <h3>Расходы</h3>
+        <p>Затраты по сотрудникам</p>
+        <div class="home-card-count" style="font-size:22px; color: var(--red);">${expenseTotal.toLocaleString('ru')} ₴</div>
+      </div>
+    `;
   }
 
   if (canViewFinance()) {
@@ -740,7 +760,7 @@ function renderHome() {
     const monthSalaryTotal = salaryEntries
       .filter(s => s.date && s.date.startsWith(currentYm))
       .reduce((sum, s) => sum + Number(s.amount), 0);
-    const anomaliesCount = (typeof getSalaryAnomalies === 'function') ? getSalaryAnomalies().length : 0;
+    const anomaliesCount = (typeof getFinanceAnomalies === 'function') ? getFinanceAnomalies().length : 0;
     container.innerHTML += `
       <div class="home-card" onclick="openOwnerSalaryScreen()">
         <div class="home-card-icon-wrap home-card-icon-dim">
@@ -804,6 +824,15 @@ function getOwnerCashLogs(confirmFilter = ownerCashConfirmFilter) {
       if (confirmFilter === 'pending') return isConfirmable && entry.fop_confirmed !== true;
       return true;
     });
+}
+
+function getOwnerExpenseLogs() {
+  const editableWorkers = new Set(getOwnerCashEditableWorkers());
+  return [...(window.allCashLog || [])]
+    .filter(entry => !String(entry?.deleted_at || '').trim())
+    .filter(entry => entry?.manual_payment !== true)
+    .filter(entry => editableWorkers.has(entry.worker_name))
+    .filter(isExpenseCashEntry);
 }
 
 function getOwnerCashBalanceLogs() {
@@ -874,6 +903,10 @@ function getOwnerCashHistoryTitle(workerKey) {
   return getWorkerDisplayName(workerKey) || workerKey || 'Касса';
 }
 
+function getOwnerExpenseHistoryTitle(workerName) {
+  return getWorkerDisplayName(workerName) || workerName || 'Расходы';
+}
+
 function getOwnerCashHistoryHtml(workerKey) {
   const logs = getOwnerCashLogs()
     .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
@@ -938,7 +971,7 @@ function closeOwnerCashHistoryModal() {
 }
 
 function getOwnerCashEditableWorkers() {
-  return getOwnerCashSeniorNames().filter(Boolean);
+  return getOwnerCashSeniorNames().filter(workerName => workerName && workerName !== OWNER_PENDING_CASH_WORKER_NAME);
 }
 
 function renderOwnerCashWorkerOptions(selectedWorker = '') {
@@ -947,12 +980,48 @@ function renderOwnerCashWorkerOptions(selectedWorker = '') {
   ).join('');
 }
 
-function openOwnerCashEntryModal(entryId = '') {
+function renderOwnerExpenseCategoryOptions(selectedCategory = '') {
+  return getExpenseCategoryOptions().map(category =>
+    `<option value="${escapeAttr(category)}" ${category === selectedCategory ? 'selected' : ''}>${escapeHtml(category)}</option>`
+  ).join('');
+}
+
+function renderOwnerExpenseWarehouseOptions(selectedWarehouse = '') {
+  return getWarehouseNameOptions().map(warehouse =>
+    `<option value="${escapeAttr(warehouse)}" ${warehouse === selectedWarehouse ? 'selected' : ''}>${escapeHtml(warehouse)}</option>`
+  ).join('');
+}
+
+function updateOwnerCashExpenseMode() {
+  const category = String(document.getElementById('owner-cash-expense-category')?.value || '').trim();
+  const warehouseGroup = document.getElementById('owner-cash-expense-warehouse-group');
+  const warehouseSelect = document.getElementById('owner-cash-expense-warehouse');
+  const hint = document.getElementById('owner-cash-expense-hint');
+  const expenseOnly = document.getElementById('owner-cash-expense-only')?.value === '1';
+  const isExpense = expenseOnly || !!category;
+  const needsWarehouse = isExpense && isWarehouseExpenseCategory(category);
+
+  if (warehouseGroup) warehouseGroup.style.display = isExpense ? '' : 'none';
+  if (warehouseSelect) {
+    warehouseSelect.disabled = !needsWarehouse;
+    if (!needsWarehouse) warehouseSelect.value = '';
+  }
+  if (hint) hint.style.display = isExpense ? 'block' : 'none';
+}
+
+function openOwnerCashEntryModal(entryId = '', options = {}) {
   if (currentRole !== 'owner') return;
   const entry = entryId
     ? (window.allCashLog || []).find(item => String(item.id) === String(entryId))
     : null;
   const selectedWorker = entry?.worker_name || ownerCashSelectedWorker || getOwnerCashEditableWorkers()[0] || '';
+  const expenseParsed = parseExpenseCashEntry(entry);
+  const expenseOnly = options?.expenseOnly === true;
+  const showExpenseFields = expenseOnly || !!expenseParsed;
+  const displayAmount = entry
+    ? String(expenseParsed ? getExpenseCashAmount(entry) : (Number(entry.amount) || 0))
+    : '';
+  const displayComment = expenseParsed?.note || entry?.comment || '';
 
   let modal = document.getElementById('owner-cash-entry-modal');
   if (!modal) {
@@ -965,11 +1034,12 @@ function openOwnerCashEntryModal(entryId = '') {
   modal.innerHTML = `
     <div class="modal" style="max-width:420px;">
       <div class="modal-header">
-        <div class="modal-title">${entry ? 'Редактировать кассу' : 'Добавить в кассу'}</div>
+        <div class="modal-title">${expenseOnly ? (entry ? 'Редактировать расход' : 'Добавить расход') : (entry ? 'Редактировать кассу' : 'Добавить в кассу')}</div>
         <button class="modal-close" onclick="closeOwnerCashEntryModal()">${icon('x')}</button>
       </div>
       <div class="modal-body" style="display:grid;gap:12px;">
         <input type="hidden" id="owner-cash-entry-id" value="${escapeAttr(entry?.id || '')}">
+        <input type="hidden" id="owner-cash-expense-only" value="${expenseOnly ? '1' : '0'}">
         <div class="form-group">
           <label class="form-label">Сотрудник</label>
           <select class="form-select" id="owner-cash-worker">
@@ -978,11 +1048,28 @@ function openOwnerCashEntryModal(entryId = '') {
         </div>
         <div class="form-group">
           <label class="form-label">Сумма</label>
-          <input class="form-input" type="number" id="owner-cash-amount" placeholder="Например 500 или -500" value="${escapeAttr(entry ? String(Number(entry.amount) || 0) : '')}">
+          <input class="form-input" type="text" inputmode="decimal" id="owner-cash-amount" placeholder="${expenseOnly ? 'Например 500' : 'Например 500 или -500'}" value="${escapeAttr(displayAmount)}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Категория расхода</label>
+          <select class="form-select" id="owner-cash-expense-category" onchange="updateOwnerCashExpenseMode()">
+            <option value="">${expenseOnly ? '— выбрать —' : 'Обычная запись'}</option>
+            ${renderOwnerExpenseCategoryOptions(expenseParsed?.category || '')}
+          </select>
+        </div>
+        <div class="form-group" id="owner-cash-expense-warehouse-group" style="display:${showExpenseFields ? '' : 'none'};">
+          <label class="form-label">Склад</label>
+          <select class="form-select" id="owner-cash-expense-warehouse">
+            <option value="">— выбрать —</option>
+            ${renderOwnerExpenseWarehouseOptions(expenseParsed?.warehouse || '')}
+          </select>
+        </div>
+        <div id="owner-cash-expense-hint" style="display:${showExpenseFields ? 'block' : 'none'};font-size:11px;color:var(--text3);margin-top:-4px;">
+          Если выбрана категория, запись сохранится как расход автоматически.
         </div>
         <div class="form-group">
           <label class="form-label">Комментарий</label>
-          <textarea class="form-input" id="owner-cash-comment" rows="3" placeholder="Причина записи">${escapeHtml(entry?.comment || '')}</textarea>
+          <textarea class="form-input" id="owner-cash-comment" rows="3" placeholder="Причина записи">${escapeHtml(displayComment)}</textarea>
         </div>
       </div>
       <div class="modal-footer">
@@ -992,6 +1079,7 @@ function openOwnerCashEntryModal(entryId = '') {
     </div>
   `;
   modal.classList.add('active');
+  updateOwnerCashExpenseMode();
   initIcons();
 }
 
@@ -1003,12 +1091,27 @@ async function saveOwnerCashEntry() {
   if (currentRole !== 'owner') return;
   const id = document.getElementById('owner-cash-entry-id')?.value || '';
   const workerName = document.getElementById('owner-cash-worker')?.value || '';
-  const amount = Number(document.getElementById('owner-cash-amount')?.value);
+  const rawAmount = Number(String(document.getElementById('owner-cash-amount')?.value || '').replace(',', '.').trim());
   const comment = String(document.getElementById('owner-cash-comment')?.value || '').trim();
+  const expenseOnly = document.getElementById('owner-cash-expense-only')?.value === '1';
+  const expenseCategory = String(document.getElementById('owner-cash-expense-category')?.value || '').trim();
+  const expenseWarehouse = String(document.getElementById('owner-cash-expense-warehouse')?.value || '').trim();
   const btn = document.getElementById('owner-cash-save-btn');
+  const isExpense = expenseOnly || !!expenseCategory;
+  const amount = isExpense ? -Math.abs(rawAmount) : rawAmount;
+  const finalComment = isExpense
+    ? buildExpenseCashComment({
+        amount: rawAmount,
+        category: expenseCategory,
+        warehouse: expenseWarehouse,
+        note: comment,
+      })
+    : comment;
 
   if (!workerName) return showToast('Выберите сотрудника', 'error');
-  if (!amount) return showToast('Введите сумму', 'error');
+  if (!rawAmount) return showToast('Введите сумму', 'error');
+  if (expenseOnly && !expenseCategory) return showToast('Выберите категорию', 'error');
+  if (isExpense && isWarehouseExpenseCategory(expenseCategory) && !expenseWarehouse) return showToast('Выберите склад', 'error');
   if (!comment) return showToast('Введите комментарий', 'error');
 
   if (btn) {
@@ -1022,7 +1125,7 @@ async function saveOwnerCashEntry() {
       saved = await sbUpdateCashEntry(id, {
         worker_name: workerName,
         amount,
-        comment,
+        comment: finalComment,
       });
       const idx = (window.allCashLog || []).findIndex(entry => String(entry.id) === String(id));
       if (idx !== -1) window.allCashLog[idx] = { ...window.allCashLog[idx], ...saved };
@@ -1030,7 +1133,7 @@ async function saveOwnerCashEntry() {
       saved = await sbInsertCashEntry({
         worker_name: workerName,
         amount,
-        comment,
+        comment: finalComment,
         cash_account: 'cash',
       });
       if (!Array.isArray(window.allCashLog)) window.allCashLog = [];
@@ -1040,6 +1143,10 @@ async function saveOwnerCashEntry() {
     closeOwnerCashEntryModal();
     ownerCashSelectedWorker = workerName;
     renderOwnerCashScreen();
+    renderOwnerExpensesScreen();
+    if (document.getElementById('owner-expense-history-modal')?.classList.contains('active') && ownerExpenseSelectedWorker) {
+      openOwnerExpenseHistoryModal(ownerExpenseSelectedWorker);
+    }
     renderHome();
     showToast(id ? 'Запись кассы обновлена ✓' : 'Запись кассы добавлена ✓');
   } catch (e) {
@@ -1050,6 +1157,173 @@ async function saveOwnerCashEntry() {
       btn.textContent = id ? 'Сохранить' : 'Добавить';
     }
   }
+}
+
+function setOwnerExpenseSelectedWorker(workerName) {
+  ownerExpenseSelectedWorker = workerName || '';
+  openOwnerExpenseHistoryModal(ownerExpenseSelectedWorker);
+}
+
+function renderOwnerEmployeeExpenseHistory(workerName, logs) {
+  const rows = (logs || [])
+    .filter(entry => entry.worker_name === workerName)
+    .slice()
+    .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+  const total = rows.reduce((sum, entry) => sum + getExpenseCashAmount(entry), 0);
+  const workerKey = getOwnerCashSafeKey(workerName + '-expenses');
+
+  if (!rows.length) {
+    return `
+      <div class="fin-month-card owner-cash-history-card">
+        <div class="owner-cash-history-title">
+          <div>
+            <div class="fin-month-name">${escapeHtml(getOwnerExpenseHistoryTitle(workerName))}</div>
+            <div class="fin-month-sub">История расходов сотрудника</div>
+          </div>
+        </div>
+        <div class="empty-state" style="padding:24px 12px;">
+          <div class="empty-state-icon">${icon('receipt')}</div>
+          <h3>Расходов нет</h3>
+          <p>У этого сотрудника пока нет записей расходов</p>
+        </div>
+      </div>
+    `;
+  }
+
+  const tree = {};
+  for (const entry of rows) {
+    const amount = getExpenseCashAmount(entry);
+    const date = _ownerCashEntryDate(entry) || 'Без даты';
+    const year = date === 'Без даты' ? 'Без даты' : date.slice(0, 4);
+    const month = date === 'Без даты' ? 'Без даты' : date.slice(0, 7);
+    if (!tree[year]) tree[year] = { total: 0, months: {} };
+    tree[year].total += amount;
+    if (!tree[year].months[month]) tree[year].months[month] = { total: 0, days: {} };
+    tree[year].months[month].total += amount;
+    if (!tree[year].months[month].days[date]) tree[year].months[month].days[date] = { total: 0, entries: [] };
+    tree[year].months[month].days[date].total += amount;
+    tree[year].months[month].days[date].entries.push(entry);
+  }
+
+  const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+  const yearsHtml = Object.keys(tree).sort((a, b) => b.localeCompare(a)).map(year => {
+    const yearData = tree[year];
+    const yearKey = `owner-expense-worker-${workerKey}-year-${year}`;
+    const monthsHtml = Object.keys(yearData.months).sort((a, b) => b.localeCompare(a)).map(monthKey => {
+      const monthData = yearData.months[monthKey];
+      const monthToggleKey = `${yearKey}-month-${monthKey}`;
+      const monthName = monthKey === 'Без даты' ? 'Без даты' : `${monthNames[Number(monthKey.slice(5, 7)) - 1] || monthKey} ${monthKey.slice(0, 4)}`;
+      const daysHtml = Object.keys(monthData.days).sort((a, b) => b.localeCompare(a)).map(day => {
+        const dayData = monthData.days[day];
+        const dayKey = `${monthToggleKey}-day-${day}`;
+        const entriesHtml = dayData.entries.map(entry => {
+          const amount = getExpenseCashAmount(entry);
+          const comment = getCashEntryDisplayComment(entry) || 'Без комментария';
+          const time = getOwnerCashEntryTime(entry);
+          return `
+            <div class="owner-cash-entry-row">
+              <div class="owner-cash-entry-main">
+                <div class="owner-cash-entry-comment">${escapeHtml(comment)}</div>
+                <div class="owner-cash-entry-meta">${time ? escapeHtml(time) : '—'}</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <div class="owner-cash-entry-amount" style="color:#ef4444;">${amount.toLocaleString('ru')} ₴</div>
+                <button class="icon-btn" title="Редактировать" onclick="event.stopPropagation(); openOwnerCashEntryModal('${escapeAttr(entry.id)}', { expenseOnly: true })">${icon('pencil')}</button>
+                <button class="icon-btn icon-action-danger" title="Удалить" onclick="event.stopPropagation(); deleteOwnerCashEntry('${escapeAttr(entry.id)}')">${icon('trash-2')}</button>
+              </div>
+            </div>
+          `;
+        }).join('');
+        return `
+          <div style="border-bottom:1px solid var(--border);">
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;cursor:pointer;" onclick="toggleProfileMonth('${dayKey}')">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <i data-lucide="chevron-right" style="width:13px;height:13px;color:var(--text3);transition:transform 0.2s;" id="pchevron-${dayKey}"></i>
+                <div style="font-size:13px;color:var(--text2);font-weight:600;">${day === 'Без даты' ? day : formatDate(day)}</div>
+                <div style="font-size:11px;color:var(--text3);">${dayData.entries.length} зап.</div>
+              </div>
+              <div style="font-size:13px;font-weight:800;color:#ef4444;">${dayData.total.toLocaleString('ru')} ₴</div>
+            </div>
+            <div id="profile-month-body-${dayKey}" style="display:none;padding:0 12px 10px 28px;">${entriesHtml}</div>
+          </div>
+        `;
+      }).join('');
+      return `
+        <div style="border-bottom:1px solid var(--border);">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;cursor:pointer;" onclick="toggleProfileMonth('${monthToggleKey}')">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <i data-lucide="chevron-right" style="width:14px;height:14px;color:var(--text3);transition:transform 0.2s;" id="pchevron-${monthToggleKey}"></i>
+              <div style="font-size:14px;font-weight:700;color:var(--text2);">${monthName}</div>
+              <div style="font-size:11px;color:var(--text3);">${Object.keys(monthData.days).length} дн.</div>
+            </div>
+            <div style="font-size:14px;font-weight:800;color:#ef4444;">${monthData.total.toLocaleString('ru')} ₴</div>
+          </div>
+          <div id="profile-month-body-${monthToggleKey}" style="display:none;background:var(--surface2);border-radius:0 0 8px 8px;">${daysHtml}</div>
+        </div>
+      `;
+    }).join('');
+    return `
+      <div style="border-bottom:1px solid var(--border);">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px;cursor:pointer;" onclick="toggleProfileMonth('${yearKey}')">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <i data-lucide="chevron-right" style="width:14px;height:14px;color:var(--text3);transition:transform 0.2s;" id="pchevron-${yearKey}"></i>
+            <div style="font-size:14px;font-weight:800;color:var(--text);">${year}</div>
+            <div style="font-size:11px;color:var(--text3);">${Object.keys(yearData.months).length} мес.</div>
+          </div>
+          <div style="font-size:14px;font-weight:900;color:#ef4444;">${yearData.total.toLocaleString('ru')} ₴</div>
+        </div>
+        <div id="profile-month-body-${yearKey}" style="display:none;">${monthsHtml}</div>
+      </div>
+    `;
+  }).join('');
+
+  return `
+    <div class="fin-month-card owner-cash-history-card">
+      <div class="owner-cash-history-title">
+        <div>
+          <div class="fin-month-name">${escapeHtml(getOwnerExpenseHistoryTitle(workerName))}</div>
+          <div class="fin-month-sub">История расходов сотрудника</div>
+        </div>
+        <div style="font-size:18px;font-weight:900;color:#ef4444;white-space:nowrap;">${total.toLocaleString('ru')} ₴</div>
+      </div>
+      <div>${yearsHtml}</div>
+    </div>
+  `;
+}
+
+function getOwnerExpenseHistoryHtml(workerName) {
+  const logs = getOwnerExpenseLogs().sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+  return renderOwnerEmployeeExpenseHistory(workerName, logs);
+}
+
+function openOwnerExpenseHistoryModal(workerName) {
+  if (!workerName) return;
+  let modal = document.getElementById('owner-expense-history-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'owner-expense-history-modal';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  ownerExpenseSelectedWorker = workerName;
+  modal.innerHTML = `
+    <div class="modal" style="max-width:760px;max-height:88vh;display:flex;flex-direction:column;">
+      <div class="modal-header" style="flex-shrink:0;">
+        <div class="modal-title">${escapeHtml(getOwnerExpenseHistoryTitle(workerName))}</div>
+        <button class="modal-close" onclick="closeOwnerExpenseHistoryModal()">${icon('x')}</button>
+      </div>
+      <div class="modal-body" style="overflow-y:auto;flex:1;">
+        ${getOwnerExpenseHistoryHtml(workerName)}
+      </div>
+    </div>
+  `;
+  modal.classList.add('active');
+  initIcons();
+}
+
+function closeOwnerExpenseHistoryModal() {
+  document.getElementById('owner-expense-history-modal')?.classList.remove('active');
+  ownerExpenseSelectedWorker = '';
 }
 
 async function deleteOwnerCashEntry(id) {
@@ -1081,6 +1355,10 @@ async function deleteOwnerCashEntry(id) {
       }
     }
     renderOwnerCashScreen();
+    renderOwnerExpensesScreen();
+    if (document.getElementById('owner-expense-history-modal')?.classList.contains('active') && ownerExpenseSelectedWorker) {
+      openOwnerExpenseHistoryModal(ownerExpenseSelectedWorker);
+    }
     renderHome();
     showToast(hardDelete ? 'Запись кассы удалена безвозвратно' : 'Запись кассы перемещена в удаленные');
   } catch (e) {
@@ -1104,6 +1382,7 @@ async function restoreOwnerCashEntry(id) {
     }
     closeOwnerDeletedCashModal();
     renderOwnerCashScreen();
+    renderOwnerExpensesScreen();
     renderHome();
     showToast('Запись кассы восстановлена ✓');
   } catch (e) {
@@ -1167,6 +1446,60 @@ function openOwnerDeletedCashModal() {
 
 function closeOwnerDeletedCashModal() {
   document.getElementById('owner-deleted-cash-modal')?.classList.remove('active');
+}
+
+function renderOwnerExpensesScreen() {
+  const container = document.getElementById('owner-expenses-content');
+  if (!container) return;
+  const expenseLogs = getOwnerExpenseLogs()
+    .slice()
+    .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+  const expenseWorkerNames = Array.from(new Set([
+    ...getOwnerCashEditableWorkers(),
+    ...expenseLogs.map(entry => entry.worker_name).filter(Boolean),
+  ])).sort((a, b) => a.localeCompare(b, 'ru'));
+  const balances = {};
+  expenseLogs.forEach(entry => {
+    balances[entry.worker_name] = (balances[entry.worker_name] || 0) + getExpenseCashAmount(entry);
+  });
+  const rows = expenseWorkerNames.map(workerName => ({
+    workerName,
+    balance: Number(balances[workerName] || 0),
+    count: expenseLogs.filter(entry => entry.worker_name === workerName).length,
+  }));
+  const total = rows.reduce((sum, row) => sum + row.balance, 0);
+  const rowsHtml = rows.length
+    ? rows.map(row => `
+        <div class="owner-cash-worker-row" onclick="setOwnerExpenseSelectedWorker('${escapeAttr(row.workerName)}')">
+          <div>
+            <div class="owner-cash-worker-name">${escapeHtml(getWorkerDisplayName(row.workerName) || row.workerName)}</div>
+            <div class="fin-month-sub">${row.count} зап.</div>
+          </div>
+          <div class="owner-cash-worker-balance" style="color:${row.balance > 0 ? '#ef4444' : 'var(--text3)'};">${row.balance.toLocaleString('ru')} ₴</div>
+        </div>
+      `).join('')
+    : '<div style="font-size:13px;color:var(--text3);">Расходов пока нет</div>';
+
+  container.innerHTML = `
+    <div class="fin-month-card" style="margin-bottom:12px;">
+      <div style="padding:14px 16px;border-bottom:1px solid var(--border);">
+        <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;">
+          <div>
+            <div class="fin-month-name">Расходы</div>
+            <div class="fin-month-sub">Отдельный журнал расходов по сотрудникам</div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
+            <div style="font-size:22px;font-weight:900;color:${total > 0 ? '#ef4444' : 'var(--text3)'};white-space:nowrap;">${total.toLocaleString('ru')} ₴</div>
+            <button class="btn-secondary" style="font-size:12px;padding:6px 10px;" onclick="openOwnerCashEntryModal('', { expenseOnly: true })">+ Расход</button>
+          </div>
+        </div>
+      </div>
+      <div style="padding:12px 16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;">
+        ${rowsHtml}
+      </div>
+    </div>
+  `;
+  initIcons();
 }
 
 function renderOwnerEmployeeCashHistory(workerName, logs) {
@@ -1588,6 +1921,7 @@ async function confirmOwnerCashEntry(id) {
       );
     }
     renderOwnerCashScreen();
+    renderOwnerExpensesScreen();
     const paymentMethod = getPaymentMethodFromSourceKey(updated?.fop_source_key);
     if (paymentMethod) showToast(`Подтверждено: ${paymentMethod} ✓`);
     else showToast('Запись подтверждена ✓');
