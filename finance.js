@@ -7,6 +7,7 @@ let allSalaries = [];
 let ownerPendingSalaryOpen = false;
 let ownerManualSalaryEntriesOpen = false;
 let ownerSalarySelectedWorker = '';
+let ownerSalaryMonthCursorMap = {};
 
 function toggleOwnerPendingSalaryPanel() {
   ownerPendingSalaryOpen = !ownerPendingSalaryOpen;
@@ -524,6 +525,25 @@ function getOwnerSalaryHistoryTitle(workerName) {
   return escapeHtml(getWorkerDisplayName(workerName) || workerName || 'История ЗП');
 }
 
+function getOwnerSalaryMonthCursor(workerName) {
+  const key = String(workerName || '');
+  if (!key) return normalizeSalaryMonthCursor(new Date());
+  if (!ownerSalaryMonthCursorMap[key]) {
+    ownerSalaryMonthCursorMap[key] = normalizeSalaryMonthCursor(new Date());
+  }
+  return normalizeSalaryMonthCursor(ownerSalaryMonthCursorMap[key]);
+}
+
+function setOwnerSalaryMonth(workerName, offset) {
+  const key = String(workerName || '');
+  if (!key) return;
+  const current = getOwnerSalaryMonthCursor(key);
+  ownerSalaryMonthCursorMap[key] = new Date(current.getFullYear(), current.getMonth() + offset, 1);
+  if (document.getElementById('owner-salary-history-modal')?.classList.contains('active')) {
+    openOwnerSalaryHistoryModal(key);
+  }
+}
+
 function getOwnerSalaryHistoryHtml(workerName) {
   const salaryEntries = getOwnerSalaryEntries();
   if (!workerName) {
@@ -667,6 +687,9 @@ function renderOwnerEmployeeSalaryHistory(workerName, entries = getOwnerSalaryEn
     .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || String(b.created_at || '').localeCompare(String(a.created_at || '')));
   const total = getSalaryAccumulatedForWithdraw(workerName, rows);
   const workerKey = String(workerName || '').replace(/[^a-zA-Z0-9_-]+/g, '-');
+  const monthCardHtml = typeof renderWorkerSalaryMonthCard === 'function'
+    ? renderWorkerSalaryMonthCard(workerName, rows, getOwnerSalaryMonthCursor(workerName), `setOwnerSalaryMonth('${financeEscapeAttr(workerName)}', __OFFSET__)`)
+    : '';
 
   if (!rows.length) {
     return `
@@ -783,6 +806,7 @@ function renderOwnerEmployeeSalaryHistory(workerName, entries = getOwnerSalaryEn
         </div>
         <div style="font-size:18px;font-weight:900;color:${total >= 0 ? 'var(--accent)' : '#ef4444'};white-space:nowrap;">${total.toLocaleString('ru')} ₴</div>
       </div>
+      ${monthCardHtml}
       <div style="border-top:1px solid var(--border);">
         ${yearsHtml}
       </div>

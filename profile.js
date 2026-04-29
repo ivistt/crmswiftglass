@@ -8,6 +8,7 @@ let workerCashLog  = [];  // записи кассы текущего специ
 let assistantWorkerSalaries = [];
 let cashSearchQuery = '';
 let selectedAssistantSalaryName = '';
+let profileSalaryMonthCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 const FOP_CASH_WORKER_NAME = 'Oleg Starshiy';
 const MANAGER_CARD_CASH_WORKER_NAME = 'Sasha Manager';
 
@@ -17,6 +18,91 @@ function canManageAssistantSalary() {
 
 function canAccessPersonalCash() {
   return currentRole === 'senior' || currentRole === 'extra' || currentWorkerName === MANAGER_CARD_CASH_WORKER_NAME;
+}
+
+function normalizeSalaryMonthCursor(value) {
+  const date = value instanceof Date && !Number.isNaN(value.getTime()) ? value : new Date();
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function formatSalaryMonthTitle(date) {
+  const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+  const safeDate = normalizeSalaryMonthCursor(date);
+  return `${monthNames[safeDate.getMonth()]} ${safeDate.getFullYear()}`;
+}
+
+function getSalaryMonthKey(date) {
+  const safeDate = normalizeSalaryMonthCursor(date);
+  return `${safeDate.getFullYear()}-${String(safeDate.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function setProfileSalaryMonth(offset) {
+  const current = normalizeSalaryMonthCursor(profileSalaryMonthCursor);
+  profileSalaryMonthCursor = new Date(current.getFullYear(), current.getMonth() + offset, 1);
+  renderProfile();
+}
+
+function getWorkerSalaryMonthSummary(workerName, entries, cursorDate = new Date()) {
+  const monthKey = getSalaryMonthKey(cursorDate);
+  const monthEntries = (entries || [])
+    .filter(isRelevantSalaryEntry)
+    .filter(entry => String(entry?.date || '').startsWith(monthKey));
+  const byDate = {};
+  monthEntries.forEach(entry => {
+    const date = String(entry?.date || '').slice(0, 10);
+    if (!date) return;
+    if (!byDate[date]) byDate[date] = [];
+    byDate[date].push(entry);
+  });
+  const dates = Object.keys(byDate).sort((a, b) => b.localeCompare(a));
+  return dates.reduce((acc, date) => {
+    const visualDay = getWorkerSalaryVisualDayData(workerName, date, byDate[date]);
+    acc.amount += Number(visualDay.visualAmount) || 0;
+    acc.orders += Number(visualDay.summary?.count) || 0;
+    acc.days += 1;
+    return acc;
+  }, {
+    monthKey,
+    title: formatSalaryMonthTitle(cursorDate),
+    amount: 0,
+    orders: 0,
+    days: 0,
+  });
+}
+
+function renderWorkerSalaryMonthCard(workerName, entries, cursorDate = new Date(), changeHandler = 'setProfileSalaryMonth') {
+  const summary = getWorkerSalaryMonthSummary(workerName, entries, cursorDate);
+  const prevAction = String(changeHandler || '').includes('__OFFSET__')
+    ? String(changeHandler).replace('__OFFSET__', '-1')
+    : `${changeHandler}(-1)`;
+  const nextAction = String(changeHandler || '').includes('__OFFSET__')
+    ? String(changeHandler).replace('__OFFSET__', '1')
+    : `${changeHandler}(1)`;
+  return ''
+    + '<div class="profile-today-card" style="margin-top:12px;">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">'
+    + '<button class="btn-secondary calendar-nav-btn" type="button" onclick="' + prevAction + '" style="flex-shrink:0;">' + icon('chevron-right') + '</button>'
+    + '<div style="text-align:center;min-width:0;flex:1;">'
+    + '<div style="font-size:12px;font-weight:800;color:var(--text3);letter-spacing:0.04em;">ЗП ЗА МЕСЯЦ</div>'
+    + '<div style="font-size:18px;font-weight:900;color:var(--text);margin-top:4px;">' + escapeHtml(summary.title) + '</div>'
+    + '</div>'
+    + '<button class="btn-secondary calendar-nav-btn" type="button" onclick="' + nextAction + '" style="flex-shrink:0;transform:rotate(180deg);">' + icon('chevron-right') + '</button>'
+    + '</div>'
+    + '<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:14px;">'
+    + '<div style="padding:12px;border-radius:12px;background:var(--surface2);border:1px solid var(--border);">'
+    + '<div style="font-size:11px;color:var(--text3);">Начислено</div>'
+    + '<div style="font-size:20px;font-weight:900;color:' + (summary.amount >= 0 ? 'var(--accent)' : '#ef4444') + ';margin-top:4px;">' + summary.amount.toLocaleString('ru') + ' ₴</div>'
+    + '</div>'
+    + '<div style="padding:12px;border-radius:12px;background:var(--surface2);border:1px solid var(--border);">'
+    + '<div style="font-size:11px;color:var(--text3);">Заказов</div>'
+    + '<div style="font-size:20px;font-weight:900;color:var(--text);margin-top:4px;">' + summary.orders + '</div>'
+    + '</div>'
+    + '<div style="padding:12px;border-radius:12px;background:var(--surface2);border:1px solid var(--border);">'
+    + '<div style="font-size:11px;color:var(--text3);">Дней</div>'
+    + '<div style="font-size:20px;font-weight:900;color:var(--text);margin-top:4px;">' + summary.days + '</div>'
+    + '</div>'
+    + '</div>'
+    + '</div>';
 }
 
 // ── ЗАГРУЗКА ─────────────────────────────────────────────────
@@ -108,6 +194,7 @@ function renderProfile() {
       + '</div>'
       + '<div class="profile-summary-card"><div class="profile-summary-label">Сегодня</div><div class="profile-summary-value">' + todayAmount.toLocaleString('ru') + ' ₴</div></div>'
       + '</div>'
+      + renderWorkerSalaryMonthCard(currentWorkerName, relevantSalaryEntries, profileSalaryMonthCursor)
       + '<div class="profile-today-card" style="margin-top:12px;">'
       + '<div style="font-size:12px;font-weight:800;color:var(--text3);margin-bottom:12px;letter-spacing:0.04em;">ИСТОРИЯ ЗАРПЛАТ</div>'
       + '<div style="display:flex;flex-direction:column;gap:12px;">' + salaryHistoryHtml + '</div>'
@@ -143,6 +230,7 @@ function renderProfile() {
         showWithdraw: currentRole !== 'junior',
         attendanceHtml: renderWorkAttendanceCard()
       })
+    + renderWorkerSalaryMonthCard(currentWorkerName, relevantSalaryEntries, profileSalaryMonthCursor)
     + '<div class="profile-today-card" style="margin-top:12px;">'
     + '<div style="font-size:12px;font-weight:800;color:var(--text3);margin-bottom:12px;letter-spacing:0.04em;">ИСТОРИЯ ЗАРПЛАТ</div>'
     + '<div style="display:flex;flex-direction:column;gap:12px;">' + salaryHistoryHtml + '</div>'

@@ -414,7 +414,7 @@ function isCurrencyCashTransferEntry(entry) {
   return !!parsed && Math.abs(Number(parsed.uahAmount) || 0) > 0;
 }
 
-const EXPENSE_CATEGORY_OPTIONS = ['Заправка', 'Химия', 'Молдинг', 'Инструменты', 'Пленка'];
+const EXPENSE_CATEGORY_OPTIONS = ['Заправка', 'Химия', 'Молдинг', 'Инструменты', 'Пленка', 'ПКО'];
 
 function getExpenseCategoryOptions() {
   return [...EXPENSE_CATEGORY_OPTIONS];
