@@ -835,6 +835,198 @@ function getOwnerExpenseLogs() {
     .filter(isExpenseCashEntry);
 }
 
+function getOwnerExpenseAnalytics(logs = getOwnerExpenseLogs()) {
+  const currentMonthKey = (typeof getLocalDateString === 'function' ? getLocalDateString() : new Date().toISOString().slice(0, 10)).slice(0, 7);
+  const byCategory = {};
+  const byWarehouse = {};
+  const byWorkerExpense = {};
+  const byWorkerIncome = {};
+  let monthTotal = 0;
+
+  (logs || []).forEach(entry => {
+    const parsed = parseExpenseCashEntry(entry);
+    const amount = getExpenseCashAmount(entry);
+    const date = String(entry?.fop_date || _ownerCashEntryDate(entry) || '').slice(0, 7);
+    if (date === currentMonthKey) monthTotal += amount;
+    if (parsed?.category) {
+      byCategory[parsed.category] = (byCategory[parsed.category] || 0) + amount;
+    }
+    if (parsed?.warehouse) {
+      byWarehouse[parsed.warehouse] = (byWarehouse[parsed.warehouse] || 0) + amount;
+    }
+    if (entry?.worker_name) {
+      byWorkerExpense[entry.worker_name] = (byWorkerExpense[entry.worker_name] || 0) + amount;
+    }
+  });
+
+  getOwnerCashBalanceLogs()
+    .filter(entry => !isExpenseCashEntry(entry))
+    .forEach(entry => {
+      const workerName = String(entry?.worker_name || '').trim();
+      if (!workerName) return;
+      const amount = Number(entry.amount) || 0;
+      if (amount > 0) byWorkerIncome[workerName] = (byWorkerIncome[workerName] || 0) + amount;
+    });
+
+  const categories = Object.entries(byCategory)
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, total]) => ({ name, total }));
+  const warehouses = Object.entries(byWarehouse)
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, total]) => ({ name, total }));
+  const workers = Array.from(new Set([
+    ...Object.keys(byWorkerExpense),
+    ...Object.keys(byWorkerIncome),
+  ])).map(workerName => {
+    const income = Number(byWorkerIncome[workerName] || 0);
+    const expense = Number(byWorkerExpense[workerName] || 0);
+    return {
+      workerName,
+      income,
+      expense,
+      delta: income - expense,
+    };
+  }).sort((a, b) => b.expense - a.expense);
+
+  return {
+    monthKey: currentMonthKey,
+    monthTotal,
+    categories,
+    warehouses,
+    workers,
+  };
+}
+
+function renderOwnerExpenseAnalytics(logs = getOwnerExpenseLogs()) {
+  const analytics = getOwnerExpenseAnalytics(logs);
+  const total = (logs || []).reduce((sum, entry) => sum + getExpenseCashAmount(entry), 0);
+  const topCategories = analytics.categories.slice(0, 5);
+  const topWarehouses = analytics.warehouses.slice(0, 5);
+  const topWorkers = analytics.workers.slice(0, 5);
+
+  const renderList = (items, emptyLabel = 'Пока нет данных') => items.length
+    ? items.map(item => `
+        <div class="sal-nav-row" style="padding:10px 0;">
+          <div style="font-size:13px;font-weight:700;color:var(--text);min-width:0;">${escapeHtml(item.name)}</div>
+          <div style="font-size:13px;font-weight:900;color:#ef4444;white-space:nowrap;">${Number(item.total || 0).toLocaleString('ru')} ₴</div>
+        </div>
+      `).join('')
+    : `<div style="font-size:12px;color:var(--text3);padding:8px 0;">${escapeHtml(emptyLabel)}</div>`;
+  const renderWorkerList = (items, emptyLabel = 'Сотрудников пока нет') => items.length
+    ? items.map(item => `
+        <div class="sal-nav-row" style="padding:10px 0;" onclick="setOwnerExpenseSelectedWorker('${escapeAttr(item.workerName)}')">
+          <div style="min-width:0;">
+            <div style="font-size:13px;font-weight:700;color:var(--text);">${escapeHtml(getWorkerDisplayName(item.workerName) || item.workerName)}</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:3px;">Приход: ${item.income.toLocaleString('ru')} ₴ · Расход: ${item.expense.toLocaleString('ru')} ₴</div>
+          </div>
+          <div style="font-size:13px;font-weight:900;color:${item.delta >= 0 ? 'var(--accent)' : '#ef4444'};white-space:nowrap;">${item.delta.toLocaleString('ru')} ₴</div>
+        </div>
+      `).join('')
+    : `<div style="font-size:12px;color:var(--text3);padding:8px 0;">${escapeHtml(emptyLabel)}</div>`;
+
+  return `
+    <div class="fin-summary" style="margin-bottom:12px;">
+      <div class="fin-summary-title">Аналитика расходов</div>
+      <div class="fin-summary-grid">
+        <div class="fin-summary-item">
+          <div class="fin-summary-item-title">Всего расходов</div>
+          <div class="fin-summary-item-value" style="color:var(--red);">${total.toLocaleString('ru')} ₴</div>
+        </div>
+        <div class="fin-summary-item">
+          <div class="fin-summary-item-title">За текущий месяц</div>
+          <div class="fin-summary-item-value" style="color:var(--red);">${analytics.monthTotal.toLocaleString('ru')} ₴</div>
+          <div class="fin-summary-item-sub">${escapeHtml(analytics.monthKey)}</div>
+        </div>
+        <div class="fin-summary-item">
+          <div class="fin-summary-item-title">Категорий с расходами</div>
+          <div class="fin-summary-item-value">${analytics.categories.length}</div>
+        </div>
+        <div class="fin-summary-item">
+          <div class="fin-summary-item-title">Складов с расходами</div>
+          <div class="fin-summary-item-value">${analytics.warehouses.length}</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-top:12px;">
+        <div style="padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface2);">
+          <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:10px;letter-spacing:0.04em;">ПО КАТЕГОРИЯМ</div>
+          ${renderList(topCategories, 'Категорий пока нет')}
+        </div>
+        <div style="padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface2);">
+          <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:10px;letter-spacing:0.04em;">ПО СКЛАДАМ</div>
+          ${renderList(topWarehouses, 'Складские расходы пока не добавлялись')}
+        </div>
+        <div style="padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface2);grid-column:1 / -1;">
+          <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:10px;letter-spacing:0.04em;">ТОП СОТРУДНИКОВ ПО РАСХОДАМ</div>
+          ${renderWorkerList(topWorkers, 'Расходных сотрудников пока нет')}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderOwnerEmployeeExpenseAnalytics(workerName, logs) {
+  const rows = (logs || []).filter(entry => entry.worker_name === workerName);
+  const analytics = getOwnerExpenseAnalytics(rows);
+  const total = rows.reduce((sum, entry) => sum + getExpenseCashAmount(entry), 0);
+  const income = getOwnerCashBalanceLogs()
+    .filter(entry => !isExpenseCashEntry(entry))
+    .filter(entry => entry.worker_name === workerName)
+    .reduce((sum, entry) => {
+      const amount = Number(entry.amount) || 0;
+      return amount > 0 ? sum + amount : sum;
+    }, 0);
+  const delta = income - total;
+  const topCategories = analytics.categories.slice(0, 4);
+  const topWarehouses = analytics.warehouses.slice(0, 4);
+
+  const renderMiniList = (items, emptyLabel) => items.length
+    ? items.map(item => `
+        <div class="sal-nav-row" style="padding:8px 0;">
+          <div style="font-size:12px;font-weight:700;color:var(--text);min-width:0;">${escapeHtml(item.name)}</div>
+          <div style="font-size:12px;font-weight:900;color:#ef4444;white-space:nowrap;">${Number(item.total || 0).toLocaleString('ru')} ₴</div>
+        </div>
+      `).join('')
+    : `<div style="font-size:11px;color:var(--text3);padding:6px 0;">${escapeHtml(emptyLabel)}</div>`;
+
+  return `
+    <div style="padding:14px;border-bottom:1px solid var(--border);background:var(--surface2);">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;">
+        <div style="padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--surface);">
+          <div style="font-size:11px;font-weight:800;color:var(--text3);letter-spacing:0.04em;">ВСЕГО</div>
+          <div style="font-size:20px;font-weight:900;color:#ef4444;margin-top:6px;">${total.toLocaleString('ru')} ₴</div>
+        </div>
+        <div style="padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--surface);">
+          <div style="font-size:11px;font-weight:800;color:var(--text3);letter-spacing:0.04em;">ПРИХОД</div>
+          <div style="font-size:20px;font-weight:900;color:var(--accent);margin-top:6px;">${income.toLocaleString('ru')} ₴</div>
+        </div>
+        <div style="padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--surface);">
+          <div style="font-size:11px;font-weight:800;color:var(--text3);letter-spacing:0.04em;">ТЕКУЩИЙ МЕСЯЦ</div>
+          <div style="font-size:20px;font-weight:900;color:#ef4444;margin-top:6px;">${analytics.monthTotal.toLocaleString('ru')} ₴</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:4px;">${escapeHtml(analytics.monthKey)}</div>
+        </div>
+        <div style="padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--surface);">
+          <div style="font-size:11px;font-weight:800;color:var(--text3);letter-spacing:0.04em;">РАЗНИЦА</div>
+          <div style="font-size:20px;font-weight:900;color:${delta >= 0 ? 'var(--accent)' : '#ef4444'};margin-top:6px;">${delta.toLocaleString('ru')} ₴</div>
+        </div>
+        <div style="padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--surface);">
+          <div style="font-size:11px;font-weight:800;color:var(--text3);letter-spacing:0.04em;">КАТЕГОРИИ / СКЛАДЫ</div>
+          <div style="font-size:20px;font-weight:900;margin-top:6px;">${analytics.categories.length} / ${analytics.warehouses.length}</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;margin-top:12px;">
+        <div style="padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--surface);">
+          <div style="font-size:11px;font-weight:800;color:var(--text3);letter-spacing:0.04em;margin-bottom:8px;">ТОП КАТЕГОРИЙ</div>
+          ${renderMiniList(topCategories, 'Категорий пока нет')}
+        </div>
+        <div style="padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--surface);">
+          <div style="font-size:11px;font-weight:800;color:var(--text3);letter-spacing:0.04em;margin-bottom:8px;">ТОП СКЛАДОВ</div>
+          ${renderMiniList(topWarehouses, 'Складских расходов пока нет')}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function getOwnerCashBalanceLogs() {
   return getOwnerCashLogs('confirmed');
 }
@@ -1286,6 +1478,7 @@ function renderOwnerEmployeeExpenseHistory(workerName, logs) {
         </div>
         <div style="font-size:18px;font-weight:900;color:#ef4444;white-space:nowrap;">${total.toLocaleString('ru')} ₴</div>
       </div>
+      ${renderOwnerEmployeeExpenseAnalytics(workerName, rows)}
       <div>${yearsHtml}</div>
     </div>
   `;
@@ -1498,6 +1691,7 @@ function renderOwnerExpensesScreen() {
         ${rowsHtml}
       </div>
     </div>
+    ${renderOwnerExpenseAnalytics(expenseLogs)}
   `;
   initIcons();
 }

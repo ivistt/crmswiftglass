@@ -13,6 +13,7 @@ let warehouseDateFilterExact = '';
 let warehouseDateFilterFrom = '';
 let warehouseDateFilterTo = '';
 let warehouseNewPostOnly = false;
+let warehouseAnomaliesOpen = false;
 
 function formatWarehouseEntryTime(value) {
   const raw = String(value || '').trim();
@@ -80,6 +81,74 @@ function getWarehouseRecordSearchText(record) {
     ].join(' ');
   }
   return '';
+}
+
+function getWarehouseSupplierAnomalies(warehouseName = '') {
+  return (orders || [])
+    .filter(order => !order?.isCancelled)
+    .filter(order => !warehouseName || (order.warehouse || 'Без склада') === warehouseName)
+    .map(order => {
+      const purchase = Math.max(0, Number(order?.purchase) || 0);
+      const paid = typeof getOrderSupplierQuickPaidAmount === 'function'
+        ? getOrderSupplierQuickPaidAmount(order)
+        : 0;
+      return {
+        order,
+        orderId: order?.id || '',
+        client: order?.client || '',
+        car: order?.car || '',
+        date: order?.date || '',
+        purchase,
+        paid,
+        overpay: Math.max(0, paid - purchase),
+      };
+    })
+    .filter(item => item.paid > item.purchase && item.paid > 0)
+    .sort((a, b) => {
+      if (b.overpay !== a.overpay) return b.overpay - a.overpay;
+      return String(b.date || '').localeCompare(String(a.date || ''));
+    });
+}
+
+function toggleWarehouseAnomalies() {
+  warehouseAnomaliesOpen = !warehouseAnomaliesOpen;
+  if (currentWarehouseFilter) renderWarehouseDetail();
+  else renderWarehousesScreen();
+}
+
+function renderWarehouseAnomaliesPanel(warehouseName = '') {
+  const anomalies = getWarehouseSupplierAnomalies(warehouseName);
+  const title = warehouseName ? `Аномалии: ${warehouseName}` : 'Аномалии по складам';
+  const hint = warehouseName
+    ? 'Показываем заказы этого склада, где быстрые оплаты поставщику больше стоимости покупки стекла.'
+    : 'Показываем заказы, где быстрые оплаты поставщику больше стоимости покупки стекла.';
+  const rowsHtml = anomalies.length
+    ? anomalies.map(item => `
+      <div class="sal-nav-row" onclick="openOrderModal('${escapeAttr(item.orderId)}')">
+        <div style="min-width:0;">
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+            <span style="font-size:13px;font-weight:800;color:#ef4444;">Поставщик</span>
+            <span style="font-size:12px;font-weight:800;color:var(--text);">${escapeHtml(item.orderId || '—')}</span>
+          </div>
+          <div style="font-size:12px;color:var(--text);margin-top:4px;font-weight:700;">${escapeHtml(item.client || item.car || '—')}</div>
+          ${item.car ? `<div style="font-size:12px;color:var(--text3);margin-top:4px;">${escapeHtml(item.car)}</div>` : ''}
+          <div style="font-size:12px;color:var(--text3);margin-top:4px;">Покупка: ${item.purchase.toLocaleString('ru')} ₴ · Быстрые оплаты: ${item.paid.toLocaleString('ru')} ₴</div>
+        </div>
+        <div style="font-size:14px;font-weight:900;color:#ef4444;white-space:nowrap;">+${item.overpay.toLocaleString('ru')} ₴</div>
+      </div>
+    `).join('')
+    : '<div style="font-size:12px;color:var(--text3);padding:8px 0;">Аномалий нет</div>';
+
+  return `<div class="profile-today-card" style="margin-top:12px;margin-bottom:12px;grid-column:1 / -1;width:100%;">
+    <button type="button" onclick="toggleWarehouseAnomalies()" style="width:100%;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;background:none;border:none;padding:0;color:inherit;text-align:left;cursor:pointer;">
+      <div>
+        <div class="profile-today-label"><i data-lucide="triangle-alert" style="width:15px;height:15px;"></i> ${escapeHtml(title)}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:6px;">${escapeHtml(hint)}</div>
+      </div>
+      <i data-lucide="${warehouseAnomaliesOpen ? 'chevron-up' : 'chevron-down'}" style="width:16px;height:16px;color:var(--text3);margin-top:2px;flex-shrink:0;"></i>
+    </button>
+    <div style="display:${warehouseAnomaliesOpen ? 'block' : 'none'};margin-top:8px;">${rowsHtml}</div>
+  </div>`;
 }
 
 function getSupplierDebt(order) {
@@ -161,7 +230,7 @@ function renderWarehousesScreen() {
     map[w].push(record);
   }
 
-  container.innerHTML = Object.keys(map).sort().map(w => {
+  const cardsHtml = Object.keys(map).sort().map(w => {
     const list = map[w];
     const totals = getWarehouseTotals(list);
     return `
@@ -178,6 +247,7 @@ function renderWarehousesScreen() {
       </div>
     `;
   }).join('');
+  container.innerHTML = cardsHtml + renderWarehouseAnomaliesPanel();
   initIcons();
 }
 
@@ -250,7 +320,8 @@ function renderWarehouseDetail() {
 
   container.innerHTML = renderWarehousePaymentFilters()
     + renderWarehouseOrderFilters()
-    + (filteredList.length ? renderWarehouseOrderTree(filteredList) : '<div class="empty-state">Записей по фильтру нет</div>');
+    + (filteredList.length ? renderWarehouseOrderTree(filteredList) : '<div class="empty-state">Записей по фильтру нет</div>')
+    + renderWarehouseAnomaliesPanel(w);
   initIcons();
 }
 

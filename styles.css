@@ -2328,12 +2328,18 @@ input[type="datetime-local"] {
   cursor: pointer;
   transition: border-color 0.15s, background 0.15s;
 }
+.owner-cash-worker-row > div:first-child {
+  min-width: 0;
+  flex: 1 1 auto;
+}
 .owner-cash-worker-row:hover,
 .owner-cash-worker-row.active {
   border-color: rgba(0, 229, 160, 0.42);
   background: rgba(0, 229, 160, 0.08);
 }
 .owner-cash-worker-name {
+  display: block;
+  width: 100%;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
