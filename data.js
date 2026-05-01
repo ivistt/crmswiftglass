@@ -3,6 +3,106 @@
 // ============================================================
 
 const WORKER_URL = 'https://swiftglass-crm.skifchaqwerty.workers.dev';
+const WORKER_PERMISSIONS_META_PREFIX = '[[CRM_PERMS:';
+const WORKER_PERMISSIONS_META_SUFFIX = ']]';
+const WORKER_PERMISSION_PRESETS = {
+  manager: {
+    orders_view_all: true,
+    orders_create: true,
+    orders_edit: true,
+    orders_delete: false,
+    clients_view: true,
+    workers_view: false,
+    warehouses_view: true,
+    dropshippers_manage: false,
+    calendar_view: false,
+    groups_view: false,
+    personal_cash_view: false,
+    cash_add_entries: false,
+    finance_view: false,
+    owner_cash_view: false,
+    owner_expenses_view: false,
+    owner_payments_view: false,
+    order_payments_manage: true,
+    order_services_edit: true,
+    order_complete: false,
+    special_service_status: false,
+    special_service_tatu: false,
+    special_service_toning: false,
+  },
+  senior: {
+    orders_view_all: false,
+    orders_create: false,
+    orders_edit: true,
+    orders_delete: false,
+    clients_view: false,
+    workers_view: false,
+    warehouses_view: false,
+    dropshippers_manage: false,
+    calendar_view: false,
+    groups_view: false,
+    personal_cash_view: true,
+    cash_add_entries: true,
+    finance_view: false,
+    owner_cash_view: false,
+    owner_expenses_view: false,
+    owner_payments_view: false,
+    order_payments_manage: true,
+    order_services_edit: true,
+    order_complete: true,
+    special_service_status: false,
+    special_service_tatu: false,
+    special_service_toning: false,
+  },
+  junior: {
+    orders_view_all: false,
+    orders_create: false,
+    orders_edit: false,
+    orders_delete: false,
+    clients_view: false,
+    workers_view: false,
+    warehouses_view: false,
+    dropshippers_manage: false,
+    calendar_view: false,
+    groups_view: false,
+    personal_cash_view: false,
+    cash_add_entries: false,
+    finance_view: false,
+    owner_cash_view: false,
+    owner_expenses_view: false,
+    owner_payments_view: false,
+    order_payments_manage: false,
+    order_services_edit: false,
+    order_complete: false,
+    special_service_status: false,
+    special_service_tatu: false,
+    special_service_toning: false,
+  },
+  extra: {
+    orders_view_all: false,
+    orders_create: false,
+    orders_edit: true,
+    orders_delete: false,
+    clients_view: false,
+    workers_view: false,
+    warehouses_view: false,
+    dropshippers_manage: false,
+    calendar_view: false,
+    groups_view: false,
+    personal_cash_view: true,
+    cash_add_entries: true,
+    finance_view: false,
+    owner_cash_view: false,
+    owner_expenses_view: false,
+    owner_payments_view: false,
+    order_payments_manage: true,
+    order_services_edit: true,
+    order_complete: true,
+    special_service_status: false,
+    special_service_tatu: false,
+    special_service_toning: false,
+  },
+};
 
 if (typeof window !== 'undefined' && window.fetch && !window.fetch.__crmNetworkGuard) {
   const nativeFetch = window.fetch.bind(window);
@@ -84,6 +184,155 @@ function getWorkerDisplayName(name) {
 function getWorkerDisplayPair(responsible, assistant) {
   const lead = getWorkerDisplayName(responsible) || '—';
   return assistant ? `${lead} + ${getWorkerDisplayName(assistant)}` : lead;
+}
+
+function parseWorkerNoteMeta(rawNote) {
+  const source = String(rawNote || '');
+  const start = source.indexOf(WORKER_PERMISSIONS_META_PREFIX);
+  if (start === -1) {
+    return { note: source.trim(), permissions: {} };
+  }
+  const end = source.indexOf(WORKER_PERMISSIONS_META_SUFFIX, start);
+  if (end === -1) {
+    return { note: source.trim(), permissions: {} };
+  }
+  const encoded = source.slice(start + WORKER_PERMISSIONS_META_PREFIX.length, end);
+  const note = (source.slice(0, start) + source.slice(end + WORKER_PERMISSIONS_META_SUFFIX.length)).trim();
+  try {
+    const decoded = JSON.parse(atob(encoded));
+    return {
+      note,
+      permissions: decoded && typeof decoded === 'object' && !Array.isArray(decoded) ? decoded : {},
+    };
+  } catch (e) {
+    return { note, permissions: {} };
+  }
+}
+
+function buildWorkerNoteWithMeta(note, permissions) {
+  const cleanNote = String(note || '').trim();
+  const cleanPermissions = permissions && typeof permissions === 'object' ? permissions : {};
+  if (!Object.keys(cleanPermissions).length) return cleanNote;
+  const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(cleanPermissions))));
+  return `${cleanNote}${cleanNote ? '\n' : ''}${WORKER_PERMISSIONS_META_PREFIX}${encoded}${WORKER_PERMISSIONS_META_SUFFIX}`;
+}
+
+function getWorkerPermissionPreset(systemRole) {
+  return { ...(WORKER_PERMISSION_PRESETS[systemRole] || WORKER_PERMISSION_PRESETS.junior) };
+}
+
+function hasExplicitWorkerPermissions(workerLike) {
+  const permissions = workerLike?.permissions;
+  return !!(permissions && typeof permissions === 'object' && !Array.isArray(permissions) && Object.keys(permissions).length);
+}
+
+function applyLegacyWorkerPermissionFallback(state, workerLike) {
+  const next = { ...(state || {}) };
+  const name = String(workerLike?.name || '').trim();
+  const role = String(workerLike?.systemRole || workerLike?.system_role || workerLike?.role || '').trim();
+  if (name === 'Sasha Manager') {
+    next.dropshippers_manage = true;
+    next.groups_view = true;
+    next.calendar_view = true;
+    next.personal_cash_view = true;
+    next.cash_add_entries = true;
+  }
+  if (name === 'Roma' || name === 'Lyosha') {
+    next.special_service_status = true;
+  }
+  if (name === 'Roma') {
+    next.special_service_tatu = true;
+  }
+  if (name === 'Lyosha') {
+    next.special_service_toning = true;
+  }
+  if (role === 'senior' || role === 'extra') {
+    next.personal_cash_view = true;
+    next.cash_add_entries = true;
+    next.order_payments_manage = true;
+    next.order_services_edit = true;
+    next.order_complete = true;
+  }
+  if (role === 'manager') {
+    next.orders_create = true;
+    next.orders_edit = true;
+    next.clients_view = true;
+    next.warehouses_view = true;
+  }
+  return next;
+}
+
+function resolveWorkerPermissionState(workerLike) {
+  const systemRole = workerLike?.systemRole || workerLike?.system_role || workerLike?.role || 'junior';
+  const preset = getWorkerPermissionPreset(systemRole);
+  const explicit = workerLike?.permissions && typeof workerLike.permissions === 'object' && !Array.isArray(workerLike.permissions)
+    ? workerLike.permissions
+    : {};
+  if (!Object.keys(explicit).length) {
+    return applyLegacyWorkerPermissionFallback(preset, workerLike);
+  }
+  return { ...preset, ...explicit };
+}
+
+function getCurrentWorkerRecord() {
+  return (workers || []).find(item => item.name === currentWorkerName) || {
+    name: currentWorkerName,
+    systemRole: currentRole,
+    permissions: {},
+  };
+}
+
+function currentUserHasPermission(key, legacyFallback = false) {
+  if (currentRole === 'owner') return true;
+  const state = resolveWorkerPermissionState(getCurrentWorkerRecord());
+  if (Object.prototype.hasOwnProperty.call(state, key)) {
+    return !!state[key];
+  }
+  return !!legacyFallback;
+}
+
+function currentUserCanViewAllOrders() {
+  return currentRole === 'owner' || currentRole === 'manager' || currentUserHasPermission('orders_view_all');
+}
+
+function getWorkerRecordByName(name) {
+  const workerName = String(name || '').trim();
+  if (!workerName) return null;
+  return (workers || []).find(item => item.name === workerName) || null;
+}
+
+function workerCanHandleSpecialService(workerLike, type) {
+  const worker = typeof workerLike === 'string' ? getWorkerRecordByName(workerLike) : workerLike;
+  const workerName = String(worker?.name || workerLike || '').trim();
+  if (!workerName) return false;
+  const state = resolveWorkerPermissionState(worker || { name: workerName, permissions: {}, systemRole: '' });
+  if (type === 'tatu') {
+    return !!state.special_service_tatu || workerName === 'Roma';
+  }
+  if (type === 'toning') {
+    return !!state.special_service_toning || workerName === 'Lyosha';
+  }
+  return false;
+}
+
+function getSpecialServiceWorkers(type) {
+  return (workers || []).filter(worker => workerCanHandleSpecialService(worker, type));
+}
+
+function getOrderSpecialServiceAssignedWorker(order, type) {
+  if (!order) return '';
+  const explicitAssigned = type === 'tatu'
+    ? String(order.tatuResponsible || '').trim()
+    : String(order.toningResponsible || '').trim();
+  const doneBy = type === 'tatu' ? String(order.tatuDoneBy || '').trim() : String(order.toningDoneBy || '').trim();
+  const legacyDefault = type === 'tatu' ? 'Roma' : 'Lyosha';
+  const candidates = [explicitAssigned, doneBy, order.responsible, order.assistant, legacyDefault].filter(Boolean);
+  return candidates.find(name => workerCanHandleSpecialService(name, type)) || '';
+}
+
+function currentUserHasAnyDashboardPermission() {
+  return ['orders_create', 'clients_view', 'workers_view', 'warehouses_view', 'dropshippers_manage', 'groups_view', 'calendar_view', 'finance_view', 'owner_cash_view', 'owner_expenses_view', 'owner_payments_view']
+    .some(key => currentUserHasPermission(key));
 }
 
 // ── ORDERS ───────────────────────────────────────────────────
@@ -213,6 +462,12 @@ async function sbUpdateWorker(workerId, updates) {
   if (updates.salaryFormula !== undefined) body.salary_formula = updates.salaryFormula || '';
   if (updates.assistant !== undefined) body.assistant = updates.assistant || '';
   if (updates.alias !== undefined) body.alias = updates.alias || '';
+  if (updates.note !== undefined || updates.permissions !== undefined) {
+    body.note = buildWorkerNoteWithMeta(
+      updates.note !== undefined ? updates.note : '',
+      updates.permissions !== undefined ? updates.permissions : {}
+    );
+  }
   // Пароль обновляется через set-pin если передан
   if (updates.password) {
     await sbSetWorkerPin(workerId, updates.password);
@@ -266,6 +521,12 @@ async function sbDeleteWorkerProblem(id) {
 
 // ── WORKER SALARIES ──────────────────────────────────────────
 
+function normalizeSalaryRows(rows, options = {}) {
+  const includeLegacySpecial = !!options?.includeLegacySpecial;
+  const list = Array.isArray(rows) ? rows : [];
+  return includeLegacySpecial ? list : list.filter(entry => !isLegacySpecialServiceSalaryEntry(entry));
+}
+
 async function sbFetchWorkerSalaries(workerName) {
   const res = await fetch(
     `${WORKER_URL}/api/salaries?worker=${encodeURIComponent(workerName)}`,
@@ -273,23 +534,24 @@ async function sbFetchWorkerSalaries(workerName) {
   );
   if (!res.ok) await throwApiError(res);
   const rows = await res.json();
-  return (Array.isArray(rows) ? rows : []).filter(entry => !isLegacySpecialServiceSalaryEntry(entry));
+  return normalizeSalaryRows(rows);
 }
 
 async function sbFetchAllSalaries() {
   const res = await fetch(`${WORKER_URL}/api/salaries/all`, { headers: getHeaders() });
   if (!res.ok) await throwApiError(res);
   const rows = await res.json();
-  return (Array.isArray(rows) ? rows : []).filter(entry => !isLegacySpecialServiceSalaryEntry(entry));
+  return normalizeSalaryRows(rows);
 }
 
-async function sbFetchSalariesByOrder(orderId) {
+async function sbFetchSalariesByOrder(orderId, options = {}) {
   const res = await fetch(
     `${WORKER_URL}/api/salaries/by-order/${encodeURIComponent(orderId)}`,
     { headers: getHeaders() }
   );
   if (!res.ok) await throwApiError(res);
-  return res.json();
+  const rows = await res.json();
+  return normalizeSalaryRows(rows, options);
 }
 
 async function sbInsertWorkerSalary(entry) {
@@ -490,6 +752,14 @@ function buildExpenseCashComment({ amount = 0, category = '', warehouse = '', no
 }
 
 function parseExpenseCashEntry(entry) {
+  if (entry?.expense_category) {
+    return {
+      amountLabel: Math.abs(Number(entry?.amount) || 0).toLocaleString('ru'),
+      category: String(entry.expense_category || '').trim(),
+      warehouse: String(entry.warehouse_name || '').trim(),
+      note: String(entry.comment || '').trim(),
+    };
+  }
   const raw = String(entry?.comment || '').trim();
   if (!raw.startsWith('Расход(')) return null;
   const match = raw.match(/^Расход\(([^)]+)\)\s*·\s*([^·-]+?)(?:\s*·\s*склад\s+([^-\n]+?))?(?:\s*-\s*([\s\S]+))?$/);
@@ -514,7 +784,15 @@ function getExpenseCashAmount(entry) {
 
 function getCashEntryDisplayComment(entry) {
   const expense = parseExpenseCashEntry(entry);
-  if (expense) return String(entry?.comment || '—');
+  if (expense) {
+    if (entry?.expense_category) {
+      const parts = [`Расход(${Math.abs(Number(entry?.amount) || 0).toLocaleString('ru')})`, expense.category];
+      if (expense.warehouse && expense.category !== 'Заправка') parts.push(`склад ${expense.warehouse}`);
+      const head = parts.join(' · ');
+      return expense.note ? `${head} - ${expense.note}` : head;
+    }
+    return String(entry?.comment || '—');
+  }
   const parsed = parseCurrencyCashEntry(entry);
   if (!parsed) return String(entry?.comment || '—');
   const base = parsed.uahAmount > 0
@@ -566,6 +844,50 @@ async function sbFetchRefOptional(table) {
     // если таблица ещё не проксируется воркером — молча возвращаем пустой список
     return [];
   }
+}
+
+async function sbCreateRef(table, payload) {
+  const res = await fetch(`${WORKER_URL}/api/ref/${table}`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(payload || {}),
+  });
+  if (!res.ok) await throwApiError(res);
+  const data = await res.json();
+  return Array.isArray(data) ? data[0] : data;
+}
+
+async function sbCreateWarehouse(name) {
+  return sbCreateRef('ref_warehouses', { name });
+}
+
+async function sbCreateDropshipper(name, workerName = '') {
+  return sbCreateRef('ref_dropshippers', {
+    name,
+    worker_name: String(workerName || '').trim() || null,
+  });
+}
+
+async function sbUpdateRef(table, id, payload) {
+  const res = await fetch(`${WORKER_URL}/api/ref/${table}/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+    body: JSON.stringify(payload || {}),
+  });
+  if (!res.ok) await throwApiError(res);
+  const data = await res.json();
+  return Array.isArray(data) ? data[0] : data;
+}
+
+async function sbUpdateWarehouse(id, name) {
+  return sbUpdateRef('ref_warehouses', id, { name });
+}
+
+async function sbUpdateDropshipper(id, name, workerName = '') {
+  return sbUpdateRef('ref_dropshippers', id, {
+    name,
+    worker_name: String(workerName || '').trim() || null,
+  });
 }
 
 // -- CAR DIRECTORY --------------------------------------------------
@@ -754,14 +1076,11 @@ function rowToOrder(r) {
     toningDoneBy:    r.toning_done_by || '',
     delivery:        r.delivery       || 0,
     author:          r.author,
-    selection:       r.selection, // legacy, column может отсутствовать
     paymentStatus:   paymentStatus,
     check:           r.check_sum      || 0,
     debt:            r.debt           || 0,
     debtDate:        r.debt_date      || '',
     total:           r.total          || 0,
-    percent10:       r.percent10      || 0, // legacy
-    percent20:       r.percent20      || 0, // legacy
     moldingAuthor:   r.molding_author,
     partner:         r.partner,
     supplierStatus:  supplierStatus,
@@ -775,6 +1094,8 @@ function rowToOrder(r) {
     configuration:   configurationMeta.configuration,
     tatuStatus:      r.tatu_status ?? configurationMeta.tatuStatus ?? false,
     toningStatus:    r.toning_status ?? configurationMeta.toningStatus ?? false,
+    tatuResponsible: configurationMeta.tatuResponsible || '',
+    toningResponsible: configurationMeta.toningResponsible || '',
     warehouseDelta:  r.warehouse_delta,
     dropshipper:     r.drop_shipper,
     dropshipperPayout: r.drop_shipper_payout || 0,
@@ -853,7 +1174,12 @@ function orderToRow(o) {
     warehouse:         o.warehouse,
     warehouse_code:    o.warehouseCode,
     new_post:          o.newPost || false,
-    configuration:     parseOrderConfigurationMeta(o.configuration).configuration,
+    configuration:     buildOrderConfigurationMeta(parseOrderConfigurationMeta(o.configuration).configuration, {
+      tatuStatus: o.tatuStatus || false,
+      toningStatus: o.toningStatus || false,
+      tatuResponsible: o.tatuResponsible || '',
+      toningResponsible: o.toningResponsible || '',
+    }),
     tatu_status:       o.tatuStatus || false,
     toning_status:     o.toningStatus || false,
     drop_shipper:      o.dropshipper || null,
@@ -887,13 +1213,15 @@ function orderToRow(o) {
 }
 
 function rowToWorker(r) {
+  const noteMeta = parseWorkerNoteMeta(r.note);
   return {
     id:            r.id,
     name:          r.name,
     alias:         r.alias         || '',
     role:          r.role          || '',
     systemRole:    r.system_role   || 'junior',
-    note:          r.note          || '',
+    note:          noteMeta.note,
+    permissions:   noteMeta.permissions || {},
     salaryFormula: r.salary_formula || '',
     assistant:     r.assistant     || '',
   };
@@ -905,7 +1233,7 @@ function workerToRow(w) {
     alias:          w.alias         || '',
     role:           w.role          || '',
     system_role:    w.systemRole    || 'junior',
-    note:           w.note          || '',
+    note:           buildWorkerNoteWithMeta(w.note, w.permissions),
     salary_formula: w.salaryFormula || '',
     assistant:      w.assistant     || '',
   };
@@ -945,6 +1273,60 @@ async function sbUpdateWorkerFormula(workerId, formula) {
 
 // ── РАСЧЁТ ЗАРПЛАТ ───────────────────────────────────────────
 //
+function parseWorkerSalaryFormula(rawFormula) {
+  const source = String(rawFormula || '').trim();
+  if (!source) return null;
+  try {
+    const parsed = JSON.parse(source);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed
+      : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function sanitizeWorkerSalaryRuleConfig(rawRule) {
+  const rule = rawRule && typeof rawRule === 'object' ? rawRule : {};
+  const adjustments = rule.serviceAdjustments && typeof rule.serviceAdjustments === 'object'
+    ? rule.serviceAdjustments
+    : {};
+  return {
+    selectedServices: !!rule.selectedServices,
+    attendanceBase: Number(rule.attendanceBase) || 0,
+    dailyBaseIfCompleted: Number(rule.dailyBaseIfCompleted) || 0,
+    glassMarginPct: Number(rule.glassMarginPct) || 0,
+    moldingPct: Number(rule.moldingPct) || 0,
+    tatuBonusPct: Number(rule.tatuBonusPct) || 0,
+    toningBonusPct: Number(rule.toningBonusPct) || 0,
+    serviceAdjustments: {
+      mount: Number(adjustments.mount) || 0,
+      cut: Number(adjustments.cut) || 0,
+      glue: Number(adjustments.glue) || 0,
+    },
+  };
+}
+
+function buildWorkerSalaryFormula(rule) {
+  const safeRule = sanitizeWorkerSalaryRuleConfig(rule);
+  const payload = {
+    _custom: true,
+    selectedServices: !!safeRule.selectedServices,
+    attendanceBase: Number(safeRule.attendanceBase) || 0,
+    dailyBaseIfCompleted: Number(safeRule.dailyBaseIfCompleted) || 0,
+    glassMarginPct: Number(safeRule.glassMarginPct) || 0,
+    moldingPct: Number(safeRule.moldingPct) || 0,
+    tatuBonusPct: Number(safeRule.tatuBonusPct) || 0,
+    toningBonusPct: Number(safeRule.toningBonusPct) || 0,
+    serviceAdjustments: {
+      mount: Number(safeRule.serviceAdjustments?.mount) || 0,
+      cut: Number(safeRule.serviceAdjustments?.cut) || 0,
+      glue: Number(safeRule.serviceAdjustments?.glue) || 0,
+    },
+  };
+  return JSON.stringify(payload);
+}
+
 const SALARY_CONFIG = {
   'Artyom':     { selectedServices: true, dailyBaseIfCompleted: 500 },
   'Roma':       { selectedServices: true, dailyBaseIfCompleted: 500, tatuBonusPct: 0.20, globalTatuBonus: true },
@@ -973,12 +1355,28 @@ const DEFAULT_SALARY_FORMULA = {
 
 // Возвращает конфиг ЗП для сотрудника с учётом дефолта по роли
 function getSalaryRule(workerName) {
-  if (SALARY_CONFIG[workerName]) return SALARY_CONFIG[workerName];
   const w = workers.find(x => x.name === workerName);
-  if (!w) return SALARY_CONFIG._junior;
-  if (w.systemRole === 'senior' || w.systemRole === 'extra') return SALARY_CONFIG._senior;
-  if (w.systemRole === 'manager') return SALARY_CONFIG._manager;
-  return SALARY_CONFIG._junior;
+  const roleBase = !w
+    ? SALARY_CONFIG._junior
+    : (w.systemRole === 'senior' || w.systemRole === 'extra')
+      ? SALARY_CONFIG._senior
+      : (w.systemRole === 'manager' ? SALARY_CONFIG._manager : SALARY_CONFIG._junior);
+  const namedBase = SALARY_CONFIG[workerName] || {};
+  const personalRule = parseWorkerSalaryFormula(w?.salaryFormula);
+  if (!personalRule) {
+    return SALARY_CONFIG[workerName] || roleBase;
+  }
+  const normalizedPersonal = sanitizeWorkerSalaryRuleConfig(personalRule);
+  return {
+    ...roleBase,
+    ...namedBase,
+    ...normalizedPersonal,
+    serviceAdjustments: {
+      ...((roleBase && roleBase.serviceAdjustments) || {}),
+      ...((namedBase && namedBase.serviceAdjustments) || {}),
+      ...((normalizedPersonal && normalizedPersonal.serviceAdjustments) || {}),
+    },
+  };
 }
 
 // Вычисляет маржу стекла: продажная минус закупочная
@@ -1194,6 +1592,7 @@ function calcReworkSalary(workerName, reworkData) {
 
 // Тату-бонус: начисляется если в конфиге есть tatuBonusPct и в заказе есть tatu
 function _calcTatuBonus(workerName, order) {
+  if (!workerName || getOrderSpecialServiceAssignedWorker(order, 'tatu') !== workerName) return 0;
   const rule = getSalaryRule(workerName);
   if (!rule.tatuBonusPct) return 0;
   
@@ -1208,6 +1607,7 @@ function _calcTatuBonus(workerName, order) {
 }
 
 function _calcToningBonus(workerName, order) {
+  if (!workerName || getOrderSpecialServiceAssignedWorker(order, 'toning') !== workerName) return 0;
   const rule = getSalaryRule(workerName);
   if (!rule.toningBonusPct) return 0;
   if (!order?.toningDone || order?.toningExternal) return 0;
@@ -1283,10 +1683,6 @@ function getOrderCardStateClass(order) {
   if (order.inWork && !order.workerDone) return 'order-card-state-planner';
   if (!order.callStatus && !order.inWork && !order.ownWarehouse && !order.workerDone) return 'order-card-state-selection';
   return '';
-}
-
-function isManualSalaryReportEntry(entry) {
-  return !!entry && entry.order_id === MANUAL_SALARY_REPORT_ORDER_ID && Number(entry.amount) > 0;
 }
 
 function isOwnerManualSalaryEntry(entry) {
@@ -1395,6 +1791,8 @@ const CASH_ACCOUNT_FOP = 'fop';
 const OWNER_PENDING_CASH_WORKER_NAME = 'Карты владельца';
 const ORDER_META_TATU_STATUS_TOKEN = '__tatu_status__';
 const ORDER_META_TONING_STATUS_TOKEN = '__toning_status__';
+const ORDER_META_TATU_RESP_PREFIX = '__tatu_resp__:';
+const ORDER_META_TONING_RESP_PREFIX = '__toning_resp__:';
 
 function parseOrderConfigurationMeta(configuration) {
   const parts = String(configuration || '')
@@ -1404,6 +1802,8 @@ function parseOrderConfigurationMeta(configuration) {
   const visibleParts = [];
   let tatuStatus = false;
   let toningStatus = false;
+  let tatuResponsible = '';
+  let toningResponsible = '';
   parts.forEach(part => {
     if (part === ORDER_META_TATU_STATUS_TOKEN) {
       tatuStatus = true;
@@ -1413,12 +1813,22 @@ function parseOrderConfigurationMeta(configuration) {
       toningStatus = true;
       return;
     }
+    if (part.startsWith(ORDER_META_TATU_RESP_PREFIX)) {
+      tatuResponsible = part.slice(ORDER_META_TATU_RESP_PREFIX.length).trim();
+      return;
+    }
+    if (part.startsWith(ORDER_META_TONING_RESP_PREFIX)) {
+      toningResponsible = part.slice(ORDER_META_TONING_RESP_PREFIX.length).trim();
+      return;
+    }
     visibleParts.push(part);
   });
   return {
     configuration: visibleParts.join(','),
     tatuStatus,
     toningStatus,
+    tatuResponsible,
+    toningResponsible,
   };
 }
 
@@ -1429,6 +1839,10 @@ function buildOrderConfigurationMeta(configuration, options = {}) {
     : [];
   if (options.tatuStatus) parts.push(ORDER_META_TATU_STATUS_TOKEN);
   if (options.toningStatus) parts.push(ORDER_META_TONING_STATUS_TOKEN);
+  const tatuResponsible = String(options.tatuResponsible ?? parsed.tatuResponsible ?? '').trim();
+  const toningResponsible = String(options.toningResponsible ?? parsed.toningResponsible ?? '').trim();
+  if (tatuResponsible) parts.push(`${ORDER_META_TATU_RESP_PREFIX}${tatuResponsible}`);
+  if (toningResponsible) parts.push(`${ORDER_META_TONING_RESP_PREFIX}${toningResponsible}`);
   return [...new Set(parts)].join(',');
 }
 
@@ -1485,9 +1899,89 @@ function getPaymentMethodFromSourceKey(sourceKey) {
   }
 }
 
+function getCashEntryAccountType(entry) {
+  return String(entry?.account_type || entry?.cash_account || 'cash').trim().toLowerCase();
+}
+
+function getCashEntryPaymentMethod(entry) {
+  return normalizePaymentMethod(
+    entry?.payment_method
+    || entry?.manual_payment_method
+    || getPaymentMethodFromSourceKey(entry?.fop_source_key)
+    || ''
+  );
+}
+
+function getCashEntryApprovalStatus(entry) {
+  if (entry?.approval_status) return String(entry.approval_status).trim().toLowerCase();
+  if (entry?.fop_confirmed === true) return 'confirmed';
+  return isConfirmableCashEntry(entry) ? 'pending' : 'not_required';
+}
+
+function isCashEntryApproved(entry) {
+  return getCashEntryApprovalStatus(entry) === 'confirmed' || getCashEntryApprovalStatus(entry) === 'not_required';
+}
+
+function getCashEntryOwner(entry) {
+  return String(entry?.cash_owner || entry?.worker_name || '').trim();
+}
+
+function getCashEntrySourceType(entry) {
+  return String(entry?.source_type || '').trim().toLowerCase();
+}
+
+function getCashEntryAccountLabel(entry) {
+  const account = getCashEntryAccountType(entry);
+  if (account === 'fop') return 'ФОП';
+  if (account === 'currency') return 'Валюта';
+  return 'Наличные';
+}
+
+function getCashEntrySourceLabel(entry) {
+  const sourceType = getCashEntrySourceType(entry);
+  const orderId = String(entry?.order_id || '').trim();
+  if (sourceType === 'order' && orderId) return `Заказ ${orderId}`;
+  if (sourceType === 'salary') return 'ЗП';
+  if (sourceType === 'expense') return 'Расход';
+  if (sourceType === 'dropshipper') return 'Дроп';
+  if (sourceType === 'exchange') return 'Обмен';
+  if (sourceType === 'manual') return 'Ручная';
+  if (orderId) return `Заказ ${orderId}`;
+  return '';
+}
+
+function getCashEntryTagLabels(entry, options = {}) {
+  const includeOwner = options?.includeOwner === true;
+  const includeSource = options?.includeSource !== false;
+  const tags = [];
+  const owner = getCashEntryOwner(entry);
+  const paymentMethod = getCashEntryPaymentMethod(entry);
+  const sourceLabel = getCashEntrySourceLabel(entry);
+  const expenseCategory = String(entry?.expense_category || '').trim();
+  const warehouseName = String(entry?.warehouse_name || '').trim();
+
+  if (includeOwner && owner) {
+    tags.push(`Касса: ${getWorkerDisplayName(owner) || owner}`);
+  } else {
+    const accountLabel = getCashEntryAccountLabel(entry);
+    if (accountLabel) tags.push(accountLabel);
+  }
+
+  if (paymentMethod) tags.push(paymentMethod);
+  if (includeSource && sourceLabel) tags.push(sourceLabel);
+  if (expenseCategory) tags.push(expenseCategory);
+  if (warehouseName && expenseCategory !== 'Заправка') tags.push(`Склад ${warehouseName}`);
+
+  return tags.filter((tag, index, arr) => tag && arr.indexOf(tag) === index);
+}
+
 function isConfirmableCashEntry(entry) {
-  const account = String(entry?.cash_account || 'cash').toLowerCase();
-  const paymentMethod = getPaymentMethodFromSourceKey(entry?.fop_source_key);
+  if (entry?.approval_status) {
+    const normalizedStatus = String(entry.approval_status).trim().toLowerCase();
+    return normalizedStatus === 'pending' || normalizedStatus === 'confirmed';
+  }
+  const account = getCashEntryAccountType(entry);
+  const paymentMethod = getCashEntryPaymentMethod(entry);
   if ((account !== CASH_ACCOUNT_CASH && account !== CASH_ACCOUNT_FOP) || !paymentMethod) return false;
   return !isCashPaymentMethod(paymentMethod);
 }
@@ -1637,7 +2131,7 @@ function generateOrderId(afterId = '') {
   return formatOrderId(Math.max(localNext, afterNext));
 }
 
-function canCreateOrder()    { return currentRole === 'owner' || currentRole === 'manager'; }
+function canCreateOrder()    { return currentRole === 'owner' || currentUserHasPermission('orders_create', currentRole === 'manager'); }
 function canEditPrice(order) {
   if (currentRole === 'owner') return true;
   if (currentRole === 'manager') return true;
@@ -1648,18 +2142,19 @@ function canEditPrice(order) {
   if (currentRole === 'senior') return !order.priceLocked;
   return false;
 }
-function canViewClients()  { return currentRole === 'owner' || currentRole === 'manager'; }
-function canViewWorkers()  { return currentRole === 'owner'; }
-function canDeleteOrder()  { return currentRole === 'owner' || currentRole === 'manager'; }
-function canViewFinance()  { return currentRole === 'owner'; }
-function canManageDropshippers() { return currentRole === 'owner' || currentWorkerName === 'Sasha Manager'; }
-function canViewWarehouses() { return currentRole === 'owner' || currentRole === 'manager'; }
-function canViewDashboard() { return currentRole === 'owner' || currentRole === 'manager' || canManageDropshippers(); }
-function canViewOwnerCash() { return currentRole === 'owner'; }
-function canViewOwnerPayments() { return currentRole === 'owner'; }
-function canViewOwnerToday() { return currentRole === 'owner' || currentWorkerName === 'Sasha Manager'; }
-function canViewCalendar() { return currentRole === 'owner' || currentWorkerName === 'Sasha Manager'; }
-function canMarkWorkerDone() { return currentRole === 'senior' || currentRole === 'extra'; }
+function canViewClients()  { return currentRole === 'owner' || currentUserHasPermission('clients_view', currentRole === 'manager'); }
+function canViewWorkers()  { return currentRole === 'owner' || currentUserHasPermission('workers_view'); }
+function canDeleteOrder()  { return currentRole === 'owner' || currentUserHasPermission('orders_delete', false); }
+function canViewFinance()  { return currentRole === 'owner' || currentUserHasPermission('finance_view'); }
+function canManageDropshippers() { return currentRole === 'owner' || currentUserHasPermission('dropshippers_manage', currentWorkerName === 'Sasha Manager'); }
+function canViewWarehouses() { return currentRole === 'owner' || currentUserHasPermission('warehouses_view', currentRole === 'manager'); }
+function canViewDashboard() { return currentRole === 'owner' || currentRole === 'manager' || currentUserHasAnyDashboardPermission(); }
+function canViewOwnerCash() { return currentRole === 'owner' || currentUserHasPermission('owner_cash_view'); }
+function canViewOwnerExpenses() { return currentRole === 'owner' || currentUserHasPermission('owner_expenses_view'); }
+function canViewOwnerPayments() { return currentRole === 'owner' || currentUserHasPermission('owner_payments_view'); }
+function canViewOwnerToday() { return currentRole === 'owner' || currentUserHasPermission('groups_view', currentWorkerName === 'Sasha Manager'); }
+function canViewCalendar() { return currentRole === 'owner' || currentUserHasPermission('calendar_view', currentWorkerName === 'Sasha Manager'); }
+function canMarkWorkerDone() { return currentRole === 'owner' || currentUserHasPermission('order_complete', currentRole === 'senior' || currentRole === 'extra'); }
 
 function getClients() {
   const map = {};

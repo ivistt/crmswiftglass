@@ -2,6 +2,280 @@
 // WORKERS.JS — экран сотрудников, модал редактирования
 // ============================================================
 
+const WORKER_PERMISSION_DEFINITIONS = [
+  { key: 'orders_view_all', label: 'Видеть все заказы' },
+  { key: 'orders_create', label: 'Создавать заказы' },
+  { key: 'orders_edit', label: 'Редактировать заказы' },
+  { key: 'orders_delete', label: 'Удалять заказы' },
+  { key: 'clients_view', label: 'Видеть клиентов' },
+  { key: 'workers_view', label: 'Видеть сотрудников' },
+  { key: 'warehouses_view', label: 'Видеть склады' },
+  { key: 'dropshippers_manage', label: 'Видеть и вести дропшипперов' },
+  { key: 'calendar_view', label: 'Видеть календарь' },
+  { key: 'groups_view', label: 'Видеть группы' },
+  { key: 'personal_cash_view', label: 'Видеть личную кассу' },
+  { key: 'cash_add_entries', label: 'Добавлять записи в кассу' },
+  { key: 'finance_view', label: 'Видеть выручку' },
+  { key: 'owner_cash_view', label: 'Видеть общую кассу' },
+  { key: 'owner_expenses_view', label: 'Видеть расходы' },
+  { key: 'owner_payments_view', label: 'Видеть оплаты' },
+  { key: 'order_payments_manage', label: 'Добавлять оплаты по заказу' },
+  { key: 'order_services_edit', label: 'Менять услуги в заказе' },
+  { key: 'order_complete', label: 'Отмечать заказ выполненным' },
+  { key: 'special_service_status', label: 'Подтверждать тату и тонировку' },
+  { key: 'special_service_tatu', label: 'Делает тату' },
+  { key: 'special_service_toning', label: 'Делает тонировку' },
+];
+
+const WORKER_ROLE_PERMISSION_PRESETS = {
+  manager: {
+    orders_view_all: true,
+    orders_create: true,
+    orders_edit: true,
+    clients_view: true,
+    workers_view: false,
+    warehouses_view: true,
+    dropshippers_manage: false,
+    calendar_view: false,
+    groups_view: false,
+    personal_cash_view: false,
+    cash_add_entries: false,
+    finance_view: false,
+    owner_cash_view: false,
+    owner_expenses_view: false,
+    owner_payments_view: false,
+    order_payments_manage: true,
+    order_services_edit: true,
+    order_complete: false,
+    special_service_status: false,
+    special_service_tatu: false,
+    special_service_toning: false,
+  },
+  senior: {
+    orders_view_all: false,
+    orders_create: false,
+    orders_edit: true,
+    clients_view: false,
+    workers_view: false,
+    warehouses_view: false,
+    dropshippers_manage: false,
+    calendar_view: false,
+    groups_view: false,
+    personal_cash_view: true,
+    cash_add_entries: true,
+    finance_view: false,
+    owner_cash_view: false,
+    owner_expenses_view: false,
+    owner_payments_view: false,
+    order_payments_manage: true,
+    order_services_edit: true,
+    order_complete: true,
+    special_service_status: false,
+    special_service_tatu: false,
+    special_service_toning: false,
+  },
+  junior: {
+    orders_view_all: false,
+    orders_create: false,
+    orders_edit: false,
+    clients_view: false,
+    workers_view: false,
+    warehouses_view: false,
+    dropshippers_manage: false,
+    calendar_view: false,
+    groups_view: false,
+    personal_cash_view: false,
+    cash_add_entries: false,
+    finance_view: false,
+    owner_cash_view: false,
+    owner_expenses_view: false,
+    owner_payments_view: false,
+    order_payments_manage: false,
+    order_services_edit: false,
+    order_complete: false,
+    special_service_status: false,
+    special_service_tatu: false,
+    special_service_toning: false,
+  },
+  extra: {
+    orders_view_all: false,
+    orders_create: false,
+    orders_edit: true,
+    clients_view: false,
+    workers_view: false,
+    warehouses_view: false,
+    dropshippers_manage: false,
+    calendar_view: false,
+    groups_view: false,
+    personal_cash_view: true,
+    cash_add_entries: true,
+    finance_view: false,
+    owner_cash_view: false,
+    owner_expenses_view: false,
+    owner_payments_view: false,
+    order_payments_manage: true,
+    order_services_edit: true,
+    order_complete: true,
+    special_service_status: false,
+    special_service_tatu: false,
+    special_service_toning: false,
+  },
+};
+
+const WORKER_SALARY_RULE_DEFINITIONS = [
+  { key: 'selectedServices', label: 'Выбранные услуги', kind: 'toggle' },
+  { key: 'attendanceBase', label: 'Ставка за смену', kind: 'money' },
+  { key: 'glassMarginPct', label: 'Маржа стекла', kind: 'percent' },
+  { key: 'moldingPct', label: 'Молдинг', kind: 'percent' },
+  { key: 'tatuBonusPct', label: 'Бонус тату', kind: 'percent' },
+  { key: 'toningBonusPct', label: 'Бонус тонировки', kind: 'percent' },
+  { key: 'serviceAdjustments.mount', label: 'Монтаж доплата', kind: 'moneySigned' },
+  { key: 'serviceAdjustments.cut', label: 'Срезка доплата', kind: 'moneySigned' },
+  { key: 'serviceAdjustments.glue', label: 'Вклейка доплата', kind: 'moneySigned' },
+];
+
+function getWorkerPermissionPreset(systemRole) {
+  return { ...(WORKER_ROLE_PERMISSION_PRESETS[systemRole] || WORKER_ROLE_PERMISSION_PRESETS.junior) };
+}
+
+function getWorkerPermissionState(workerLike) {
+  if (typeof resolveWorkerPermissionState === 'function') {
+    return resolveWorkerPermissionState(workerLike);
+  }
+  const systemRole = workerLike?.systemRole || workerLike?.system_role || 'junior';
+  return {
+    ...getWorkerPermissionPreset(systemRole),
+    ...((workerLike && typeof workerLike.permissions === 'object' && workerLike.permissions) || {}),
+  };
+}
+
+function renderWorkerPermissionRows(workerLike) {
+  const permissions = getWorkerPermissionState(workerLike);
+  return WORKER_PERMISSION_DEFINITIONS.map(item => {
+    const checked = !!permissions[item.key];
+    return `
+      <label class="worker-permission-row">
+        <span class="worker-permission-label">${escapeHtml(item.label)}</span>
+        <span class="worker-permission-switch ${checked ? 'active' : ''}">
+          <input type="checkbox" id="we-perm-${escapeAttr(item.key)}" ${checked ? 'checked' : ''} onchange="syncWorkerPermissionSwitch(this)">
+          <span class="worker-permission-slider"></span>
+        </span>
+      </label>
+    `;
+  }).join('');
+}
+
+function syncWorkerPermissionSwitch(input) {
+  const wrapper = input?.closest('.worker-permission-switch');
+  if (!wrapper) return;
+  wrapper.classList.toggle('active', !!input.checked);
+}
+
+function collectWorkerPermissionState() {
+  return WORKER_PERMISSION_DEFINITIONS.reduce((acc, item) => {
+    acc[item.key] = !!document.getElementById(`we-perm-${item.key}`)?.checked;
+    return acc;
+  }, {});
+}
+
+function getWorkerSalaryRuleState(workerLike) {
+  const workerName = workerLike?.name || '';
+  const rule = typeof getSalaryRule === 'function'
+    ? getSalaryRule(workerName)
+    : {};
+  const serviceAdjustments = rule.serviceAdjustments || {};
+  return {
+    selectedServices: !!rule.selectedServices,
+    attendanceBase: Number(rule.attendanceBase || rule.dailyBaseIfCompleted) || 0,
+    glassMarginPct: Math.round((Number(rule.glassMarginPct) || 0) * 100),
+    moldingPct: Math.round((Number(rule.moldingPct) || 0) * 100),
+    tatuBonusPct: Math.round((Number(rule.tatuBonusPct) || 0) * 100),
+    toningBonusPct: Math.round((Number(rule.toningBonusPct) || 0) * 100),
+    'serviceAdjustments.mount': Number(serviceAdjustments.mount) || 0,
+    'serviceAdjustments.cut': Number(serviceAdjustments.cut) || 0,
+    'serviceAdjustments.glue': Number(serviceAdjustments.glue) || 0,
+  };
+}
+
+function renderWorkerSalaryRuleRows(workerLike) {
+  const values = getWorkerSalaryRuleState(workerLike);
+  return WORKER_SALARY_RULE_DEFINITIONS.map(item => {
+    const rawValue = values[item.key];
+    const enabled = item.kind === 'toggle' ? !!rawValue : Number(rawValue) !== 0;
+    const value = item.kind === 'toggle' ? '' : String(rawValue || 0);
+    const placeholder = item.kind === 'percent' ? '%' : '₴';
+    return `
+      <label class="worker-setting-row">
+        <span class="worker-setting-label">${escapeHtml(item.label)}</span>
+        <span class="worker-setting-controls">
+          <span class="worker-permission-switch ${enabled ? 'active' : ''}">
+            <input
+              type="checkbox"
+              id="we-salary-enabled-${escapeAttr(item.key)}"
+              ${enabled ? 'checked' : ''}
+              onchange="syncWorkerSettingSwitch(this, '${escapeAttr(item.key)}')"
+            >
+            <span class="worker-permission-slider"></span>
+          </span>
+          ${item.kind === 'toggle' ? '' : `
+            <span class="worker-setting-input-wrap ${enabled ? 'active' : ''}" id="we-salary-input-wrap-${escapeAttr(item.key)}">
+              <input
+                class="worker-setting-input"
+                type="text"
+                inputmode="decimal"
+                id="we-salary-value-${escapeAttr(item.key)}"
+                value="${escapeAttr(value)}"
+                ${enabled ? '' : 'disabled'}
+              >
+              <span class="worker-setting-suffix">${placeholder}</span>
+            </span>
+          `}
+        </span>
+      </label>
+    `;
+  }).join('');
+}
+
+function syncWorkerSettingSwitch(input, key) {
+  syncWorkerPermissionSwitch(input);
+  const wrap = document.getElementById(`we-salary-input-wrap-${key}`);
+  const field = document.getElementById(`we-salary-value-${key}`);
+  const enabled = !!input?.checked;
+  if (wrap) wrap.classList.toggle('active', enabled);
+  if (field) {
+    field.disabled = !enabled;
+    if (!enabled) field.value = '0';
+    else if (!String(field.value || '').trim()) field.value = '0';
+  }
+}
+
+function collectWorkerSalaryRuleState() {
+  const readNumber = (key, percent = false) => {
+    const enabled = !!document.getElementById(`we-salary-enabled-${key}`)?.checked;
+    if (!enabled) return 0;
+    const raw = String(document.getElementById(`we-salary-value-${key}`)?.value || '')
+      .replace(/\s+/g, '')
+      .replace(',', '.')
+      .trim();
+    const value = Number(raw) || 0;
+    return percent ? value / 100 : value;
+  };
+  return {
+    selectedServices: !!document.getElementById('we-salary-enabled-selectedServices')?.checked,
+    attendanceBase: readNumber('attendanceBase'),
+    dailyBaseIfCompleted: 0,
+    glassMarginPct: readNumber('glassMarginPct', true),
+    moldingPct: readNumber('moldingPct', true),
+    tatuBonusPct: readNumber('tatuBonusPct', true),
+    toningBonusPct: readNumber('toningBonusPct', true),
+    serviceAdjustments: {
+      mount: readNumber('serviceAdjustments.mount'),
+      cut: readNumber('serviceAdjustments.cut'),
+      glue: readNumber('serviceAdjustments.glue'),
+    },
+  };
+}
+
 async function loadWorkers() {
   try {
     workers = await sbFetchWorkers();
@@ -201,11 +475,16 @@ function openWorkerEditModal(workerId) {
             </div>
           </div>
 
-          <!-- Условия ЗП (readonly, из SALARY_CONFIG) -->
+          <!-- Условия ЗП -->
           <div class="form-group" id="we-formula-group">
             <label class="form-label">${icon('coins')} Условия зарплаты</label>
-            <div id="we-salary-rule-display" style="background:var(--surface2);border-radius:10px;padding:10px 14px;"></div>
-            <div style="font-size:11px;color:var(--text3);margin-top:5px;">Условия задаются в <code>SALARY_CONFIG</code> в файле <code>data.js</code></div>
+            <div class="worker-permissions-card" id="we-salary-rule-card"></div>
+            <div style="font-size:11px;color:var(--text3);margin-top:5px;">Включите нужный пункт и задайте сумму или процент</div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">${icon('shield')} Права доступа</label>
+            <div class="worker-permissions-card" id="we-permissions-card"></div>
           </div>
 
           <!-- Проблемы -->
@@ -245,8 +524,10 @@ function openWorkerEditModal(workerId) {
   document.getElementById('we-alias').value = w.alias || '';
   document.getElementById('we-display-role').value = w.role || 'Старший специалист';
   document.getElementById('we-role').value = w.systemRole || 'senior';
-  // Показываем условия ЗП из SALARY_CONFIG
-  _renderWeSalaryRule(w.name);
+  // Показываем условия ЗП
+  _renderWeSalaryRule(w);
+  const permissionsCard = document.getElementById('we-permissions-card');
+  if (permissionsCard) permissionsCard.innerHTML = renderWorkerPermissionRows(w);
   document.getElementById('we-error').style.display = 'none';
 
   // Заполняем список помощников (только junior)
@@ -275,73 +556,17 @@ function _updateWeFormulaVisibility() {
   const role = document.getElementById('we-role')?.value;
   const group = document.getElementById('we-formula-group');
   const asGroup = document.getElementById('we-assistant-group');
-  if (group) group.style.display = (role === 'manager') ? 'none' : '';
+  if (group) group.style.display = '';
   if (asGroup) asGroup.style.display = (role === 'senior') ? '' : 'none';
   // Перерисовываем условия ЗП при смене роли
   const w = workers.find(x => x.id === _editWorkerId);
-  if (w) _renderWeSalaryRule(w.name);
+  if (w) _renderWeSalaryRule({ ...w, systemRole: role });
 }
 
-function _renderWeSalaryRule(workerName) {
-  const container = document.getElementById('we-salary-rule-display');
-  if (!container || typeof SALARY_CONFIG === 'undefined' || typeof getSalaryRule === 'undefined') return;
-
-  const rule = getSalaryRule(workerName);
-  const rows = [];
-
-  if (rule.base)
-    rows.push(['Ставка за день', rule.base.toLocaleString('ru') + ' ₴']);
-  const shiftBaseAmount = Number(typeof getShiftBaseAmount === 'function' ? getShiftBaseAmount(workerName) : 0) || 0;
-  if (shiftBaseAmount)
-    rows.push(['Ставка по кнопке "Я на смене"', shiftBaseAmount.toLocaleString('ru') + ' ₴']);
-  if (rule.baseIfResp)
-    rows.push(['Доплата за день (если ответственный)', rule.baseIfResp.toLocaleString('ru') + ' ₴']);
-  if (rule.glassMarginPct)
-    rows.push(['Маржа стекла', Math.round(rule.glassMarginPct * 100) + '%']);
-  if (rule.moldingPct)
-    rows.push(['Молдинг', Math.round(rule.moldingPct * 100) + '%']);
-  if (rule.servicesPct)
-    rows.push(['Услуги (монтаж и др.)', Math.round(rule.servicesPct * 100) + '%']);
-  if (rule.selectedServices) {
-    const adj = rule.serviceAdjustments || {};
-    const details = [
-      adj.mount ? `монтаж ${adj.mount > 0 ? '+' : ''}${adj.mount}` : '',
-      adj.cut ? `срезка ${adj.cut > 0 ? '+' : ''}${adj.cut}` : '',
-      adj.glue ? `вклейка ${adj.glue > 0 ? '+' : ''}${adj.glue}` : '',
-    ].filter(Boolean).join(', ');
-    rows.push(['Выбранные услуги', details || 'по прайсу']);
-  }
-  if (rule.tatuBonusPct)
-    rows.push(['Бонус тату', Math.round(rule.tatuBonusPct * 100) + '%']);
-  if (rule.toningBonusPct)
-    rows.push(['Бонус тонировки', Math.round(rule.toningBonusPct * 100) + '%']);
-
-  if (!rows.length) {
-    container.innerHTML = '<div style="font-size:13px;color:var(--text3);">Условия не заданы</div>';
-    return;
-  }
-
-  const formulaParts = [];
-  if (rule.base) formulaParts.push(rule.base + ' ₴');
-  if (shiftBaseAmount) formulaParts.push(shiftBaseAmount + ' ₴/смена');
-  if (rule.baseIfResp) formulaParts.push(rule.baseIfResp + ' ₴ (если отв.)');
-  if (rule.glassMarginPct) formulaParts.push('маржа × ' + Math.round(rule.glassMarginPct * 100) + '%');
-  if (rule.moldingPct) formulaParts.push('молдинг × ' + Math.round(rule.moldingPct * 100) + '%');
-  if (rule.servicesPct) formulaParts.push('услуги × ' + Math.round(rule.servicesPct * 100) + '%');
-  if (rule.selectedServices) formulaParts.push('выбранные услуги');
-
-  container.innerHTML =
-    rows.map((r, i) =>
-      '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;' +
-      (i < rows.length - 1 ? 'border-bottom:1px solid var(--border);' : '') + '">' +
-      '<span style="font-size:12px;color:var(--text3);">' + r[0] + '</span>' +
-      '<span style="font-size:13px;font-weight:700;color:var(--text);">' + r[1] + '</span>' +
-      '</div>'
-    ).join('') +
-    '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);">' +
-    '<div style="font-size:10px;color:var(--text3);margin-bottom:3px;letter-spacing:0.04em;">ФОРМУЛА</div>' +
-    '<code style="font-size:12px;color:var(--accent);">' + formulaParts.join(' + ') + '</code>' +
-    '</div>';
+function _renderWeSalaryRule(workerLike) {
+  const container = document.getElementById('we-salary-rule-card');
+  if (!container) return;
+  container.innerHTML = renderWorkerSalaryRuleRows(workerLike);
 }
 
 function _renderWeProblems(w) {
@@ -394,6 +619,10 @@ async function saveWorkerEdit() {
   const displayRole = document.getElementById('we-display-role')?.value || '';
   const role      = document.getElementById('we-role').value;
   const assistant = document.getElementById('we-assistant')?.value || '';
+  const permissions = collectWorkerPermissionState();
+  const salaryFormula = typeof buildWorkerSalaryFormula === 'function'
+    ? buildWorkerSalaryFormula(collectWorkerSalaryRuleState())
+    : '';
 
   const btn = document.getElementById('we-save-btn');
   if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
@@ -404,6 +633,9 @@ async function saveWorkerEdit() {
       systemRole: role,
       alias: alias,
       assistant: assistant,
+      note: w.note || '',
+      permissions,
+      salaryFormula,
     };
     if (password) updates.password = password;
 
@@ -415,6 +647,8 @@ async function saveWorkerEdit() {
     w.systemRole = role;
     w.alias = alias;
     w.assistant = assistant;
+    w.permissions = permissions;
+    w.salaryFormula = salaryFormula;
 
     closeWorkerEditModal();
     renderWorkers();

@@ -82,20 +82,28 @@ function currentUserCanActAsSenior() {
 
 function canMarkWorkerDone() {
   // Галочка доступна только специалисту (senior) для своих заказов
-  return currentUserCanActAsSenior();
+  return currentUserHasPermission('order_complete', currentUserCanActAsSenior()) && currentUserCanActAsSenior();
 }
 
 function canQuickConfirmOrderAmounts(order) {
-  return currentUserCanActAsSenior()
+  return currentUserHasPermission('order_payments_manage', currentUserCanActAsSenior())
+    && currentUserCanActAsSenior()
     && order?.responsible === currentWorkerName
     && isOrderFinanciallyActive(order)
     && !order?.workerDone;
 }
 
 function canCurrentUserOpenOrderModal(order) {
-  if (currentRole === 'junior') return false;
   if (currentRole === 'owner' || currentRole === 'manager') return true;
-  return currentUserCanActAsSenior();
+  if (currentUserCanViewAllOrders()) return true;
+  if (currentUserCanActAsSenior()) return true;
+  if (!order) return false;
+  const hasOrderAccess = currentUserHasPermission('orders_edit')
+    || currentUserHasPermission('order_payments_manage')
+    || currentUserHasPermission('order_services_edit')
+    || currentUserHasPermission('order_complete')
+    || currentUserHasPermission('special_service_status');
+  return hasOrderAccess && _isCurrentWorkerOrder(order);
 }
 
 function resolveSalaryEntryOrderId(rawOrderId) {
@@ -125,32 +133,38 @@ function canCurrentUserManageOrderPayments(order) {
   if (!order && editingOrderId !== null) {
     order = getOrderDraftFromForm(editingOrderId ? orders.find(item => item.id === editingOrderId) : null);
   }
-  if (!order) return currentRole === 'owner' || currentRole === 'manager';
+  if (!order) return currentRole === 'owner' || currentRole === 'manager' || currentUserHasPermission('order_payments_manage', currentUserCanActAsSenior());
   if (currentRole === 'owner' || currentRole === 'manager') return true;
-  return currentUserCanActAsSenior() && order.responsible === currentWorkerName;
+  return currentUserHasPermission('order_payments_manage', currentUserCanActAsSenior()) && order.responsible === currentWorkerName;
 }
 
 function canCurrentUserEditOrderServices(order) {
   if (currentRole === 'owner' || currentRole === 'manager') return true;
   if (!order || !currentUserCanActAsSenior()) return false;
   if (order.responsible !== currentWorkerName) return false;
+  if (!currentUserHasPermission('order_services_edit', currentUserCanActAsSenior())) return false;
   return !String(order.serviceType || '').trim();
 }
 
 function canCurrentUserToggleSpecialServiceStatus(order, type) {
   if (currentRole === 'owner' || currentRole === 'manager') return true;
   if (!order) return false;
+  const canHandle = workerCanHandleSpecialService(currentWorkerName, type);
+  if (!canHandle) return false;
+  const assignedWorker = getOrderSpecialServiceAssignedWorker(order, type);
+  if (assignedWorker && assignedWorker !== currentWorkerName) return false;
   if (type === 'tatu') {
-    return currentWorkerName === 'Roma' && Number(order.tatu) > 0;
+    return Number(order.tatu) > 0;
   }
   if (type === 'toning') {
-    return currentWorkerName === 'Lyosha' && Number(order.toning) > 0 && !order.toningExternal;
+    return Number(order.toning) > 0 && !order.toningExternal;
   }
   return false;
 }
 
 function canCurrentUserCompleteOrder(order) {
-  return currentUserCanActAsSenior()
+  return currentUserHasPermission('order_complete', currentUserCanActAsSenior())
+    && currentUserCanActAsSenior()
     && order?.responsible === currentWorkerName
     && isOrderFinanciallyActive(order)
     && !order?.workerDone;
@@ -174,6 +188,82 @@ function _moneyInputValue(value) {
     .replace(',', '.')
     .trim();
   return Number(normalized) || 0;
+}
+
+function getOrderFormSpecialServiceNeeds() {
+  const tatuAmount = _moneyInputValue(document.getElementById('f-tatu')?.value);
+  const toningAmount = _moneyInputValue(document.getElementById('f-toning')?.value);
+  const toningExternal = !!document.getElementById('f-toning-external')?.checked;
+  return {
+    needsTatu: tatuAmount > 0,
+    needsToning: toningAmount > 0 && !toningExternal,
+  };
+}
+
+function getResponsibleWorkerOptionRows() {
+  const { needsTatu, needsToning } = getOrderFormSpecialServiceNeeds();
+  const baseWorkers = workers.filter(w => ['senior', 'extra'].includes(w.systemRole));
+  return baseWorkers.map(worker => {
+    const canTatu = workerCanHandleSpecialService(worker, 'tatu');
+    const canToning = workerCanHandleSpecialService(worker, 'toning');
+    const priorityScore =
+      (needsTatu && canTatu ? 2 : 0)
+      + (needsToning && canToning ? 2 : 0)
+      + (canTatu || canToning ? 1 : 0);
+    const tags = [];
+    if (canTatu) tags.push('тату');
+    if (canToning) tags.push('тонировка');
+    return {
+      worker,
+      priorityScore,
+      tags,
+    };
+  }).sort((a, b) => {
+    if (b.priorityScore !== a.priorityScore) return b.priorityScore - a.priorityScore;
+    return String(getWorkerDisplayName(a.worker.name) || a.worker.name).localeCompare(String(getWorkerDisplayName(b.worker.name) || b.worker.name), 'ru');
+  });
+}
+
+function refreshResponsibleOptions() {
+  const respSel = document.getElementById('f-responsible');
+  if (!respSel) return;
+  const cur = respSel.value;
+  const rows = getResponsibleWorkerOptionRows();
+  respSel.innerHTML = '<option value="">— выбрать —</option>' +
+    rows.map(({ worker, tags }) => {
+      const label = `${getWorkerDisplayName(worker.name)} (${worker.role})${tags.length ? ' · ' + tags.join(', ') : ''}`;
+      return `<option value="${escapeAttr(worker.name)}">${escapeHtml(label)}</option>`;
+    }).join('');
+  if (cur && [...respSel.options].some(option => option.value === cur)) {
+    respSel.value = cur;
+  }
+}
+
+function populateSpecialServiceResponsibleSelects() {
+  const tatuSel = document.getElementById('f-tatu-responsible');
+  const toningSel = document.getElementById('f-toning-responsible');
+  if (tatuSel) {
+    const cur = tatuSel.value;
+    const options = getSpecialServiceWorkers('tatu').slice();
+    if (cur && !options.some(worker => worker.name === cur)) {
+      const currentWorker = getWorkerRecordByName(cur);
+      if (currentWorker) options.push(currentWorker);
+    }
+    tatuSel.innerHTML = '<option value="">— выбрать —</option>' +
+      options.map(worker => `<option value="${escapeAttr(worker.name)}">${escapeHtml(getWorkerDisplayName(worker.name))}</option>`).join('');
+    if (cur && [...tatuSel.options].some(option => option.value === cur)) tatuSel.value = cur;
+  }
+  if (toningSel) {
+    const cur = toningSel.value;
+    const options = getSpecialServiceWorkers('toning').slice();
+    if (cur && !options.some(worker => worker.name === cur)) {
+      const currentWorker = getWorkerRecordByName(cur);
+      if (currentWorker) options.push(currentWorker);
+    }
+    toningSel.innerHTML = '<option value="">— выбрать —</option>' +
+      options.map(worker => `<option value="${escapeAttr(worker.name)}">${escapeHtml(getWorkerDisplayName(worker.name))}</option>`).join('');
+    if (cur && [...toningSel.options].some(option => option.value === cur)) toningSel.value = cur;
+  }
 }
 
 function _escapeAttr(value) {
@@ -371,33 +461,34 @@ async function confirmSeniorOrderAmounts(orderId) {
   }
 
   try {
-    const saved = await sbPatchOrderFields(orderId, {
-      debt: totalClientPaid,
-      check_sum: totalSupplierPaid,
-      client_payments: nextClientPayments,
-      supplier_payments: nextSupplierPayments,
-    });
-    const mergedOrder = { ...updatedOrder, ...saved, clientPayments: nextClientPayments, supplierPayments: nextSupplierPayments };
-    const idx = orders.findIndex(x => x.id === orderId);
-    if (idx !== -1) orders[idx] = mergedOrder;
-
+    const shouldUseSaveWithCash = cashEntries.length > 0;
+    const saved = shouldUseSaveWithCash
+      ? (await sbSaveOrderWithCash({
+          ...updatedOrder,
+          clientPayments: nextClientPayments,
+          supplierPayments: nextSupplierPayments,
+          debt: totalClientPaid,
+          check: totalSupplierPaid,
+        }, {
+          isNew: false,
+          cashEntries,
+          rollbackOrder: order,
+        })).order
+      : await sbPatchOrderFields(orderId, {
+          debt: totalClientPaid,
+          check_sum: totalSupplierPaid,
+          client_payments: nextClientPayments,
+          supplier_payments: nextSupplierPayments,
+        });
     if (checkEl) checkEl.value = '';
     if (debtEl) debtEl.value = '';
-
-    for (const rawCashEntry of cashEntries) {
-      const cashEntry = await sbInsertCashEntry({
-        worker_name: rawCashEntry.worker_name,
-        amount: rawCashEntry.amount,
-        comment: rawCashEntry.comment,
-        cash_account: 'cash',
-      });
-      const targetWorker = cashEntry?.worker_name;
-      if (typeof workerCashLog !== 'undefined' && targetWorker === currentWorkerName) {
-        workerCashLog.unshift(cashEntry);
-      }
-      if (currentRole === 'owner' && Array.isArray(window.allCashLog) && cashEntry) {
-        window.allCashLog.unshift(cashEntry);
-      }
+    if (shouldUseSaveWithCash) {
+      await refreshCashStateAfterServerSave();
+    }
+    try {
+      orders = await sbFetchOrders();
+    } catch (refreshError) {
+      console.warn('Failed to refresh orders after quick amount save:', refreshError);
     }
 
     currentMonthFilter ? renderOrdersForMonth(currentMonthFilter) : renderOrders();
@@ -496,10 +587,10 @@ function renderOrderCard(o) {
     (o.priorityTask && !o.workerDone)
       ? `<span class="status-badge status-priority" title="Приоритетная задача">Приоритет</span>`
       : '',
-    currentWorkerName === 'Roma' && Number(o.tatu) > 0
+    workerCanHandleSpecialService(currentWorkerName, 'tatu') && Number(o.tatu) > 0
       ? `<span class="status-badge status-call" title="В заказе есть тату">Тату ${(Number(o.tatu) || 0).toLocaleString('ru')} ₴</span>`
       : '',
-    currentWorkerName === 'Lyosha' && Number(o.toning) > 0
+    workerCanHandleSpecialService(currentWorkerName, 'toning') && Number(o.toning) > 0
       ? `<span class="status-badge status-own-warehouse" title="В заказе есть тонировка">Тонировка ${(Number(o.toning) || 0).toLocaleString('ru')} ₴</span>`
       : '',
   ].filter(Boolean).join('');
@@ -653,10 +744,10 @@ function renderOrderCardCallNotes(order) {
 
 function getSpecialServiceAction(order) {
   if (!order || !isOrderFinanciallyActive(order)) return null;
-  if (currentWorkerName === 'Roma' && Number(order.tatu) > 0 && !order.tatuStatus) {
+  if (workerCanHandleSpecialService(currentWorkerName, 'tatu') && Number(order.tatu) > 0 && !order.tatuStatus) {
     return { type: 'tatu', label: 'Выполнить тату', title: 'Подтвердить выполнение тату' };
   }
-  if (currentWorkerName === 'Lyosha' && Number(order.toning) > 0 && !order.toningStatus && !order.toningExternal) {
+  if (workerCanHandleSpecialService(currentWorkerName, 'toning') && Number(order.toning) > 0 && !order.toningStatus && !order.toningExternal) {
     return { type: 'toning', label: 'Выполнить тонировку', title: 'Подтвердить выполнение тонировки' };
   }
   return null;
@@ -674,18 +765,23 @@ async function confirmSpecialServiceDone(orderId, type) {
       ? { tatu_status: true, tatu_done: true, tatu_done_by: currentWorkerName }
       : { toning_status: true, toning_done: true, toning_done_by: currentWorkerName };
     const saved = await sbPatchOrderFields(order.id, patch);
-    const idx = orders.findIndex(item => item.id === order.id);
-    const updated = {
-      ...order,
-      ...saved,
-      tatuStatus: isTatu ? true : (saved?.tatuStatus ?? order.tatuStatus),
-      tatuDone: isTatu ? true : (saved?.tatuDone ?? order.tatuDone),
-      tatuDoneBy: isTatu ? currentWorkerName : (saved?.tatuDoneBy ?? order.tatuDoneBy),
-      toningStatus: !isTatu ? true : (saved?.toningStatus ?? order.toningStatus),
-      toningDone: !isTatu ? true : (saved?.toningDone ?? order.toningDone),
-      toningDoneBy: !isTatu ? currentWorkerName : (saved?.toningDoneBy ?? order.toningDoneBy),
-    };
-    if (idx !== -1) orders[idx] = updated;
+    try {
+      orders = await sbFetchOrders();
+    } catch (refreshError) {
+      console.warn('Failed to refresh orders after special service status update:', refreshError);
+      const idx = orders.findIndex(item => item.id === order.id);
+      const updated = {
+        ...order,
+        ...saved,
+        tatuStatus: isTatu ? true : (saved?.tatuStatus ?? order.tatuStatus),
+        tatuDone: isTatu ? true : (saved?.tatuDone ?? order.tatuDone),
+        tatuDoneBy: isTatu ? currentWorkerName : (saved?.tatuDoneBy ?? order.tatuDoneBy),
+        toningStatus: !isTatu ? true : (saved?.toningStatus ?? order.toningStatus),
+        toningDone: !isTatu ? true : (saved?.toningDone ?? order.toningDone),
+        toningDoneBy: !isTatu ? currentWorkerName : (saved?.toningDoneBy ?? order.toningDoneBy),
+      };
+      if (idx !== -1) orders[idx] = updated;
+    }
     currentMonthFilter ? renderOrdersForMonth(currentMonthFilter) : renderOrders();
     showToast('Услуга выполнена ✓');
     if (document.getElementById('screen-profile')?.classList.contains('active')) {
@@ -825,9 +921,12 @@ async function saveOrderServices(orderId) {
   if (btn) btn.disabled = true;
   try {
     const serialized = serializeOrderServiceSelections(values);
-    const saved = await sbPatchOrderFields(orderId, { service_type: serialized });
-    const idx = orders.findIndex(item => item.id === orderId);
-    if (idx !== -1) orders[idx] = { ...orders[idx], ...saved, serviceType: serialized };
+    await sbPatchOrderFields(orderId, { service_type: serialized });
+    try {
+      orders = await sbFetchOrders();
+    } catch (refreshError) {
+      console.warn('Failed to refresh orders after saving services:', refreshError);
+    }
     closeOrderServicesModal();
     currentMonthFilter ? renderOrdersForMonth(currentMonthFilter) : renderOrders();
     showToast('Услуги сохранены ✓');
@@ -877,23 +976,25 @@ function renderOrderStatusBadges(o) {
 }
 
 function _isCurrentWorkerOrder(order) {
-  return order && (order.responsible === currentWorkerName || order.assistant === currentWorkerName);
+  if (!order) return false;
+  if (currentUserCanViewAllOrders()) return true;
+  return order.responsible === currentWorkerName || order.assistant === currentWorkerName;
 }
 
 function _filterSpecialistOrdersByTab(list) {
   const today = todayStr();
   list = list.filter(o => !isOrderDeleted(o));
-  if (currentWorkerName === 'Roma' && currentWorkerTab === 'tatuActual') {
-    return list.filter(o => o.inWork && !o.isCancelled && Number(o.tatu) > 0 && !o.tatuStatus);
+  if (workerCanHandleSpecialService(currentWorkerName, 'tatu') && currentWorkerTab === 'tatuActual') {
+    return list.filter(o => o.inWork && !o.isCancelled && Number(o.tatu) > 0 && !o.tatuStatus && getOrderSpecialServiceAssignedWorker(o, 'tatu') === currentWorkerName);
   }
-  if (currentWorkerName === 'Roma' && currentWorkerTab === 'tatuDone') {
-    return list.filter(o => o.inWork && !o.isCancelled && Number(o.tatu) > 0 && !!o.tatuStatus);
+  if (workerCanHandleSpecialService(currentWorkerName, 'tatu') && currentWorkerTab === 'tatuDone') {
+    return list.filter(o => o.inWork && !o.isCancelled && Number(o.tatu) > 0 && !!o.tatuStatus && getOrderSpecialServiceAssignedWorker(o, 'tatu') === currentWorkerName);
   }
-  if (currentWorkerName === 'Lyosha' && currentWorkerTab === 'toningActual') {
-    return list.filter(o => o.inWork && !o.isCancelled && Number(o.toning) > 0 && !o.toningStatus && !o.toningExternal);
+  if (workerCanHandleSpecialService(currentWorkerName, 'toning') && currentWorkerTab === 'toningActual') {
+    return list.filter(o => o.inWork && !o.isCancelled && Number(o.toning) > 0 && !o.toningStatus && !o.toningExternal && getOrderSpecialServiceAssignedWorker(o, 'toning') === currentWorkerName);
   }
-  if (currentWorkerName === 'Lyosha' && currentWorkerTab === 'toningDone') {
-    return list.filter(o => o.inWork && !o.isCancelled && Number(o.toning) > 0 && !!o.toningStatus && !o.toningExternal);
+  if (workerCanHandleSpecialService(currentWorkerName, 'toning') && currentWorkerTab === 'toningDone') {
+    return list.filter(o => o.inWork && !o.isCancelled && Number(o.toning) > 0 && !!o.toningStatus && !o.toningExternal && getOrderSpecialServiceAssignedWorker(o, 'toning') === currentWorkerName);
   }
   if (currentWorkerName === 'Nastya' && currentWorkerTab === 'ownWarehouse') {
     return list.filter(o => o.ownWarehouse && !o.workerDone && !o.isCancelled);
@@ -1354,18 +1455,22 @@ async function deleteOrder(id, event) {
       showToast('Заказ удален безвозвратно');
     } else {
       const deletedAt = new Date().toISOString();
-      const saved = await sbPatchOrderFields(id, {
+      await sbPatchOrderFields(id, {
         deleted_at: deletedAt,
         deleted_by: currentWorkerName || currentRole || 'system',
       });
-      const idx = orders.findIndex(o => o.id === id);
-      if (idx !== -1) {
-        orders[idx] = {
-          ...orders[idx],
-          ...saved,
-          deletedAt: saved?.deletedAt || deletedAt,
-          deletedBy: saved?.deletedBy || currentWorkerName || currentRole || 'system',
-        };
+      try {
+        orders = await sbFetchOrders();
+      } catch (refreshError) {
+        console.warn('Failed to refresh orders after soft delete:', refreshError);
+        const idx = orders.findIndex(o => o.id === id);
+        if (idx !== -1) {
+          orders[idx] = {
+            ...orders[idx],
+            deletedAt,
+            deletedBy: currentWorkerName || currentRole || 'system',
+          };
+        }
       }
       showToast('Заказ перемещен в удаленные');
     }
@@ -1396,18 +1501,22 @@ async function restoreOrder(id, event) {
   if (!existingOrder || !isOrderDeleted(existingOrder)) return;
   deletingOrderIds.add(id);
   try {
-    const saved = await sbPatchOrderFields(id, {
+    await sbPatchOrderFields(id, {
       deleted_at: null,
       deleted_by: null,
     });
-    const idx = orders.findIndex(o => o.id === id);
-    if (idx !== -1) {
-      orders[idx] = {
-        ...orders[idx],
-        ...saved,
-        deletedAt: '',
-        deletedBy: '',
-      };
+    try {
+      orders = await sbFetchOrders();
+    } catch (refreshError) {
+      console.warn('Failed to refresh orders after restore:', refreshError);
+      const idx = orders.findIndex(o => o.id === id);
+      if (idx !== -1) {
+        orders[idx] = {
+          ...orders[idx],
+          deletedAt: '',
+          deletedBy: '',
+        };
+      }
     }
     showToast('Заказ восстановлен ✓');
     if (document.getElementById('screen-order-detail')?.classList.contains('active') && currentOrderDetailId === id) {
@@ -1653,32 +1762,24 @@ async function addCashEntriesForDuplicatedOrder(order) {
 
   if (supplierCashPaid !== 0) {
     const cashComment = `Списание за стекло ${order.id}, ${fDate} ${fTime}, клиент: ${fClient}, авто: ${fCar}, склад: ${order.warehouse || '—'}`;
-    const cashEntry = await sbInsertCashEntry({
+    await sbInsertCashEntry({
       worker_name: targetWorker,
       amount: -supplierCashPaid,
       comment: cashComment,
     });
-    if (typeof workerCashLog !== 'undefined' && targetWorker === currentWorkerName && cashEntry) {
-      workerCashLog.unshift(cashEntry);
-    }
-    if (currentRole === 'owner' && Array.isArray(window.allCashLog) && cashEntry) {
-      window.allCashLog.unshift(cashEntry);
-    }
   }
 
   if (clientCashPaid !== 0) {
     const cashComment = `Оплата клиента наличкой ${order.id}, ${fDate}, клиент: ${fClient}, авто: ${fCar}`;
-    const cashEntry = await sbInsertCashEntry({
+    await sbInsertCashEntry({
       worker_name: targetWorker,
       amount: clientCashPaid,
       comment: cashComment,
     });
-    if (typeof workerCashLog !== 'undefined' && targetWorker === currentWorkerName && cashEntry) {
-      workerCashLog.unshift(cashEntry);
-    }
-    if (currentRole === 'owner' && Array.isArray(window.allCashLog) && cashEntry) {
-      window.allCashLog.unshift(cashEntry);
-    }
+  }
+
+  if (supplierCashPaid !== 0 || clientCashPaid !== 0) {
+    await refreshCashStateAfterServerSave();
   }
 }
 
@@ -1737,8 +1838,12 @@ async function duplicateOrder(id) {
   try {
     const saved = await sbInsertOrder(duplicate);
     const nextOrder = saved || duplicate;
-    orders.unshift(nextOrder);
     await addCashEntriesForDuplicatedOrder(nextOrder);
+    try {
+      orders = await sbFetchOrders();
+    } catch (refreshError) {
+      console.warn('Failed to refresh orders after duplicate:', refreshError);
+    }
     showToast(`Дубликат создан: ${nextOrder.id} ✓`);
     openOrderDetail(nextOrder.id);
   } catch (e) {
@@ -1954,11 +2059,7 @@ function populateRefSelects() {
   // Ответственный — старшие специалисты
   const respSel = document.getElementById('f-responsible');
   if (respSel) {
-    const cur = respSel.value;
-    respSel.innerHTML = '<option value="">— выбрать —</option>' +
-      workers.filter(w => ['senior', 'extra'].includes(w.systemRole)).map(w => `<option value="${w.name}">${getWorkerDisplayName(w.name)} (${w.role})</option>`).join('');
-    if (cur) respSel.value = cur;
-    
+    refreshResponsibleOptions();
     // При смене ответственного — подставляем помощника
     respSel.onchange = () => applyAssistantForResponsible(respSel.value);
   }
@@ -1975,6 +2076,7 @@ function populateRefSelects() {
     if (cur) managerSel.value = cur;
   }
 
+  populateSpecialServiceResponsibleSelects();
   populateOrderWorkerFilter();
 }
 
@@ -2146,21 +2248,22 @@ async function addClientPayment() {
   const method = normalizePaymentMethod(methodEl?.value || '');
   if (!method) return showToast('Выберите способ оплаты', 'error');
 
-  const prevPayments = JSON.parse(JSON.stringify(currentClientPayments || []));
-  currentClientPayments.push({ amount, date, method, timestamp: new Date().toISOString() });
+  const nextClientPayments = [
+    ...JSON.parse(JSON.stringify(currentClientPayments || [])),
+    { amount, date, method, timestamp: new Date().toISOString() },
+  ];
   if (addBtn) addBtn.disabled = true;
   try {
-    await persistImmediateOrderPaymentsUpdate();
+    await persistImmediateOrderPaymentsUpdate({
+      clientPayments: nextClientPayments,
+      supplierPayments: currentSupplierPayments,
+    });
     amtEl.value = '';
     renderClientPayments();
     syncClientPaidFromPayments();
     recalcTotal();
     showToast('Оплата клиента добавлена ✓');
   } catch (e) {
-    currentClientPayments = prevPayments;
-    renderClientPayments();
-    syncClientPaidFromPayments();
-    recalcTotal();
     showToast('Ошибка сохранения: ' + e.message, 'error');
   } finally {
     if (addBtn) addBtn.disabled = false;
@@ -2180,35 +2283,71 @@ async function addSupplierPayment() {
   const method = normalizePaymentMethod(methodEl?.value || '');
   if (!method) return showToast('Выберите способ оплаты', 'error');
 
-  const prevPayments = JSON.parse(JSON.stringify(currentSupplierPayments || []));
-  currentSupplierPayments.push({ amount, date, method, timestamp: new Date().toISOString() });
+  const nextSupplierPayments = [
+    ...JSON.parse(JSON.stringify(currentSupplierPayments || [])),
+    { amount, date, method, timestamp: new Date().toISOString() },
+  ];
   if (addBtn) addBtn.disabled = true;
   try {
-    await persistImmediateOrderPaymentsUpdate();
+    await persistImmediateOrderPaymentsUpdate({
+      clientPayments: currentClientPayments,
+      supplierPayments: nextSupplierPayments,
+    });
     amtEl.value = '';
     renderSupplierPayments();
     syncSupplierPaidFromPayments();
     recalcTotal();
     showToast('Оплата поставщику добавлена ✓');
   } catch (e) {
-    currentSupplierPayments = prevPayments;
-    renderSupplierPayments();
-    syncSupplierPaidFromPayments();
-    recalcTotal();
     showToast('Ошибка сохранения: ' + e.message, 'error');
   } finally {
     if (addBtn) addBtn.disabled = false;
   }
 }
 
-async function persistImmediateOrderPaymentsUpdate() {
+async function refreshImmediatePaymentState(orderId, { refreshCash = false } = {}) {
+  let refreshedOrder = null;
+  try {
+    orders = await sbFetchOrders();
+    refreshedOrder = orders.find(item => item.id === orderId) || null;
+  } catch (refreshError) {
+    console.warn('Failed to refresh orders after immediate payment save:', refreshError);
+  }
+
+  if (refreshCash) {
+    await refreshCashStateAfterServerSave();
+  }
+
+  return refreshedOrder;
+}
+
+async function refreshCashStateAfterServerSave() {
+  if (currentRole === 'owner') {
+    try {
+      window.allCashLog = await sbFetchAllCashLog();
+    } catch (cashError) {
+      console.warn('Failed to refresh owner cash log after server save:', cashError);
+    }
+  } else if (typeof workerCashLog !== 'undefined' && currentWorkerName) {
+    try {
+      workerCashLog = await sbFetchCashLog(currentWorkerName);
+    } catch (cashError) {
+      console.warn('Failed to refresh worker cash log after server save:', cashError);
+    }
+  }
+}
+
+async function persistImmediateOrderPaymentsUpdate({
+  clientPayments = currentClientPayments,
+  supplierPayments = currentSupplierPayments,
+} = {}) {
   if (!editingOrderId) return;
   const existingOrder = orders.find(item => item.id === editingOrderId);
   if (!existingOrder) throw new Error('Заказ не найден');
 
   const data = getOrderDraftFromForm(existingOrder);
-  data.clientPayments = currentClientPayments;
-  data.supplierPayments = currentSupplierPayments;
+  data.clientPayments = JSON.parse(JSON.stringify(clientPayments || []));
+  data.supplierPayments = JSON.parse(JSON.stringify(supplierPayments || []));
 
   const oldSupplierPayments = existingOrder?.supplierPayments || [];
   const newSupplierPayments = data.supplierPayments || [];
@@ -2225,6 +2364,8 @@ async function persistImmediateOrderPaymentsUpdate() {
   const newCashClientPaid = newFinanciallyActive ? getCashClientPaidForOrderSnapshot({ ...data, clientPayments: newClientPayments }) : 0;
   const cashClientDiff = newFinanciallyActive ? (newCashClientPaid - oldCashClientPaid) : 0;
   const cashEntries = [];
+  const confirmedClientPaid = sumConfirmedOrderPayments({ ...existingOrder, ...data }, data.clientPayments, 'client');
+  const confirmedSupplierPaid = sumConfirmedOrderPayments({ ...existingOrder, ...data }, data.supplierPayments, 'supplier');
 
   if ((currentRole === 'senior' || currentRole === 'owner') && cashSupplierDiff !== 0) {
     const amount = -cashSupplierDiff;
@@ -2256,48 +2397,34 @@ async function persistImmediateOrderPaymentsUpdate() {
     });
   }
 
-  const saved = await sbPatchOrderFields(editingOrderId, {
-    client_payments: data.clientPayments,
-    supplier_payments: data.supplierPayments,
-    debt: sumConfirmedOrderPayments({ ...existingOrder, ...data }, data.clientPayments, 'client'),
-    check_sum: sumConfirmedOrderPayments({ ...existingOrder, ...data }, data.supplierPayments, 'supplier'),
-  });
-  const idx = orders.findIndex(item => item.id === editingOrderId);
-  if (idx !== -1 && saved) {
-    orders[idx] = {
-      ...orders[idx],
-      ...saved,
-      clientPayments: data.clientPayments,
-      supplierPayments: data.supplierPayments,
-    };
-  }
+  data.debt = confirmedClientPaid;
+  data.check = confirmedSupplierPaid;
 
-  for (const rawCashEntry of cashEntries) {
-    const cashEntry = await sbInsertCashEntry({
-      worker_name: rawCashEntry.worker_name,
-      amount: rawCashEntry.amount,
-      comment: rawCashEntry.comment,
-      cash_account: 'cash',
-    });
-    if (typeof workerCashLog !== 'undefined' && cashEntry?.worker_name === currentWorkerName) {
-      workerCashLog.unshift(cashEntry);
-    }
-    if (currentRole === 'owner' && Array.isArray(window.allCashLog) && cashEntry) {
-      window.allCashLog.unshift(cashEntry);
-    }
-  }
-
-  try {
-    orders = await sbFetchOrders();
-  } catch (refreshError) {
-    console.warn('Failed to refresh orders after immediate payment save:', refreshError);
-  }
+  const shouldUseSaveWithCash = cashEntries.length > 0;
+  const saved = shouldUseSaveWithCash
+    ? (await sbSaveOrderWithCash(data, {
+        isNew: false,
+        cashEntries,
+        rollbackOrder: existingOrder,
+      })).order
+    : await sbPatchOrderFields(editingOrderId, {
+        client_payments: data.clientPayments,
+        supplier_payments: data.supplierPayments,
+        debt: confirmedClientPaid,
+        check_sum: confirmedSupplierPaid,
+      });
+  const refreshedOrder = await refreshImmediatePaymentState(editingOrderId, { refreshCash: shouldUseSaveWithCash });
+  const canonicalOrder = refreshedOrder || saved || orders.find(item => item.id === editingOrderId) || null;
+  currentClientPayments = JSON.parse(JSON.stringify(canonicalOrder?.clientPayments || data.clientPayments || []));
+  currentSupplierPayments = JSON.parse(JSON.stringify(canonicalOrder?.supplierPayments || data.supplierPayments || []));
 
   if (typeof refreshActiveOrdersViews === 'function') {
     refreshActiveOrdersViews();
   } else {
     currentMonthFilter ? renderOrdersForMonth(currentMonthFilter) : renderOrders();
   }
+
+  return canonicalOrder;
 }
 
 function sumCashSupplierPayments(payments) {
@@ -2306,20 +2433,40 @@ function sumCashSupplierPayments(payments) {
   }, 0);
 }
 
-function removeClientPayment(idx) {
+async function removeClientPayment(idx) {
   if (!confirm('Удалить этот платеж из истории?')) return;
-  currentClientPayments.splice(idx, 1);
-  renderClientPayments();
-  syncClientPaidFromPayments();
-  recalcTotal();
+  const nextClientPayments = JSON.parse(JSON.stringify(currentClientPayments || []));
+  nextClientPayments.splice(idx, 1);
+  try {
+    await persistImmediateOrderPaymentsUpdate({
+      clientPayments: nextClientPayments,
+      supplierPayments: currentSupplierPayments,
+    });
+    renderClientPayments();
+    syncClientPaidFromPayments();
+    recalcTotal();
+    showToast('Платеж клиента удален ✓');
+  } catch (e) {
+    showToast('Ошибка удаления: ' + e.message, 'error');
+  }
 }
 
-function removeSupplierPayment(idx) {
+async function removeSupplierPayment(idx) {
   if (!confirm('Удалить этот платеж поставщику из истории?')) return;
-  currentSupplierPayments.splice(idx, 1);
-  renderSupplierPayments();
-  syncSupplierPaidFromPayments();
-  recalcTotal();
+  const nextSupplierPayments = JSON.parse(JSON.stringify(currentSupplierPayments || []));
+  nextSupplierPayments.splice(idx, 1);
+  try {
+    await persistImmediateOrderPaymentsUpdate({
+      clientPayments: currentClientPayments,
+      supplierPayments: nextSupplierPayments,
+    });
+    renderSupplierPayments();
+    syncSupplierPaidFromPayments();
+    recalcTotal();
+    showToast('Платеж поставщику удален ✓');
+  } catch (e) {
+    showToast('Ошибка удаления: ' + e.message, 'error');
+  }
 }
 
 // ---------- МОДАЛ СОЗДАНИЯ / РЕДАКТИРОВАНИЯ ----------
@@ -2434,7 +2581,7 @@ function openOrderModal(id) {
   newIncome.addEventListener('input', recalcMargin);
 
   const tonExtEl = document.getElementById('f-toning-external');
-  if (tonExtEl) tonExtEl.addEventListener('change', () => { recalcFullMargins(); recalcTotal(); });
+  if (tonExtEl) tonExtEl.addEventListener('change', () => { populateSpecialServiceResponsibleSelects(); recalcFullMargins(); recalcTotal(); });
   [
     { id: 'f-tatu-status', type: 'tatu' },
     { id: 'f-toning-status', type: 'toning' },
@@ -2465,6 +2612,7 @@ function openOrderModal(id) {
     const el = document.getElementById(id);
     if (!el) return;
     el.addEventListener('input', () => {
+      if (id === 'f-tatu' || id === 'f-toning') populateSpecialServiceResponsibleSelects();
       recalcFullMargins();
       renderOrderSummary(editingOrderId ? orders.find(item => item.id === editingOrderId) : null);
     });
@@ -2613,6 +2761,8 @@ function getOrderDraftFromForm(baseOrder = null) {
   order.tatu = getN('f-tatu');
   order.tatuStatus = document.getElementById('f-tatu-status')?.checked || false;
   order.toningStatus = document.getElementById('f-toning-status')?.checked || false;
+  order.tatuResponsible = document.getElementById('f-tatu-responsible')?.value || baseOrder?.tatuResponsible || '';
+  order.toningResponsible = document.getElementById('f-toning-responsible')?.value || baseOrder?.toningResponsible || '';
   order.priorityTask = document.getElementById('f-priority-task')?.checked || false;
   order.total = getN('f-total');
   order.income = getN('f-income');
@@ -2632,7 +2782,13 @@ function getOrderSalaryPreviewRows(order) {
   if (!order) return [];
   const rows = [];
   const seen = new Set();
-  const candidateNames = [order.responsible, order.assistant, order.manager, 'Roma', 'Lyosha'].filter(Boolean);
+  const candidateNames = [
+    order.responsible,
+    order.assistant,
+    order.manager,
+    getOrderSpecialServiceAssignedWorker(order, 'tatu'),
+    getOrderSpecialServiceAssignedWorker(order, 'toning'),
+  ].filter(Boolean);
   candidateNames.forEach(workerName => {
     if (seen.has(workerName)) return;
     seen.add(workerName);
@@ -2701,11 +2857,11 @@ function getWorkerOrderSalaryPreviewBreakdown(workerName, order) {
     if (managerAmount > 0) parts.push({ label: 'Менеджер ' + Math.round((rule.glassMarginPct || 0) * 100) + '% маржи стекла', amount: managerAmount });
   }
 
-  if (workerName === 'Roma' && Number(order.tatu) > 0) {
+  if (workerCanHandleSpecialService(workerName, 'tatu') && getOrderSpecialServiceAssignedWorker(order, 'tatu') === workerName && Number(order.tatu) > 0) {
     parts.push({ label: 'Тату ' + Math.round((rule.tatuBonusPct || 0) * 100) + '%', amount: Math.round((Number(order.tatu) || 0) * (rule.tatuBonusPct || 0)) });
   }
 
-  if (workerName === 'Lyosha' && !order.toningExternal && Number(order.toning) > 0) {
+  if (workerCanHandleSpecialService(workerName, 'toning') && getOrderSpecialServiceAssignedWorker(order, 'toning') === workerName && !order.toningExternal && Number(order.toning) > 0) {
     parts.push({ label: 'Тонировка ' + Math.round((rule.toningBonusPct || 0) * 100) + '%', amount: Math.round((Number(order.toning) || 0) * (rule.toningBonusPct || 0)) });
   }
 
@@ -3009,10 +3165,10 @@ function shouldAutoPersistSpecialServiceStatus(type, order) {
   if (currentRole === 'owner' || currentRole === 'manager') return false;
   if (!order) return false;
   if (type === 'tatu') {
-    return currentWorkerName === 'Roma' && canCurrentUserToggleSpecialServiceStatus(order, 'tatu');
+    return workerCanHandleSpecialService(currentWorkerName, 'tatu') && canCurrentUserToggleSpecialServiceStatus(order, 'tatu');
   }
   if (type === 'toning') {
-    return currentWorkerName === 'Lyosha' && canCurrentUserToggleSpecialServiceStatus(order, 'toning');
+    return workerCanHandleSpecialService(currentWorkerName, 'toning') && canCurrentUserToggleSpecialServiceStatus(order, 'toning');
   }
   return false;
 }
@@ -3043,18 +3199,25 @@ async function handleSpecialServiceStatusChange(type) {
           toning_done_by: nextValue ? currentWorkerName : null,
         };
     const saved = await sbPatchOrderFields(editingOrderId, patch);
-    const updatedOrder = {
-      ...existingOrder,
-      ...saved,
-      tatuStatus: isTatu ? nextValue : existingOrder.tatuStatus,
-      tatuDone: isTatu ? nextValue : existingOrder.tatuDone,
-      tatuDoneBy: isTatu ? (nextValue ? currentWorkerName : '') : existingOrder.tatuDoneBy,
-      toningStatus: !isTatu ? nextValue : existingOrder.toningStatus,
-      toningDone: !isTatu ? nextValue : existingOrder.toningDone,
-      toningDoneBy: !isTatu ? (nextValue ? currentWorkerName : '') : existingOrder.toningDoneBy,
-    };
-    const idx = orders.findIndex(item => item.id === editingOrderId);
-    if (idx !== -1) orders[idx] = updatedOrder;
+    let updatedOrder = null;
+    try {
+      orders = await sbFetchOrders();
+      updatedOrder = orders.find(item => item.id === editingOrderId) || null;
+    } catch (refreshError) {
+      console.warn('Failed to refresh orders after service status toggle:', refreshError);
+      updatedOrder = {
+        ...existingOrder,
+        ...saved,
+        tatuStatus: isTatu ? nextValue : existingOrder.tatuStatus,
+        tatuDone: isTatu ? nextValue : existingOrder.tatuDone,
+        tatuDoneBy: isTatu ? (nextValue ? currentWorkerName : '') : existingOrder.tatuDoneBy,
+        toningStatus: !isTatu ? nextValue : existingOrder.toningStatus,
+        toningDone: !isTatu ? nextValue : existingOrder.toningDone,
+        toningDoneBy: !isTatu ? (nextValue ? currentWorkerName : '') : existingOrder.toningDoneBy,
+      };
+      const idx = orders.findIndex(item => item.id === editingOrderId);
+      if (idx !== -1) orders[idx] = updatedOrder;
+    }
     updateOrderModalAccess(updatedOrder);
     renderOrderSummary(updatedOrder);
     if (currentMonthFilter) renderOrdersForMonth(currentMonthFilter);
@@ -3108,6 +3271,8 @@ function fillOrderForm(o) {
   const newPostEl = document.getElementById('f-new-post');
   if (newPostEl) newPostEl.checked = !!o.newPost;
   set('f-configuration', o.configuration || '');
+  set('f-tatu-responsible', o.tatuResponsible || '');
+  set('f-toning-responsible', o.toningResponsible || '');
   const tatuStatusEl = document.getElementById('f-tatu-status');
   if (tatuStatusEl) tatuStatusEl.checked = !!o.tatuStatus;
   const toningStatusEl = document.getElementById('f-toning-status');
@@ -3183,7 +3348,7 @@ function clearOrderForm() {
     'f-remainder','f-payment-method','f-dropshipper','f-margin-total',
     'f-payout-dropshipper','f-payout-manager-glass','f-payout-resp-glass',
     'f-payout-lesha','f-payout-roma','f-payout-extra-resp','f-payout-extra-assist',
-    'f-payout-molding-resp','f-payout-molding-assist','f-assistant','f-manager',
+    'f-payout-molding-resp','f-payout-molding-assist','f-assistant','f-manager','f-tatu-responsible','f-toning-responsible',
     'f-new-payment-amount','f-new-payment-date','f-new-supplier-payment-amount','f-new-supplier-payment-date','f-new-supplier-payment-method'
   ];
   ids.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
@@ -3374,6 +3539,8 @@ async function saveOrder() {
     toning:          getN('f-toning'),
     tatuStatus:      document.getElementById('f-tatu-status')?.checked || false,
     toningStatus:    document.getElementById('f-toning-status')?.checked || false,
+    tatuResponsible: document.getElementById('f-tatu-responsible')?.value || '',
+    toningResponsible: document.getElementById('f-toning-responsible')?.value || '',
     priorityTask:    (currentRole === 'owner' || currentRole === 'manager')
       ? (document.getElementById('f-priority-task')?.checked || false)
       : !!existingOrder?.priorityTask,
@@ -3511,45 +3678,22 @@ async function saveOrder() {
         : { order: await sbUpdateOrder(data), cashEntries: [] });
     const saved = result.order;
 
-    if (isNew) {
-      orders.unshift(saved);
-      await rememberCarDirectoryFromOrder(saved);
-      try {
-        await rememberAssistantForResponsible(data.responsible, data.assistant);
-      } catch (e) {
-        console.warn('Failed to remember assistant preference:', e);
-      }
-      try {
-        await rememberClientAddressFromOrder(saved);
-      } catch (e) {
-        console.warn('Failed to remember client address:', e);
-      }
-      showToast('Запись создана ✓');
-    } else {
-      const idx = orders.findIndex(o => o.id === editingOrderId);
-      if (idx !== -1) orders[idx] = saved;
-      await rememberCarDirectoryFromOrder(saved);
-      try {
-        await rememberAssistantForResponsible(data.responsible, data.assistant);
-      } catch (e) {
-        console.warn('Failed to remember assistant preference:', e);
-      }
-      try {
-        await rememberClientAddressFromOrder(saved);
-      } catch (e) {
-        console.warn('Failed to remember client address:', e);
-      }
-      showToast('Запись обновлена ✓');
+    await rememberCarDirectoryFromOrder(saved);
+    try {
+      await rememberAssistantForResponsible(data.responsible, data.assistant);
+    } catch (e) {
+      console.warn('Failed to remember assistant preference:', e);
     }
+    try {
+      await rememberClientAddressFromOrder(saved);
+    } catch (e) {
+      console.warn('Failed to remember client address:', e);
+    }
+    showToast(isNew ? 'Запись создана ✓' : 'Запись обновлена ✓');
 
     const savedCashEntries = result.cashEntries || [];
-    for (const cashEntry of savedCashEntries) {
-      if (typeof workerCashLog !== 'undefined' && cashEntry?.worker_name === currentWorkerName) {
-        workerCashLog.unshift(cashEntry);
-      }
-      if (currentRole === 'owner' && Array.isArray(window.allCashLog) && cashEntry) {
-        window.allCashLog.unshift(cashEntry);
-      }
+    if (savedCashEntries.length > 0) {
+      await refreshCashStateAfterServerSave();
     }
 
     if (cashSupplierDiff !== 0) {
@@ -3559,12 +3703,6 @@ async function saveOrder() {
 
     try {
       orders = await sbFetchOrders();
-      const refreshedIdx = orders.findIndex(o => o.id === saved.id);
-      if (refreshedIdx !== -1) {
-        orders[refreshedIdx] = { ...orders[refreshedIdx], ...saved };
-      } else {
-        orders.unshift(saved);
-      }
     } catch (refreshError) {
       console.warn('Failed to refresh orders after save:', refreshError);
       const fallbackIdx = orders.findIndex(o => o.id === saved.id);
@@ -3903,26 +4041,26 @@ async function toggleWorkerDone(orderId) {
     return;
   }
   if (!confirm(`Отметить заказ ${o.id} выполненным? После этого будет начислена зарплата.`)) return;
-  o.workerDone = true;
   try {
     if (String(draftOrder.serviceType || '').trim() !== String(o.serviceType || '').trim()) {
-      const savedServices = await sbPatchOrderFields(o.id, { service_type: String(draftOrder.serviceType || '').trim() || null });
-      if (savedServices) {
-        const idx = orders.findIndex(x => x.id === orderId);
-        if (idx !== -1) orders[idx] = { ...orders[idx], ...savedServices, serviceType: draftOrder.serviceType };
-      } else {
-        o.serviceType = draftOrder.serviceType;
-      }
+      await sbPatchOrderFields(o.id, { service_type: String(draftOrder.serviceType || '').trim() || null });
     }
-    const saved = await sbPatchOrderFields(o.id, { worker_done: true });
-    if (saved) {
-      const idx = orders.findIndex(x => x.id === orderId);
-      if (idx !== -1) orders[idx] = { ...o, ...saved, workerDone: true };
+    await sbPatchOrderFields(o.id, { worker_done: true });
+    try {
+      orders = await sbFetchOrders();
+    } catch (refreshError) {
+      console.warn('Failed to refresh orders after worker done update:', refreshError);
     }
-    await _upsertOrderSalaries(orders.find(x => x.id === orderId) || o);
-    // Автозачисление в кассу если наличка и заказ отмечен выполненным
-    if (typeof addCashFromOrder === 'function') {
-      await addCashFromOrder(o);
+    const refreshedOrder = orders.find(x => x.id === orderId) || { ...o, serviceType: draftOrder.serviceType, workerDone: true };
+    await _upsertOrderSalaries(refreshedOrder);
+    // Legacy fallback для старых заказов без истории оплат.
+    if (typeof addLegacyCashFromCompletedOrder === 'function') {
+      await addLegacyCashFromCompletedOrder(refreshedOrder);
+    }
+    try {
+      orders = await sbFetchOrders();
+    } catch (refreshError) {
+      console.warn('Failed to refresh orders after completion side effects:', refreshError);
     }
     currentMonthFilter ? renderOrdersForMonth(currentMonthFilter) : renderOrders();
     showToast('✓ Выполнено');
@@ -3970,23 +4108,25 @@ async function _upsertOrderSalaries(order) {
       amounts[managerName] = (amounts[managerName] || 0) + _calcManagerSalary(order);
     }
 
-    const tatuAmount = _calcTatuBonus('Roma', order);
+    const tatuWorkerName = getOrderSpecialServiceAssignedWorker(order, 'tatu');
+    const tatuAmount = _calcTatuBonus(tatuWorkerName, order);
     if (tatuAmount > 0) {
-      affectedWorkers.add('Roma');
-      amounts['Roma'] = (amounts['Roma'] || 0) + tatuAmount;
+      affectedWorkers.add(tatuWorkerName);
+      amounts[tatuWorkerName] = (amounts[tatuWorkerName] || 0) + tatuAmount;
     }
 
-    const toningAmount = _calcToningBonus('Lyosha', order);
+    const toningWorkerName = getOrderSpecialServiceAssignedWorker(order, 'toning');
+    const toningAmount = _calcToningBonus(toningWorkerName, order);
     if (toningAmount > 0) {
-      affectedWorkers.add('Lyosha');
-      amounts['Lyosha'] = (amounts['Lyosha'] || 0) + toningAmount;
+      affectedWorkers.add(toningWorkerName);
+      amounts[toningWorkerName] = (amounts[toningWorkerName] || 0) + toningAmount;
     }
   }
 
   // Всегда берём актуальные записи ЗП по этому заказу из БД
   let existingInDb = [];
   try {
-    existingInDb = await sbFetchSalariesByOrder(order.id) || [];
+    existingInDb = await sbFetchSalariesByOrder(order.id, { includeLegacySpecial: true }) || [];
   } catch (e) { /* если упало — продолжаем с пустым массивом */ }
   const legacySpecialEntriesInDb = existingInDb.filter(isLegacySpecialServiceSalaryEntry);
   for (const entry of legacySpecialEntriesInDb) {
@@ -4006,10 +4146,6 @@ async function _upsertOrderSalaries(order) {
     for (const workerName of missingWorkers) {
       await sbInsertWorkerSalary({ worker_name: workerName, date: order.date, amount: amounts[workerName], order_id: order.id, entry_type: 'auto' });
       affectedWorkers.add(workerName);
-    }
-    for (const workerName of affectedWorkers) {
-      if (!_canSyncDailyBaseSalaryForWorker(workerName)) continue;
-      await _syncDailyBaseSalaryEntry(workerName, order.date);
     }
     if (typeof workerSalaries !== 'undefined') {
       try {
@@ -4039,61 +4175,12 @@ async function _upsertOrderSalaries(order) {
     }
   }
 
-  for (const workerName of affectedWorkers) {
-    if (!_canSyncDailyBaseSalaryForWorker(workerName)) continue;
-    await _syncDailyBaseSalaryEntry(workerName, order.date);
-  }
-
   // Обновляем локальный массив workerSalaries (только для текущего пользователя)
   if (typeof workerSalaries !== 'undefined') {
     try {
       workerSalaries = await sbFetchWorkerSalaries(currentWorkerName);
     } catch (e) { /* не критично */ }
   }
-}
-
-function getSpecialServiceSalaryEntries(order) {
-  return [];
-}
-
-async function upsertSpecialServiceSalaryEntry(entry) {
-  if (!entry?.workerName || !entry.date || !entry.orderId) return;
-  const amount = Number(entry.amount) || 0;
-  let salaryRows = [];
-  try {
-    salaryRows = await sbFetchWorkerSalaries(entry.workerName) || [];
-  } catch (e) {
-    return;
-  }
-
-  const existing = salaryRows.find(row => row.order_id === entry.orderId && !isOwnerManualSalaryEntry(row));
-  if (amount > 0) {
-    if (!existing) {
-      await sbInsertWorkerSalary({
-        worker_name: entry.workerName,
-        date: entry.date,
-        amount,
-        order_id: entry.orderId,
-        entry_type: 'auto',
-        comment: entry.comment || '',
-      });
-    } else if (Number(existing.amount) !== amount || existing.comment !== entry.comment) {
-      await sbUpdateWorkerSalary(existing.id, {
-        amount,
-        comment: entry.comment || '',
-      });
-    }
-  } else if (existing) {
-    await sbDeleteWorkerSalary(existing.id);
-  }
-}
-
-function _canSyncDailyBaseSalaryForWorker(workerName) {
-  return false;
-}
-
-async function _syncDailyBaseSalaryEntry(workerName, date) {
-  return;
 }
 
 // ---------- ТАБЫ ЗАКАЗОВ ----------
@@ -4123,8 +4210,8 @@ function initOrderTabs() {
       tabsEl.style.display = 'flex';
       tabsEl.innerHTML = `
         <button class="orders-tab orders-tab-relevant active" id="tab-actual" onclick="setWorkerTab('actual')"><span class="tab-dot"></span> Актуальные</button>
-        ${currentWorkerName === 'Roma' ? '<button class="orders-tab" id="tab-tatu-actual" onclick="setWorkerTab(\'tatuActual\')">Тату актуальные</button><button class="orders-tab" id="tab-tatu-done" onclick="setWorkerTab(\'tatuDone\')">Тату выполненные</button>' : ''}
-        ${currentWorkerName === 'Lyosha' ? '<button class="orders-tab" id="tab-toning-actual" onclick="setWorkerTab(\'toningActual\')">Тонировка актуальные</button><button class="orders-tab" id="tab-toning-done" onclick="setWorkerTab(\'toningDone\')">Тонировка выполненные</button>' : ''}
+        ${workerCanHandleSpecialService(currentWorkerName, 'tatu') ? '<button class="orders-tab" id="tab-tatu-actual" onclick="setWorkerTab(\'tatuActual\')">Тату актуальные</button><button class="orders-tab" id="tab-tatu-done" onclick="setWorkerTab(\'tatuDone\')">Тату выполненные</button>' : ''}
+        ${workerCanHandleSpecialService(currentWorkerName, 'toning') ? '<button class="orders-tab" id="tab-toning-actual" onclick="setWorkerTab(\'toningActual\')">Тонировка актуальные</button><button class="orders-tab" id="tab-toning-done" onclick="setWorkerTab(\'toningDone\')">Тонировка выполненные</button>' : ''}
         <button class="orders-tab" id="tab-today" onclick="setWorkerTab('today')">Сегодняшние</button>
         <button class="orders-tab" id="tab-done-worker" onclick="setWorkerTab('done')">Выполненные</button>
         <button class="orders-tab" id="tab-future" onclick="setWorkerTab('future')">Будущие</button>

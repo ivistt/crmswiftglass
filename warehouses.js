@@ -14,6 +14,8 @@ let warehouseDateFilterFrom = '';
 let warehouseDateFilterTo = '';
 let warehouseNewPostOnly = false;
 let warehouseAnomaliesOpen = false;
+let warehouseCreateModalMode = '';
+let warehouseRefEditState = null;
 
 function formatWarehouseEntryTime(value) {
   const raw = String(value || '').trim();
@@ -219,25 +221,42 @@ function renderWarehousesScreen() {
     ...orders.filter(isWarehouseRelevantOrder),
     ...getWarehouseExpenseEntries(),
   ];
-  if (!warehouseRecords.length) {
-    container.innerHTML = `<div class="empty-state"><div class="empty-state-icon">${icon('package')}</div><h3>Записей нет</h3></div>`;
-    return;
-  }
-
   const map = {};
   for (const record of warehouseRecords) {
     const w = getWarehouseRecordWarehouse(record);
     if (!map[w]) map[w] = [];
     map[w].push(record);
   }
+  (typeof getWarehouseNameOptions === 'function' ? getWarehouseNameOptions() : []).forEach(name => {
+    if (!map[name]) map[name] = [];
+  });
+
+  const actionBar = currentRole === 'owner' ? `
+    <div style="grid-column:1 / -1;display:flex;justify-content:flex-end;gap:8px;">
+      <button class="btn-secondary" onclick="openWarehouseRefCreateModal()">+ Склад</button>
+    </div>
+  ` : '';
+
+  if (!Object.keys(map).length) {
+    container.innerHTML = `${actionBar}<div class="empty-state" style="grid-column:1 / -1;"><div class="empty-state-icon">${icon('package')}</div><h3>Записей нет</h3></div>`;
+    initIcons();
+    return;
+  }
 
   const cardsHtml = Object.keys(map).sort().map(w => {
     const list = map[w];
     const totals = getWarehouseTotals(list);
+    const refRow = (Array.isArray(refWarehouses) ? refWarehouses : []).find(row => String(row?.name || '').trim() === String(w).trim() && row?.id);
+    const editBtn = currentRole === 'owner' && refRow?.id
+      ? `<button class="btn-secondary" style="padding:6px 10px;min-height:0;" onclick="event.stopPropagation(); openWarehouseRefEditModal('${escapeAttr(String(refRow.id))}','${escapeAttr(w)}')">${icon('pencil')}</button>`
+      : '';
     return `
       <div class="home-card" style="display:flex;flex-direction:column;min-height:120px;" onclick="openWarehouseDetail('${escapeAttr(w)}')">
-        <div style="font-size:12px;color:var(--text3);font-weight:600;letter-spacing:0.04em;">
-          Записей: ${list.length} · С долгом: ${totals.debtCount} · Возврат: ${totals.returnCount} · Расход: ${totals.expenseCount}
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;">
+          <div style="font-size:12px;color:var(--text3);font-weight:600;letter-spacing:0.04em;">
+            Записей: ${list.length} · С долгом: ${totals.debtCount} · Возврат: ${totals.returnCount} · Расход: ${totals.expenseCount}
+          </div>
+          ${editBtn}
         </div>
         <div style="margin-top:auto;padding-top:12px;">
           <div style="font-size:20px;font-weight:800;line-height:1.2;margin-bottom:6px;">${escapeHtml(w)}</div>
@@ -248,7 +267,7 @@ function renderWarehousesScreen() {
       </div>
     `;
   }).join('');
-  container.innerHTML = cardsHtml + renderWarehouseAnomaliesPanel();
+  container.innerHTML = actionBar + cardsHtml + renderWarehouseAnomaliesPanel();
   initIcons();
 }
 
@@ -626,23 +645,43 @@ function renderDropshippersScreen() {
   const container = document.getElementById('dropshippers-list');
   if (!container) return;
   const list = orders.filter(o => isOrderFinanciallyActive(o) && o.dropshipper && Number(o.dropshipperPayout) > 0);
-  if (!list.length) {
-    container.innerHTML = `<div class="empty-state"><div class="empty-state-icon">${icon('handshake')}</div><h3>Выплат нет</h3></div>`;
-    return;
-  }
   const map = {};
   list.forEach(o => {
     if (!map[o.dropshipper]) map[o.dropshipper] = [];
     map[o.dropshipper].push(o);
   });
-  container.innerHTML = Object.keys(map).sort().map(name => {
+  ensureBuiltInDropshippers(refDropshippers || []).forEach(row => {
+    const name = String(row?.name || '').trim();
+    if (name && !map[name]) map[name] = [];
+  });
+
+  const actionBar = currentRole === 'owner' ? `
+    <div style="grid-column:1 / -1;display:flex;justify-content:flex-end;gap:8px;">
+      <button class="btn-secondary" onclick="openDropshipperRefCreateModal()">+ Дропшиппер</button>
+    </div>
+  ` : '';
+
+  if (!Object.keys(map).length) {
+    container.innerHTML = `${actionBar}<div class="empty-state" style="grid-column:1 / -1;"><div class="empty-state-icon">${icon('handshake')}</div><h3>Дропшипперов пока нет</h3></div>`;
+    initIcons();
+    return;
+  }
+
+  container.innerHTML = actionBar + Object.keys(map).sort().map(name => {
     const rows = map[name];
     const total = rows.reduce((sum, o) => sum + (Number(o.dropshipperPayout) || 0), 0);
     const paid = rows.reduce((sum, o) => sum + getDropshipperPaid(o), 0);
     const left = Math.max(0, total - paid);
+    const refRow = (Array.isArray(refDropshippers) ? refDropshippers : []).find(row => String(row?.name || '').trim() === String(name).trim() && row?.id);
+    const editBtn = currentRole === 'owner' && refRow?.id
+      ? `<button class="btn-secondary" style="padding:6px 10px;min-height:0;" onclick="event.stopPropagation(); openDropshipperRefEditModal('${escapeAttr(String(refRow.id))}','${escapeAttr(name)}','${escapeAttr(String(refRow?.worker_name || ''))}')">${icon('pencil')}</button>`
+      : '';
     return `
       <div class="home-card" onclick="openDropshipperDetail('${escapeAttr(name)}')">
-        <div style="font-size:12px;color:var(--text3);font-weight:600;">Записей: ${rows.length} · Осталось: ${left.toLocaleString('ru')} ₴</div>
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;">
+          <div style="font-size:12px;color:var(--text3);font-weight:600;">Записей: ${rows.length} · Осталось: ${left.toLocaleString('ru')} ₴</div>
+          ${editBtn}
+        </div>
         <div style="margin-top:auto;padding-top:12px;">
           <div style="font-size:20px;font-weight:800;margin-bottom:6px;">${escapeHtml(name)}</div>
           <div style="font-size:20px;font-weight:800;color:var(--yellow);">${total.toLocaleString('ru')} ₴</div>
@@ -651,6 +690,216 @@ function renderDropshippersScreen() {
       </div>
     `;
   }).join('');
+  initIcons();
+}
+
+function openWarehouseRefCreateModal() {
+  if (currentRole !== 'owner') return;
+  warehouseCreateModalMode = 'warehouse';
+  warehouseRefEditState = null;
+  let modal = document.getElementById('warehouse-ref-create-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'warehouse-ref-create-modal';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  modal.innerHTML = `
+    <div class="modal" style="max-width:420px;">
+      <div class="modal-header">
+        <div class="modal-title">Новый склад</div>
+        <button class="modal-close" onclick="closeWarehouseRefCreateModal()">${icon('x')}</button>
+      </div>
+      <div class="modal-body" style="display:grid;gap:12px;">
+        <label class="form-group">
+          <span class="form-label">Название склада</span>
+          <input class="form-input" id="warehouse-ref-create-name" type="text" placeholder="Напр. БОСС">
+        </label>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeWarehouseRefCreateModal()">Отмена</button>
+        <button class="btn-primary" id="warehouse-ref-create-save-btn" onclick="saveWarehouseRefCreate()">Сохранить</button>
+      </div>
+    </div>
+  `;
+  modal.classList.add('active');
+  initIcons();
+}
+
+function openDropshipperRefCreateModal() {
+  if (currentRole !== 'owner') return;
+  warehouseCreateModalMode = 'dropshipper';
+  warehouseRefEditState = null;
+  let modal = document.getElementById('warehouse-ref-create-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'warehouse-ref-create-modal';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  const workerOptions = (workers || [])
+    .map(worker => `<option value="${escapeAttr(worker.name)}">${escapeHtml(getWorkerDisplayName(worker.name) || worker.name)}</option>`)
+    .join('');
+  modal.innerHTML = `
+    <div class="modal" style="max-width:420px;">
+      <div class="modal-header">
+        <div class="modal-title">Новый дропшиппер</div>
+        <button class="modal-close" onclick="closeWarehouseRefCreateModal()">${icon('x')}</button>
+      </div>
+      <div class="modal-body" style="display:grid;gap:12px;">
+        <label class="form-group">
+          <span class="form-label">Имя</span>
+          <input class="form-input" id="dropshipper-ref-create-name" type="text" placeholder="Напр. Паша Литовченко">
+        </label>
+        <label class="form-group">
+          <span class="form-label">Связанный сотрудник</span>
+          <select class="form-select" id="dropshipper-ref-create-worker">
+            <option value="">— не привязывать —</option>
+            ${workerOptions}
+          </select>
+        </label>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeWarehouseRefCreateModal()">Отмена</button>
+        <button class="btn-primary" id="warehouse-ref-create-save-btn" onclick="saveDropshipperRefCreate()">Сохранить</button>
+      </div>
+    </div>
+  `;
+  modal.classList.add('active');
+  initIcons();
+}
+
+function openWarehouseRefEditModal(id, name) {
+  if (currentRole !== 'owner') return;
+  warehouseCreateModalMode = 'warehouse-edit';
+  warehouseRefEditState = { id: String(id || '').trim() };
+  let modal = document.getElementById('warehouse-ref-create-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'warehouse-ref-create-modal';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  modal.innerHTML = `
+    <div class="modal" style="max-width:420px;">
+      <div class="modal-header">
+        <div class="modal-title">Редактировать склад</div>
+        <button class="modal-close" onclick="closeWarehouseRefCreateModal()">${icon('x')}</button>
+      </div>
+      <div class="modal-body" style="display:grid;gap:12px;">
+        <label class="form-group">
+          <span class="form-label">Название склада</span>
+          <input class="form-input" id="warehouse-ref-create-name" type="text" value="${escapeAttr(name || '')}">
+        </label>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeWarehouseRefCreateModal()">Отмена</button>
+        <button class="btn-primary" id="warehouse-ref-create-save-btn" onclick="saveWarehouseRefCreate()">Сохранить</button>
+      </div>
+    </div>
+  `;
+  modal.classList.add('active');
+  initIcons();
+}
+
+function openDropshipperRefEditModal(id, name, workerName = '') {
+  if (currentRole !== 'owner') return;
+  warehouseCreateModalMode = 'dropshipper-edit';
+  warehouseRefEditState = { id: String(id || '').trim() };
+  let modal = document.getElementById('warehouse-ref-create-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'warehouse-ref-create-modal';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  const workerOptions = (workers || [])
+    .map(worker => `<option value="${escapeAttr(worker.name)}" ${String(worker.name) === String(workerName) ? 'selected' : ''}>${escapeHtml(getWorkerDisplayName(worker.name) || worker.name)}</option>`)
+    .join('');
+  modal.innerHTML = `
+    <div class="modal" style="max-width:420px;">
+      <div class="modal-header">
+        <div class="modal-title">Редактировать дропшиппера</div>
+        <button class="modal-close" onclick="closeWarehouseRefCreateModal()">${icon('x')}</button>
+      </div>
+      <div class="modal-body" style="display:grid;gap:12px;">
+        <label class="form-group">
+          <span class="form-label">Имя</span>
+          <input class="form-input" id="dropshipper-ref-create-name" type="text" value="${escapeAttr(name || '')}">
+        </label>
+        <label class="form-group">
+          <span class="form-label">Связанный сотрудник</span>
+          <select class="form-select" id="dropshipper-ref-create-worker">
+            <option value="">— не привязывать —</option>
+            ${workerOptions}
+          </select>
+        </label>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeWarehouseRefCreateModal()">Отмена</button>
+        <button class="btn-primary" id="warehouse-ref-create-save-btn" onclick="saveDropshipperRefCreate()">Сохранить</button>
+      </div>
+    </div>
+  `;
+  modal.classList.add('active');
+  initIcons();
+}
+
+function closeWarehouseRefCreateModal() {
+  warehouseCreateModalMode = '';
+  warehouseRefEditState = null;
+  document.getElementById('warehouse-ref-create-modal')?.classList.remove('active');
+}
+
+async function saveWarehouseRefCreate() {
+  const name = String(document.getElementById('warehouse-ref-create-name')?.value || '').trim();
+  if (!name) {
+    showToast('Введите название склада', 'error');
+    return;
+  }
+  const btn = document.getElementById('warehouse-ref-create-save-btn');
+  if (btn) btn.disabled = true;
+  try {
+    if (warehouseCreateModalMode === 'warehouse-edit' && warehouseRefEditState?.id) {
+      await sbUpdateWarehouse(warehouseRefEditState.id, name);
+    } else {
+      await sbCreateWarehouse(name);
+    }
+    await loadRefData();
+    closeWarehouseRefCreateModal();
+    renderWarehousesScreen();
+    showToast(warehouseCreateModalMode === 'warehouse-edit' ? 'Склад обновлен' : 'Склад добавлен');
+  } catch (e) {
+    showToast('Ошибка создания склада: ' + e.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function saveDropshipperRefCreate() {
+  const name = String(document.getElementById('dropshipper-ref-create-name')?.value || '').trim();
+  const workerName = String(document.getElementById('dropshipper-ref-create-worker')?.value || '').trim();
+  if (!name) {
+    showToast('Введите имя дропшиппера', 'error');
+    return;
+  }
+  const btn = document.getElementById('warehouse-ref-create-save-btn');
+  if (btn) btn.disabled = true;
+  try {
+    if (warehouseCreateModalMode === 'dropshipper-edit' && warehouseRefEditState?.id) {
+      await sbUpdateDropshipper(warehouseRefEditState.id, name, workerName);
+    } else {
+      await sbCreateDropshipper(name, workerName);
+    }
+    await loadRefData();
+    closeWarehouseRefCreateModal();
+    renderDropshippersScreen();
+    showToast(warehouseCreateModalMode === 'dropshipper-edit' ? 'Дропшиппер обновлен' : 'Дропшиппер добавлен');
+  } catch (e) {
+    showToast('Ошибка создания дропшиппера: ' + e.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 function getDropshipperPaid(order) {

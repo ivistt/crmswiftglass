@@ -2390,6 +2390,25 @@ input[type="datetime-local"] {
   font-size: 11px;
   color: var(--text3);
 }
+.cash-entry-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.cash-entry-tag {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--order-pill-border);
+  background: var(--order-pill-bg);
+  color: var(--text2);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.3;
+}
 .owner-cash-entry-amount {
   flex-shrink: 0;
   white-space: nowrap;
@@ -2655,6 +2674,145 @@ input[type="datetime-local"] {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
+}
+
+.worker-permissions-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.worker-permission-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.worker-permission-row:last-child {
+  border-bottom: 0;
+}
+
+.worker-permission-label {
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.3;
+}
+
+.worker-permission-switch {
+  position: relative;
+  flex-shrink: 0;
+  width: 58px;
+  height: 32px;
+  border-radius: 999px;
+  background: rgba(239, 68, 68, 0.88);
+  transition: background 0.18s ease;
+}
+
+.worker-permission-switch.active {
+  background: #3ba3ff;
+}
+
+.worker-permission-switch input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  margin: 0;
+}
+
+.worker-permission-slider {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #0f1724;
+  border: 1px solid rgba(255,255,255,0.2);
+  transition: transform 0.18s ease;
+}
+
+.worker-permission-switch.active .worker-permission-slider {
+  transform: translateX(26px);
+}
+
+.worker-setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--border);
+  cursor: default;
+}
+
+.worker-setting-row:last-child {
+  border-bottom: 0;
+}
+
+.worker-setting-label {
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.3;
+}
+
+.worker-setting-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.worker-setting-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 112px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  opacity: 0.5;
+  transition: opacity 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+
+.worker-setting-input-wrap.active {
+  opacity: 1;
+  border-color: var(--accent);
+  background: var(--surface2);
+}
+
+.worker-setting-input {
+  width: 62px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+  text-align: right;
+}
+
+.worker-setting-input:disabled {
+  color: var(--text3);
+}
+
+.worker-setting-suffix {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--text3);
+  white-space: nowrap;
 }
 
 /* ===== CAR DIRECTORY TABLE ===== */

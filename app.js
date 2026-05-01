@@ -117,7 +117,7 @@ async function initApp() {
   }
   await Promise.all(tasks);
   updateNavbarVisibility();
-  if (currentRole === 'owner') {
+  if (canViewDashboard()) {
     renderHome();
     showScreen('home');
     setActiveNav('home');
@@ -153,18 +153,18 @@ function updateNavbarVisibility() {
     // Менеджер: Записи
     if (bottomNav)  bottomNav.style.display  = '';
     if (navHome)    navHome.style.display    = canViewDashboard() ? '' : 'none';
-    if (navCash)    navCash.style.display    = currentWorkerName === 'Sasha Manager' ? '' : 'none';
+    if (navCash)    navCash.style.display    = (typeof canAccessPersonalCash === 'function' && canAccessPersonalCash()) ? '' : 'none';
     if (navProfile) navProfile.style.display = '';
     if (navClients) navClients.style.display = canViewClients() ? '' : 'none';
-    if (navWorkers) navWorkers.style.display = 'none';
+    if (navWorkers) navWorkers.style.display = canViewWorkers() ? '' : 'none';
     document.getElementById('app')?.classList.remove('no-navbar');
   } else {
-    // Специалисты: Записи + ЗП, касса только для старших
-    if (navClients) navClients.style.display = 'none';
-    if (navWorkers) navWorkers.style.display = 'none';
+    // Специалисты: показываем только то, что реально разрешено
+    if (navClients) navClients.style.display = canViewClients() ? '' : 'none';
+    if (navWorkers) navWorkers.style.display = canViewWorkers() ? '' : 'none';
     if (bottomNav) bottomNav.style.display = '';
-    if (navHome)   navHome.style.display   = 'none';
-    if (navCash)   navCash.style.display   = currentRole === 'junior' ? 'none' : '';
+    if (navHome)   navHome.style.display   = canViewDashboard() ? '' : 'none';
+    if (navCash)   navCash.style.display   = (typeof canAccessPersonalCash === 'function' && canAccessPersonalCash()) ? '' : 'none';
     if (navProfile) navProfile.style.display = '';
     document.getElementById('app')?.classList.remove('no-navbar');
   }
@@ -200,7 +200,7 @@ async function openOwnerCashScreen() {
 }
 
 async function openOwnerExpensesScreen() {
-  if (!canViewOwnerCash()) return;
+  if (!canViewOwnerExpenses()) return;
   try { window.allCashLog = await sbFetchAllCashLog(); } catch(e) { window.allCashLog = window.allCashLog || []; }
   renderOwnerExpensesScreen();
   showScreen('owner-expenses');
@@ -692,7 +692,7 @@ function renderHome() {
     `;
   }
 
-  if (currentRole === 'owner') {
+  if (canViewOwnerCash()) {
     const totalCash = getOwnerCurrentCashTotal();
     container.innerHTML += `
       <div class="home-card" onclick="openOwnerCashScreen()">
@@ -704,6 +704,9 @@ function renderHome() {
         <div class="home-card-count" style="font-size:22px; color: var(--accent);">${totalCash.toLocaleString('ru')} ₴</div>
       </div>
     `;
+  }
+
+  if (canViewOwnerExpenses()) {
     const expenseTotal = getOwnerExpenseLogs().reduce((sum, entry) => sum + getExpenseCashAmount(entry), 0);
     container.innerHTML += `
       <div class="home-card" onclick="openOwnerExpensesScreen()">
@@ -799,7 +802,7 @@ function renderHome() {
     `;
   }
 
-  if (currentRole === 'owner') {
+  if (canViewOwnerPayments()) {
     const paymentEntries = getOwnerPaymentEntries();
     const paymentsTotal = paymentEntries.reduce((sum, entry) => sum + entry.amount, 0);
     const paymentMethodsCount = new Set(paymentEntries.map(entry => entry.method)).size;
@@ -813,7 +816,9 @@ function renderHome() {
         <div class="home-card-count" style="font-size:22px; color: var(--accent);">${paymentsTotal.toLocaleString('ru')} ₴</div>
       </div>
     `;
+  }
 
+  if (canViewFinance()) {
     const salaryEntries = (typeof getFinanceSalaryEntries === 'function')
       ? getFinanceSalaryEntries()
       : ((typeof allSalaries !== 'undefined' && Array.isArray(allSalaries))
@@ -823,18 +828,19 @@ function renderHome() {
     const monthSalaryTotal = salaryEntries
       .filter(s => s.date && s.date.startsWith(currentYm))
       .reduce((sum, s) => sum + Number(s.amount), 0);
-    const anomaliesCount = (typeof getFinanceAnomalies === 'function') ? getFinanceAnomalies().length : 0;
     container.innerHTML += `
       <div class="home-card" onclick="openOwnerSalaryScreen()">
         <div class="home-card-icon-wrap home-card-icon-dim">
           <i data-lucide="wallet-cards" style="width:22px;height:22px;"></i>
         </div>
         <h3>ЗП</h3>
-        <p>${anomaliesCount > 0 ? `Аномалий: ${anomaliesCount}` : 'Проверка зарплат'}</p>
-        <div class="home-card-count" style="font-size:22px; color: ${anomaliesCount > 0 ? 'var(--red)' : 'var(--yellow)'};">${monthSalaryTotal.toLocaleString('ru')} ₴</div>
+        <p>Начислено за месяц</p>
+        <div class="home-card-count" style="font-size:22px; color: var(--yellow);">${monthSalaryTotal.toLocaleString('ru')} ₴</div>
       </div>
     `;
+  }
 
+  if (currentRole === 'owner') {
     container.innerHTML += `
       <div class="home-card" onclick="openCarDirectoryScreen()">
         <div class="home-card-icon-wrap home-card-icon-dim">
@@ -874,17 +880,17 @@ function getOwnerCashLogs(confirmFilter = ownerCashConfirmFilter) {
     .filter(entry => entry?.manual_payment !== true)
     .filter(entry => seniorNames.includes(entry.worker_name))
     .filter(entry => {
-      const account = String(entry?.cash_account || 'cash').toLowerCase();
+      const account = getCashEntryAccountType(entry);
       if (account === 'fop') return false;
       if (entry.worker_name === OWNER_PENDING_CASH_WORKER_NAME) {
-        return account === 'cash' && !!getPaymentMethodFromSourceKey(entry?.fop_source_key);
+        return account === 'cash' && !!getCashEntryPaymentMethod(entry);
       }
       return account === 'cash';
     })
     .filter(entry => {
       const isConfirmable = isConfirmableCashEntry(entry);
-      if (confirmFilter === 'confirmed') return !isConfirmable || entry.fop_confirmed === true;
-      if (confirmFilter === 'pending') return isConfirmable && entry.fop_confirmed !== true;
+      if (confirmFilter === 'confirmed') return !isConfirmable || getCashEntryApprovalStatus(entry) === 'confirmed';
+      if (confirmFilter === 'pending') return isConfirmable && getCashEntryApprovalStatus(entry) !== 'confirmed';
       return true;
     });
 }
@@ -1128,11 +1134,11 @@ function setOwnerCashSelectedWorker(workerName) {
 
 function getOwnerFopCashLogs(confirmFilter = ownerCashConfirmFilter) {
   return [...(window.allCashLog || [])]
-    .filter(entry => String(entry?.cash_account || '').toLowerCase() === 'fop')
+    .filter(entry => getCashEntryAccountType(entry) === 'fop')
     .filter(entry => entry.worker_name === 'Oleg Starshiy')
     .filter(entry => {
-      if (confirmFilter === 'confirmed') return entry.fop_confirmed === true;
-      if (confirmFilter === 'pending') return entry.fop_confirmed !== true;
+      if (confirmFilter === 'confirmed') return getCashEntryApprovalStatus(entry) === 'confirmed';
+      if (confirmFilter === 'pending') return getCashEntryApprovalStatus(entry) !== 'confirmed';
       return true;
     });
 }
@@ -1342,6 +1348,14 @@ function closeOwnerCashEntryModal() {
   document.getElementById('owner-cash-entry-modal')?.classList.remove('active');
 }
 
+async function refreshOwnerCashState() {
+  try {
+    window.allCashLog = await sbFetchAllCashLog();
+  } catch (e) {
+    console.warn('Failed to refresh owner cash log:', e);
+  }
+}
+
 async function saveOwnerCashEntry() {
   if (currentRole !== 'owner') return;
   const id = document.getElementById('owner-cash-entry-id')?.value || '';
@@ -1375,26 +1389,32 @@ async function saveOwnerCashEntry() {
   }
 
   try {
-    let saved;
     if (id) {
-      saved = await sbUpdateCashEntry(id, {
+      await sbUpdateCashEntry(id, {
         worker_name: workerName,
         amount,
         comment: finalComment,
+        cash_owner: workerName,
+        account_type: 'cash',
+        source_type: isExpense ? 'expense' : 'manual',
+        expense_category: expenseCategory || null,
+        warehouse_name: expenseWarehouse || null,
       });
-      const idx = (window.allCashLog || []).findIndex(entry => String(entry.id) === String(id));
-      if (idx !== -1) window.allCashLog[idx] = { ...window.allCashLog[idx], ...saved };
     } else {
-      saved = await sbInsertCashEntry({
+      await sbInsertCashEntry({
         worker_name: workerName,
         amount,
         comment: finalComment,
         cash_account: 'cash',
+        cash_owner: workerName,
+        account_type: 'cash',
+        source_type: isExpense ? 'expense' : 'manual',
+        expense_category: expenseCategory || null,
+        warehouse_name: expenseWarehouse || null,
       });
-      if (!Array.isArray(window.allCashLog)) window.allCashLog = [];
-      if (saved) window.allCashLog.unshift(saved);
     }
 
+    await refreshOwnerCashState();
     closeOwnerCashEntryModal();
     ownerCashSelectedWorker = workerName;
     renderOwnerCashScreen();
@@ -1479,6 +1499,7 @@ function renderOwnerEmployeeExpenseHistory(workerName, logs) {
             <div class="owner-cash-entry-row">
               <div class="owner-cash-entry-main">
                 <div class="owner-cash-entry-comment">${escapeHtml(comment)}</div>
+                ${renderOwnerCashEntryTags(entry)}
                 <div class="owner-cash-entry-meta">${time ? escapeHtml(time) : '—'}</div>
               </div>
               <div style="display:flex;align-items:center;gap:8px;">
@@ -1666,6 +1687,7 @@ function openOwnerDeletedCashModal() {
           <div class="owner-cash-entry-row">
             <div class="owner-cash-entry-main">
               <div class="owner-cash-entry-comment">${escapeHtml(getWorkerDisplayName(entry.worker_name) || entry.worker_name || '—')} · ${escapeHtml(getCashEntryDisplayComment(entry) || 'Без комментария')}</div>
+              ${renderOwnerCashEntryTags(entry)}
               <div class="owner-cash-entry-meta">Удалено: ${escapeHtml(deletedAt)}${entry.deleted_by ? ' · ' + escapeHtml(entry.deleted_by) : ''}</div>
             </div>
             <div style="display:flex;align-items:center;gap:8px;">
@@ -1818,10 +1840,10 @@ function renderOwnerEmployeeCashHistory(workerName, logs) {
           const time = getOwnerCashEntryTime(entry);
           const isCurrency = isCurrencyCashEntry(entry);
           const isConfirmable = isConfirmableCashEntry(entry);
-          const isPendingConfirm = isConfirmable && entry?.fop_confirmed !== true;
-          const account = String(entry?.cash_account || 'cash').toLowerCase();
-          const paymentMethod = getPaymentMethodFromSourceKey(entry?.fop_source_key);
-          const isConfirmedCard = entry?.fop_confirmed === true
+          const isPendingConfirm = isConfirmable && getCashEntryApprovalStatus(entry) !== 'confirmed';
+          const account = getCashEntryAccountType(entry);
+          const paymentMethod = getCashEntryPaymentMethod(entry);
+          const isConfirmedCard = getCashEntryApprovalStatus(entry) === 'confirmed'
             && account === 'cash'
             && paymentMethod
             && !isCashPaymentMethod(paymentMethod)
@@ -1833,6 +1855,7 @@ function renderOwnerEmployeeCashHistory(workerName, logs) {
             <div class="owner-cash-entry-row">
               <div class="owner-cash-entry-main">
                 <div class="owner-cash-entry-comment">${escapeHtml(comment)}${cardTag}</div>
+                ${renderOwnerCashEntryTags(entry)}
                 <div class="owner-cash-entry-meta">${time ? escapeHtml(time) : '—'}${extraMeta ? ' · ' + escapeHtml(extraMeta) : ''} ${renderOwnerCashEntryConfirmBadge(entry)}</div>
               </div>
               <div style="display:flex;align-items:center;gap:8px;">
@@ -1969,6 +1992,7 @@ function renderOwnerEmployeeFopCashHistory(logs) {
             <div class="owner-cash-entry-row">
               <div class="owner-cash-entry-main">
                 <div class="owner-cash-entry-comment">${escapeHtml(comment)}</div>
+                ${renderOwnerCashEntryTags(entry)}
                 <div class="owner-cash-entry-meta">${time ? escapeHtml(time) : '—'} ${renderOwnerCashEntryConfirmBadge(entry)}</div>
               </div>
               <div style="display:flex;align-items:center;gap:8px;">
@@ -2085,6 +2109,7 @@ function renderOwnerEmployeeCurrencyCashHistory(workerName, logs) {
             <div class="owner-cash-entry-row">
               <div class="owner-cash-entry-main">
                 <div class="owner-cash-entry-comment">${escapeHtml(title)}</div>
+                ${renderOwnerCashEntryTags(entry)}
                 <div class="owner-cash-entry-meta">${time ? escapeHtml(time) : '—'}${meta ? ' · ' + escapeHtml(meta) : ''}</div>
               </div>
               <div style="display:flex;align-items:center;gap:8px;">
@@ -2162,10 +2187,16 @@ function renderOwnerEmployeeCurrencyCashHistory(workerName, logs) {
 
 function renderOwnerCashEntryConfirmBadge(entry) {
   if (!isConfirmableCashEntry(entry)) return '';
-  const confirmed = entry?.fop_confirmed === true;
+  const confirmed = getCashEntryApprovalStatus(entry) === 'confirmed';
   const label = confirmed ? 'подтверждено' : 'ожидает подтверждения';
   const color = confirmed ? 'var(--accent)' : 'var(--yellow)';
   return `<span style="margin-left:6px;color:${color};font-weight:800;">${label}</span>`;
+}
+
+function renderOwnerCashEntryTags(entry, options = {}) {
+  const labels = getCashEntryTagLabels(entry, options);
+  if (!labels.length) return '';
+  return `<div class="cash-entry-tags">${labels.map(label => `<span class="cash-entry-tag">${escapeHtml(label)}</span>`).join('')}</div>`;
 }
 
 async function confirmOwnerCashEntry(id) {
@@ -2174,12 +2205,12 @@ async function confirmOwnerCashEntry(id) {
     const updated = await sbUpdateCashEntry(id, { fop_confirmed: true });
     if (Array.isArray(window.allCashLog)) {
       window.allCashLog = window.allCashLog.map(entry =>
-        entry.id === id ? { ...entry, ...updated, fop_confirmed: true } : entry
+        entry.id === id ? { ...entry, ...updated, fop_confirmed: true, approval_status: 'confirmed' } : entry
       );
     }
     renderOwnerCashScreen();
     renderOwnerExpensesScreen();
-    const paymentMethod = getPaymentMethodFromSourceKey(updated?.fop_source_key);
+    const paymentMethod = getCashEntryPaymentMethod(updated);
     if (paymentMethod) showToast(`Подтверждено: ${paymentMethod} ✓`);
     else showToast('Запись подтверждена ✓');
   } catch (e) {
@@ -2189,7 +2220,7 @@ async function confirmOwnerCashEntry(id) {
 
 function isOwnerFopPaymentEntryVisible(entry) {
   if (entry?.manual_payment === true) return false;
-  if (String(entry?.cash_account || '').toLowerCase() !== 'fop' || entry.fop_confirmed !== true) return false;
+  if (getCashEntryAccountType(entry) !== 'fop' || getCashEntryApprovalStatus(entry) !== 'confirmed') return false;
   const source = String(entry.fop_source_key || '');
   if (!source.startsWith('order:')) return true;
   const orderId = source.split(':')[1];
@@ -2306,8 +2337,8 @@ function getOwnerPaymentEntries() {
 
   (window.allCashLog || [])
     .filter(entry => {
-      const paymentMethod = getPaymentMethodFromSourceKey(entry?.fop_source_key);
-      if (String(entry?.cash_account || '').toLowerCase() !== 'cash' || entry.fop_confirmed !== true) return false;
+      const paymentMethod = getCashEntryPaymentMethod(entry);
+      if (getCashEntryAccountType(entry) !== 'cash' || getCashEntryApprovalStatus(entry) !== 'confirmed') return false;
       if (!isSashaManagerCardPaymentMethod(paymentMethod)) return false;
       return !String(entry.fop_source_key || '').startsWith('order:');
     })
@@ -2333,7 +2364,7 @@ function getOwnerPaymentEntries() {
         method: normalizeManualOwnerPaymentMethod(entry.manual_payment_method),
         date: _ownerCashEntryDate(entry),
         cashEntry: entry,
-        pendingConfirm: isConfirmableCashEntry(entry) && entry?.fop_confirmed !== true,
+        pendingConfirm: isConfirmableCashEntry(entry) && getCashEntryApprovalStatus(entry) !== 'confirmed',
       });
     });
 
@@ -2442,15 +2473,19 @@ async function saveOwnerManualPayment() {
   if (btn) { btn.disabled = true; btn.textContent = 'Запись...'; }
 
   try {
-    const entry = await sbInsertCashEntry({
+    await sbInsertCashEntry({
       worker_name: 'OWNER_PAYMENTS',
       amount,
       comment,
       cash_account: 'cash',
+      cash_owner: 'OWNER_PAYMENTS',
+      account_type: 'cash',
+      source_type: 'manual',
+      payment_method: method,
       manual_payment: true,
       manual_payment_method: method,
     });
-    if (Array.isArray(window.allCashLog) && entry) window.allCashLog.unshift(entry);
+    await refreshOwnerCashState();
     renderOwnerPaymentsScreen();
     showToast('Запись добавлена ✓');
   } catch (e) {
@@ -2653,6 +2688,7 @@ function renderOwnerPaymentsScreen() {
                     <span class="order-meta-item">${escapeHtml(cashEntry.worker_name || '—')}</span>
                     <span class="order-meta-item">${entry.title}</span>
                   </div>
+                  ${renderOwnerCashEntryTags(cashEntry, { includeOwner: true })}
                 </div>
               `;
             }
@@ -2671,6 +2707,7 @@ function renderOwnerPaymentsScreen() {
                     <span class="order-meta-item">${entry.title}</span>
                     <span class="order-meta-item">${escapeHtml(cashEntry.manual_payment_method || entry.method || '—')}</span>
                   </div>
+                  ${renderOwnerCashEntryTags(cashEntry, { includeOwner: true })}
                 </div>
               `;
             }
@@ -2689,6 +2726,7 @@ function renderOwnerPaymentsScreen() {
                     <span class="order-meta-item">${escapeHtml(cashEntry.worker_name || '—')}</span>
                     <span class="order-meta-item">${entry.title}</span>
                   </div>
+                  ${renderOwnerCashEntryTags(cashEntry, { includeOwner: true })}
                 </div>
               `;
             }
@@ -2817,7 +2855,7 @@ function renderOwnerCashScreen() {
     balance: Number(currencyBalances[name] || 0),
   }));
   const currentFopTotal = fopLogs
-    .filter(entry => entry.fop_confirmed === true)
+    .filter(entry => getCashEntryApprovalStatus(entry) === 'confirmed')
     .reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
   const currentCashTotal = currentCashRows.reduce((sum, row) => sum + row.balance, 0);
   const currentCurrencyTotal = currentCurrencyRows.reduce((sum, row) => sum + row.balance, 0);
