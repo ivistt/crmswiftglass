@@ -205,6 +205,7 @@ function getWarehouseTotalsColor(totals) {
 }
 
 function openWarehousesScreen() {
+  if (typeof canViewWarehouses === 'function' && !canViewWarehouses()) return;
   currentWarehouseFilter = null;
   renderWarehousesScreen();
   showScreen('warehouses');

@@ -1488,13 +1488,13 @@ function getPaymentMethodFromSourceKey(sourceKey) {
 function isConfirmableCashEntry(entry) {
   const account = String(entry?.cash_account || 'cash').toLowerCase();
   const paymentMethod = getPaymentMethodFromSourceKey(entry?.fop_source_key);
-  if (account !== CASH_ACCOUNT_CASH || !paymentMethod) return false;
-  return !isCashPaymentMethod(paymentMethod) && !isFopPaymentMethod(paymentMethod);
+  if ((account !== CASH_ACCOUNT_CASH && account !== CASH_ACCOUNT_FOP) || !paymentMethod) return false;
+  return !isCashPaymentMethod(paymentMethod);
 }
 
 function isConfirmablePaymentMethod(method) {
   const normalized = normalizePaymentMethod(method);
-  return !!normalized && !isCashPaymentMethod(normalized) && !isFopPaymentMethod(normalized);
+  return !!normalized && !isCashPaymentMethod(normalized);
 }
 
 function isOrderPaymentConfirmed(order, payment, paymentType = 'client') {
@@ -1540,7 +1540,7 @@ function getPaymentCashRoute(method, fallbackWorkerName = '') {
     return {
       workerName: 'Oleg Starshiy',
       cashAccount: CASH_ACCOUNT_FOP,
-      requiresConfirmation: false,
+      requiresConfirmation: true,
     };
   }
   if (isSashaManagerCardPaymentMethod(normalized)) {
@@ -1653,7 +1653,8 @@ function canViewWorkers()  { return currentRole === 'owner'; }
 function canDeleteOrder()  { return currentRole === 'owner' || currentRole === 'manager'; }
 function canViewFinance()  { return currentRole === 'owner'; }
 function canManageDropshippers() { return currentRole === 'owner' || currentWorkerName === 'Sasha Manager'; }
-function canViewDashboard() { return currentRole === 'owner' || canManageDropshippers(); }
+function canViewWarehouses() { return currentRole === 'owner' || currentRole === 'manager'; }
+function canViewDashboard() { return currentRole === 'owner' || currentRole === 'manager' || canManageDropshippers(); }
 function canViewOwnerCash() { return currentRole === 'owner'; }
 function canViewOwnerPayments() { return currentRole === 'owner'; }
 function canViewOwnerToday() { return currentRole === 'owner' || currentWorkerName === 'Sasha Manager'; }

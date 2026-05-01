@@ -58,6 +58,10 @@ const GLASS_MANUFACTURERS = [
     name: '🇵🇱Carlex',
     description: 'Средний сегмент (аналог)\nПольское производство, часто встречается в Европе',
   },
+  {
+    name: '🇹🇷🇪🇺GLAVISTA',
+    description: 'турецко-европейский производитель автостекла',
+  },
 ];
 const GLASS_MANUFACTURER_BY_NAME = Object.fromEntries(GLASS_MANUFACTURERS.map(item => [item.name, item]));
 

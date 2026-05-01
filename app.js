@@ -4,6 +4,7 @@
 
 let currentMonthFilter = null;
 let ownerPaymentFilters = { client: true, supplier: true, dropshipper: true, fop: true, manual: true };
+let ownerPaymentsConfirmFilter = 'all';
 let ownerCashSelectedWorker = '';
 let ownerExpenseSelectedWorker = '';
 let ownerCashCurrencyView = 'uah';
@@ -654,7 +655,7 @@ function renderHome() {
     `;
   }
 
-  if (canViewFinance()) {
+  if (canViewWarehouses()) {
     const debtOrders = orders.filter(o => typeof isWarehouseRelevantOrder === 'function'
       ? isWarehouseRelevantOrder(o)
       : (isOrderFinanciallyActive(o) && (o.supplierStatus === 'Не оплачено' || o.supplierStatus === 'Частично')));
@@ -2162,6 +2163,7 @@ function getOwnerPaymentEntries() {
           totalDue: clientTotal,
           progressLabel: 'Клиент оплатил',
           order,
+          pendingConfirm: !isOrderPaymentConfirmed(order, payment, 'client'),
         });
       });
     } else if (order.paymentMethod && getOrderClientPaidAmount(order) > 0) {
@@ -2178,6 +2180,7 @@ function getOwnerPaymentEntries() {
           totalDue: clientTotal,
           progressLabel: 'Клиент оплатил',
           order,
+          pendingConfirm: false,
         });
       }
     }
@@ -2199,6 +2202,7 @@ function getOwnerPaymentEntries() {
         totalDue: Number(order.purchase) || 0,
         progressLabel: 'Поставщику оплачено',
         order,
+        pendingConfirm: !isOrderPaymentConfirmed(order, payment, 'supplier'),
       });
     });
 
@@ -2219,6 +2223,7 @@ function getOwnerPaymentEntries() {
         totalDue: Number(order.dropshipperPayout) || 0,
         progressLabel: 'Дропшипперу выплачено',
         order,
+        pendingConfirm: !isOrderPaymentConfirmed(order, payment, 'dropshipper'),
       });
     });
   }
@@ -2233,6 +2238,7 @@ function getOwnerPaymentEntries() {
         method: 'БАБЕНКО',
         date: entry.fop_date || _ownerCashEntryDate(entry),
         cashEntry: entry,
+        pendingConfirm: false,
       });
     });
 
@@ -2251,6 +2257,7 @@ function getOwnerPaymentEntries() {
         method: 'Карта Саши',
         date: entry.fop_date || _ownerCashEntryDate(entry),
         cashEntry: entry,
+        pendingConfirm: false,
       });
     });
 
@@ -2264,6 +2271,7 @@ function getOwnerPaymentEntries() {
         method: normalizeManualOwnerPaymentMethod(entry.manual_payment_method),
         date: _ownerCashEntryDate(entry),
         cashEntry: entry,
+        pendingConfirm: isConfirmableCashEntry(entry) && entry?.fop_confirmed !== true,
       });
     });
 
@@ -2295,8 +2303,17 @@ function setOwnerPaymentFilter(type, checked) {
   renderOwnerPaymentsScreen();
 }
 
+function setOwnerPaymentsConfirmFilter(filter) {
+  ownerPaymentsConfirmFilter = filter === 'pending' ? 'pending' : 'all';
+  renderOwnerPaymentsScreen();
+}
+
 function renderOwnerPaymentFilters() {
   return `
+    <div class="owner-cash-confirm-filters" style="margin-bottom:10px;">
+      <button class="orders-tab ${ownerPaymentsConfirmFilter === 'all' ? 'active' : ''}" onclick="setOwnerPaymentsConfirmFilter('all')">Все оплаты</button>
+      <button class="orders-tab ${ownerPaymentsConfirmFilter === 'pending' ? 'active' : ''}" onclick="setOwnerPaymentsConfirmFilter('pending')">Ожидающие подтверждения</button>
+    </div>
     <div class="owner-payment-filters">
       <label class="checkbox order-flag-checkbox">
         <input type="checkbox" ${ownerPaymentFilters.client ? 'checked' : ''} onchange="setOwnerPaymentFilter('client', this.checked)">
@@ -2487,7 +2504,9 @@ function renderOwnerPaymentsScreen() {
   if (!container) return;
 
   const allPaymentEntries = getOwnerPaymentEntries();
-  const paymentEntries = allPaymentEntries.filter(entry => ownerPaymentFilters[entry.type]);
+  const paymentEntries = allPaymentEntries
+    .filter(entry => ownerPaymentFilters[entry.type])
+    .filter(entry => ownerPaymentsConfirmFilter === 'pending' ? entry.pendingConfirm === true : true);
 
   if (!allPaymentEntries.length) {
     container.innerHTML = `
@@ -2509,7 +2528,7 @@ function renderOwnerPaymentsScreen() {
       <div class="empty-state">
         <div class="empty-state-icon">${icon('credit-card')}</div>
         <h3>Нет записей по фильтру</h3>
-        <p>Включите приходы или расходы, чтобы увидеть движения оплат</p>
+        <p>${ownerPaymentsConfirmFilter === 'pending' ? 'Сейчас нет оплат, ожидающих подтверждения' : 'Включите приходы или расходы, чтобы увидеть движения оплат'}</p>
       </div>
     `;
     initIcons();
@@ -2752,7 +2771,7 @@ function renderOwnerCashScreen() {
     <div class="owner-cash-confirm-filters">
       <button class="orders-tab ${ownerCashConfirmFilter === 'all' ? 'active' : ''}" onclick="setOwnerCashConfirmFilter('all')">Все</button>
       <button class="orders-tab ${ownerCashConfirmFilter === 'confirmed' ? 'active' : ''}" onclick="setOwnerCashConfirmFilter('confirmed')">Подтверждено</button>
-      <button class="orders-tab ${ownerCashConfirmFilter === 'pending' ? 'active' : ''}" onclick="setOwnerCashConfirmFilter('pending')">Ожидает</button>
+      <button class="orders-tab ${ownerCashConfirmFilter === 'pending' ? 'active' : ''}" onclick="setOwnerCashConfirmFilter('pending')">Ожидающие подтверждения</button>
     </div>
   ` : '';
   const rowsHtml = rows.length
