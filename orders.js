@@ -465,7 +465,7 @@ function goBackFromOrdersList() {
     return;
   }
 
-  goHome();
+  goBackOrHome('home');
 }
 
 // ---------- РЕНДЕР КАРТОЧКИ ЗАКАЗА ----------

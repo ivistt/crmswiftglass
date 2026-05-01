@@ -14,6 +14,8 @@ let calendarCursorDate = new Date();
 let calendarWorkerFilters = [];
 let ownerTodayDateFilter = '';
 const THEME_STORAGE_KEY = 'crm_theme';
+let screenBackStack = [];
+let suppressScreenHistoryOnce = false;
 
 // Fallback если data.js старой версии (без carDirectory)
 if (typeof carDirectory === 'undefined') {
@@ -539,11 +541,23 @@ async function refreshOrders() {
 }
 
 // --- НАВИГАЦИЯ ---
-function showScreen(name) {
+function getActiveScreenName() {
+  const activeScreen = document.querySelector('.screen.active');
+  return String(activeScreen?.id || '').replace(/^screen-/, '');
+}
+
+function showScreen(name, options = {}) {
+  const skipHistory = !!options?.skipHistory || suppressScreenHistoryOnce === true;
+  suppressScreenHistoryOnce = false;
   const activeScreen = document.querySelector('.screen.active');
   const activeScreenId = activeScreen?.id || '';
   if (activeScreenId === 'screen-orders' && name !== 'orders') {
     if (typeof resetOrdersFilters === 'function') resetOrdersFilters();
+  }
+  const activeName = activeScreenId.replace(/^screen-/, '');
+  if (!skipHistory && activeName && activeName !== name) {
+    screenBackStack.push(activeName);
+    if (screenBackStack.length > 80) screenBackStack = screenBackStack.slice(-80);
   }
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   const el = document.getElementById('screen-' + name);
@@ -559,6 +573,54 @@ function updateHomeBackLabels() {
   document.querySelectorAll('[data-back-home-label]').forEach(el => {
     el.textContent = label;
   });
+}
+
+function runWithoutScreenHistory(fn) {
+  suppressScreenHistoryOnce = true;
+  try {
+    return fn();
+  } catch (e) {
+    suppressScreenHistoryOnce = false;
+    throw e;
+  }
+}
+
+function openScreenByName(name) {
+  const target = String(name || '').trim();
+  if (!target) return goHome();
+  return runWithoutScreenHistory(() => {
+    if (target === 'home') return goHome();
+    if (target === 'orders') return openOrdersScreen();
+    if (target === 'clients') return openClientsScreen();
+    if (target === 'workers') return openWorkersScreen();
+    if (target === 'cash') return openCashScreen();
+    if (target === 'profile') return openProfileScreen();
+    if (target === 'finance') return openFinanceScreen();
+    if (target === 'owner-cash') return openOwnerCashScreen();
+    if (target === 'owner-expenses') return openOwnerExpensesScreen();
+    if (target === 'owner-salary') return openOwnerSalaryScreen();
+    if (target === 'owner-payments') return openOwnerPaymentsScreen();
+    if (target === 'owner-today') return openOwnerTodayScreen();
+    if (target === 'calendar') return openCalendarScreen();
+    if (target === 'car-directory') return openCarDirectoryScreen();
+    if (target === 'warehouses') return openWarehousesScreen();
+    if (target === 'dropshippers') return openDropshippersScreen();
+    if (target === 'years' || target === 'months') return openOrdersScreen();
+    showScreen(target, { skipHistory: true });
+  });
+}
+
+function goBackOrHome(fallback = 'home') {
+  let target = '';
+  while (screenBackStack.length) {
+    const candidate = screenBackStack.pop();
+    if (!candidate) continue;
+    if (candidate === getActiveScreenName()) continue;
+    target = candidate;
+    break;
+  }
+  if (!target) target = fallback;
+  return openScreenByName(target || fallback);
 }
 
 function goHome() {
@@ -2869,12 +2931,11 @@ function setupMonthsActions() {
 function goBackFromOrder() {
   if (currentMonthFilter) {
     renderOrdersForMonth(currentMonthFilter);
-    showScreen('orders');
   } else {
     setupOrderActions();
     renderOrders();
-    showScreen('orders');
   }
+  goBackOrHome('orders');
 }
 
 function openClientsScreen() {
