@@ -713,6 +713,7 @@ function renderHome() {
   const container = document.getElementById('home-cards');
   container.classList.toggle('owner-dashboard-cards', currentRole === 'owner');
   container.innerHTML = '';
+  const dashboardOrdersCount = getHomeDashboardOrdersCount();
 
   // Карточка "Записи" — акцентная (бирюзовая)
   container.innerHTML += `
@@ -722,7 +723,7 @@ function renderHome() {
       </div>
       <h3>Записи</h3>
       <p>Заказы и работы</p>
-      <div class="home-card-count">${orders.length}</div>
+      <div class="home-card-count">${dashboardOrdersCount}</div>
     </div>
   `;
 
@@ -931,6 +932,24 @@ function renderHome() {
   }
 
   initIcons();
+}
+
+function getHomeDashboardOrdersCount() {
+  const list = Array.isArray(orders) ? orders : [];
+  if (currentRole === 'owner' || currentRole === 'manager') {
+    return list.length;
+  }
+  return list.filter(order => {
+    if (!order || order.isCancelled || isOrderDeleted(order)) return false;
+    if (!order.inWork || order.workerDone) return false;
+    if (currentWorkerName === 'Nastya') {
+      return true;
+    }
+    const isMainWorker = order.responsible === currentWorkerName || order.assistant === currentWorkerName;
+    const isAssignedSpecialist = getOrderSpecialServiceAssignedWorker(order, 'tatu') === currentWorkerName
+      || getOrderSpecialServiceAssignedWorker(order, 'toning') === currentWorkerName;
+    return isMainWorker || isAssignedSpecialist;
+  }).length;
 }
 
 function _ownerCashEntryDate(entry) {
