@@ -9,6 +9,12 @@ let ownerManualSalaryEntriesOpen = false;
 let ownerSalarySelectedWorker = '';
 let ownerSalaryMonthCursorMap = {};
 
+function getSalaryDeviationPct(manual, auto) {
+  const expected = Math.abs(Number(auto) || 0);
+  if (!expected) return 0;
+  return Math.abs((Number(manual) || 0) - expected) / expected;
+}
+
 function renderOwnerSystemBannerControls() {
   if (currentRole !== 'owner') return '';
   return `
@@ -315,7 +321,6 @@ async function renderFinance() {
         <i data-lucide="trash-2" style="width:14px;height:14px;"></i> Удалить выполненные
       </button>
     </div>
-    ${renderOwnerSystemBannerControls()}
     <div id="backup-history-wrap" style="margin-bottom:16px;">
       <div id="backup-history-bar" style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--surface2);border-radius:12px;cursor:pointer;border:1px solid var(--border);" onclick="toggleBackupHistory()">
         <span style="font-size:13px;font-weight:600;display:flex;align-items:center;gap:7px;">

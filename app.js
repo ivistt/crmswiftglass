@@ -278,6 +278,12 @@ async function openOwnerPaymentsScreen() {
   showScreen('owner-payments');
 }
 
+function openOwnerSettingsScreen() {
+  if (currentRole !== 'owner') return;
+  renderOwnerSettingsScreen();
+  showScreen('owner-settings');
+}
+
 function openOwnerTodayScreen() {
   if (!canViewOwnerToday()) return;
   ownerTodayDateFilter = ownerTodayDateFilter || getLocalDateString();
@@ -658,6 +664,7 @@ function openScreenByName(name) {
     if (target === 'owner-expenses') return openOwnerExpensesScreen();
     if (target === 'owner-salary') return openOwnerSalaryScreen();
     if (target === 'owner-payments') return openOwnerPaymentsScreen();
+    if (target === 'owner-settings') return openOwnerSettingsScreen();
     if (target === 'owner-today') return openOwnerTodayScreen();
     if (target === 'calendar') return openCalendarScreen();
     if (target === 'car-directory') return openCarDirectoryScreen();
@@ -899,6 +906,17 @@ function renderHome() {
   }
 
   if (currentRole === 'owner') {
+    container.innerHTML += `
+      <div class="home-card" onclick="openOwnerSettingsScreen()">
+        <div class="home-card-icon-wrap home-card-icon-dim">
+          <i data-lucide="settings" style="width:22px;height:22px;"></i>
+        </div>
+        <h3>Настройки</h3>
+        <p>Профиль и системные опции</p>
+        <div class="home-card-count" style="font-size:18px;">CRM</div>
+      </div>
+    `;
+
     container.innerHTML += `
       <div class="home-card" onclick="openCarDirectoryScreen()">
         <div class="home-card-icon-wrap home-card-icon-dim">
@@ -3048,6 +3066,26 @@ async function openWorkersScreen() {
   }
   renderWorkers();
   showScreen('workers');
+}
+
+function renderOwnerSettingsScreen() {
+  const container = document.getElementById('owner-settings-content');
+  if (!container) return;
+  const ownerWorker = (workers || []).find(worker => worker.name === currentWorkerName) || null;
+  container.innerHTML = `
+    <div class="owner-settings-profile-grid">
+      <div class="owner-settings-profile-item">
+        <div class="owner-settings-profile-label">Имя</div>
+        <div class="owner-settings-profile-value">${escapeHtml(ownerWorker?.name || currentWorkerName || '—')}</div>
+      </div>
+      <div class="owner-settings-profile-item">
+        <div class="owner-settings-profile-label">Должность</div>
+        <div class="owner-settings-profile-value">Владелец</div>
+      </div>
+    </div>
+    ${typeof renderOwnerSystemBannerControls === 'function' ? renderOwnerSystemBannerControls() : ''}
+  `;
+  initIcons();
 }
 
 function openCarDirectoryScreen() {

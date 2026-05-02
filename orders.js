@@ -86,9 +86,11 @@ function canMarkWorkerDone() {
 }
 
 function canQuickConfirmOrderAmounts(order) {
+  const isAssignedSpecialist = getOrderSpecialServiceAssignedWorker(order, 'tatu') === currentWorkerName
+    || getOrderSpecialServiceAssignedWorker(order, 'toning') === currentWorkerName;
   return currentUserHasPermission('order_payments_manage', currentUserCanActAsSenior())
     && currentUserCanActAsSenior()
-    && order?.responsible === currentWorkerName
+    && (order?.responsible === currentWorkerName || isAssignedSpecialist)
     && isOrderFinanciallyActive(order)
     && !order?.workerDone;
 }
@@ -135,7 +137,10 @@ function canCurrentUserManageOrderPayments(order) {
   }
   if (!order) return currentRole === 'owner' || currentRole === 'manager' || currentUserHasPermission('order_payments_manage', currentUserCanActAsSenior());
   if (currentRole === 'owner' || currentRole === 'manager') return true;
-  return currentUserHasPermission('order_payments_manage', currentUserCanActAsSenior()) && order.responsible === currentWorkerName;
+  const isAssignedSpecialist = getOrderSpecialServiceAssignedWorker(order, 'tatu') === currentWorkerName
+    || getOrderSpecialServiceAssignedWorker(order, 'toning') === currentWorkerName;
+  return currentUserHasPermission('order_payments_manage', currentUserCanActAsSenior())
+    && (order.responsible === currentWorkerName || isAssignedSpecialist);
 }
 
 function canCurrentUserEditOrderServices(order) {
@@ -2377,7 +2382,7 @@ async function persistImmediateOrderPaymentsUpdate({
   const confirmedClientPaid = sumConfirmedOrderPayments({ ...existingOrder, ...data }, data.clientPayments, 'client');
   const confirmedSupplierPaid = sumConfirmedOrderPayments({ ...existingOrder, ...data }, data.supplierPayments, 'supplier');
 
-  if ((currentRole === 'senior' || currentRole === 'owner') && cashSupplierDiff !== 0) {
+  if ((currentRole === 'owner' || canCurrentUserManageOrderPayments(data)) && cashSupplierDiff !== 0) {
     const amount = -cashSupplierDiff;
     const typeStr = cashSupplierDiff > 0 ? 'Списание' : 'Возврат';
     const fDate = data.date ? formatDate(data.date) : '—';
@@ -2393,7 +2398,7 @@ async function persistImmediateOrderPaymentsUpdate({
     });
   }
 
-  if ((currentRole === 'senior' || currentRole === 'owner') && cashClientDiff !== 0) {
+  if ((currentRole === 'owner' || canCurrentUserManageOrderPayments(data)) && cashClientDiff !== 0) {
     const typeStr = cashClientDiff > 0 ? 'Оплата клиента' : 'Возврат клиенту';
     const fDate = data.date ? formatDate(data.date) : '—';
     const fClient = data.client || '—';
@@ -2409,10 +2414,17 @@ async function persistImmediateOrderPaymentsUpdate({
 
   data.debt = confirmedClientPaid;
   data.check = confirmedSupplierPaid;
+  const paymentPatchOrder = {
+    id: editingOrderId,
+    clientPayments: data.clientPayments,
+    supplierPayments: data.supplierPayments,
+    debt: confirmedClientPaid,
+    check: confirmedSupplierPaid,
+  };
 
   const shouldUseSaveWithCash = cashEntries.length > 0;
   const saved = shouldUseSaveWithCash
-    ? (await sbSaveOrderWithCash(data, {
+    ? (await sbSaveOrderWithCash(paymentPatchOrder, {
         isNew: false,
         cashEntries,
         rollbackOrder: existingOrder,
