@@ -2423,19 +2423,27 @@ async function persistImmediateOrderPaymentsUpdate({
   };
 
   const shouldUseSaveWithCash = cashEntries.length > 0;
-  const saved = shouldUseSaveWithCash
-    ? (await sbSaveOrderWithCash(paymentPatchOrder, {
-        isNew: false,
-        cashEntries,
-        rollbackOrder: existingOrder,
-      })).order
-    : await sbPatchOrderFields(editingOrderId, {
-        client_payments: data.clientPayments,
-        supplier_payments: data.supplierPayments,
-        debt: confirmedClientPaid,
-        check_sum: confirmedSupplierPaid,
-      });
-  const refreshedOrder = await refreshImmediatePaymentState(editingOrderId, { refreshCash: shouldUseSaveWithCash });
+  let saved;
+  if (shouldUseSaveWithCash && currentRole === 'owner') {
+    saved = (await sbSaveOrderWithCash(paymentPatchOrder, {
+      isNew: false,
+      cashEntries,
+      rollbackOrder: existingOrder,
+    })).order;
+  } else {
+    saved = await sbPatchOrderFields(editingOrderId, {
+      client_payments: data.clientPayments,
+      supplier_payments: data.supplierPayments,
+      debt: confirmedClientPaid,
+      check_sum: confirmedSupplierPaid,
+    });
+    if (cashEntries.length) {
+      for (const entry of cashEntries) {
+        await sbInsertCashEntry(entry);
+      }
+    }
+  }
+  const refreshedOrder = await refreshImmediatePaymentState(editingOrderId, { refreshCash: cashEntries.length > 0 });
   const canonicalOrder = refreshedOrder || saved || orders.find(item => item.id === editingOrderId) || null;
   currentClientPayments = JSON.parse(JSON.stringify(canonicalOrder?.clientPayments || data.clientPayments || []));
   currentSupplierPayments = JSON.parse(JSON.stringify(canonicalOrder?.supplierPayments || data.supplierPayments || []));
