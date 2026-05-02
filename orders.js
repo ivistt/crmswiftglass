@@ -4113,6 +4113,14 @@ async function completeOrderFromModal() {
 
 // Начислить / удалить записи ЗП для всех участников заказа
 async function _upsertOrderSalaries(order) {
+  try {
+    if (typeof sbFetchWorkers === 'function') {
+      workers = await sbFetchWorkers();
+    }
+  } catch (e) {
+    console.warn('Failed to refresh workers before salary sync:', e);
+  }
+
   const amounts = {};
   const affectedWorkers = new Set();
 

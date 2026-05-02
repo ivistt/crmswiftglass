@@ -296,9 +296,6 @@ async function loadWorkers() {
         if (typeof updateNavbarVisibility === 'function') updateNavbarVisibility();
       }
     }
-    if (currentRole !== 'owner') {
-      workers = workers.map(worker => ({ ...worker, salaryFormula: '' }));
-    }
   } catch (e) {
     showToast('Ошибка загрузки сотрудников: ' + e.message, 'error');
   }
