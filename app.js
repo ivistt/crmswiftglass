@@ -14,9 +14,9 @@ let calendarCursorDate = new Date();
 let calendarWorkerFilters = [];
 let ownerTodayDateFilter = '';
 const THEME_STORAGE_KEY = 'crm_theme';
-const SYSTEM_BANNER_DISMISS_PREFIX = 'crm_system_banner_seen_';
 let screenBackStack = [];
 let suppressScreenHistoryOnce = false;
+const dismissedSystemBanners = new Set();
 const SYSTEM_BANNER_CONFIGS = [
   {
     key: 'tech_works_banner',
@@ -151,18 +151,12 @@ function getSystemBannerState(key) {
 
 function isSystemBannerVisible(config) {
   const state = getSystemBannerState(config.key);
-  if (!state?.enabled || !state?.version) return false;
-  try {
-    return localStorage.getItem(`${SYSTEM_BANNER_DISMISS_PREFIX}${config.key}`) !== String(state.version);
-  } catch (e) {
-    return true;
-  }
+  if (!state?.enabled) return false;
+  return !dismissedSystemBanners.has(String(config.key || ''));
 }
 
-function dismissSystemBanner(key, version) {
-  try {
-    localStorage.setItem(`${SYSTEM_BANNER_DISMISS_PREFIX}${key}`, String(version || ''));
-  } catch (e) {}
+function dismissSystemBanner(key) {
+  dismissedSystemBanners.add(String(key || ''));
   renderSystemBanners();
 }
 
@@ -183,7 +177,7 @@ function renderSystemBanners() {
           <div class="system-banner-title">${escapeHtml(config.title)}</div>
           <div class="system-banner-text">${escapeHtml(config.message)}</div>
         </div>
-        <button class="system-banner-close" onclick="dismissSystemBanner('${escapeAttr(config.key)}','${escapeAttr(state.version)}')" aria-label="Закрыть">×</button>
+        <button class="system-banner-close" onclick="dismissSystemBanner('${escapeAttr(config.key)}')" aria-label="Закрыть">×</button>
       </div>
     `;
   }).join('');
