@@ -2439,6 +2439,13 @@ input[type="datetime-local"] {
     width: 100%;
     justify-content: flex-start;
   }
+  .owner-banner-card {
+    flex-direction: column;
+  }
+  .owner-banner-card-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
 }
 
 .fin-section-title {
@@ -3259,6 +3266,106 @@ input[type="datetime-local"] {
   font-size: 11px;
   color: var(--text3);
   margin-top: 8px;
+}
+
+.system-banner-stack {
+  position: fixed;
+  top: 66px;
+  left: 12px;
+  right: 12px;
+  z-index: 140;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+.system-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #dc2626;
+  color: #fff;
+  box-shadow: var(--shadow-md);
+  pointer-events: auto;
+}
+.system-banner-body {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.system-banner-title {
+  font-size: 12px;
+  font-weight: 800;
+  margin-bottom: 2px;
+}
+.system-banner-text {
+  font-size: 12px;
+  line-height: 1.35;
+  color: rgba(255,255,255,0.96);
+}
+.system-banner-close {
+  border: 0;
+  background: rgba(255,255,255,0.12);
+  color: #fff;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.owner-banner-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.owner-banner-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface2);
+}
+.owner-banner-card-title {
+  font-size: 13px;
+  font-weight: 800;
+  margin-bottom: 3px;
+}
+.owner-banner-card-text {
+  font-size: 12px;
+  color: var(--text3);
+  line-height: 1.4;
+}
+.owner-banner-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.owner-banner-card-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text3);
+  font-size: 11px;
+  font-weight: 800;
+}
+.owner-banner-card-status.is-active {
+  color: var(--accent);
+  border-color: rgba(0,229,160,0.25);
+  background: var(--accent-dim);
 }
 
 .owner-today-summary {

@@ -14,8 +14,21 @@ let calendarCursorDate = new Date();
 let calendarWorkerFilters = [];
 let ownerTodayDateFilter = '';
 const THEME_STORAGE_KEY = 'crm_theme';
+const SYSTEM_BANNER_DISMISS_PREFIX = 'crm_system_banner_seen_';
 let screenBackStack = [];
 let suppressScreenHistoryOnce = false;
+const SYSTEM_BANNER_CONFIGS = [
+  {
+    key: 'tech_works_banner',
+    title: 'Технические работы',
+    message: 'Сейчас проводятся технические работы, если заметили ошибку - напишите в группу в телеге или Максу.',
+  },
+  {
+    key: 'restart_site_banner',
+    title: 'Перезапустите сайт',
+    message: 'Перезапустите сайт. Если Android - закройте приложение. Если iPhone - закройте и подождите 15 секунд.',
+  },
+];
 
 // Fallback если data.js старой версии (без carDirectory)
 if (typeof carDirectory === 'undefined') {
@@ -117,6 +130,7 @@ async function initApp() {
   }
   await Promise.all(tasks);
   updateNavbarVisibility();
+  renderSystemBanners();
   if (canViewDashboard()) {
     renderHome();
     showScreen('home');
@@ -129,6 +143,50 @@ async function initApp() {
     loader.classList.add('hiding');
     setTimeout(() => loader.remove(), 400);
   }
+}
+
+function getSystemBannerState(key) {
+  return appSettings?.[key] && typeof appSettings[key] === 'object' ? appSettings[key] : {};
+}
+
+function isSystemBannerVisible(config) {
+  const state = getSystemBannerState(config.key);
+  if (!state?.enabled || !state?.version) return false;
+  try {
+    return localStorage.getItem(`${SYSTEM_BANNER_DISMISS_PREFIX}${config.key}`) !== String(state.version);
+  } catch (e) {
+    return true;
+  }
+}
+
+function dismissSystemBanner(key, version) {
+  try {
+    localStorage.setItem(`${SYSTEM_BANNER_DISMISS_PREFIX}${key}`, String(version || ''));
+  } catch (e) {}
+  renderSystemBanners();
+}
+
+function renderSystemBanners() {
+  let stack = document.getElementById('system-banner-stack');
+  if (!stack) {
+    stack = document.createElement('div');
+    stack.id = 'system-banner-stack';
+    document.body.appendChild(stack);
+  }
+  const active = SYSTEM_BANNER_CONFIGS.filter(isSystemBannerVisible);
+  stack.innerHTML = active.map(config => {
+    const state = getSystemBannerState(config.key);
+    return `
+      <div class="system-banner">
+        <div class="system-banner-body">
+          <div class="system-banner-title">${escapeHtml(config.title)}</div>
+          <div class="system-banner-text">${escapeHtml(config.message)}</div>
+        </div>
+        <button class="system-banner-close" onclick="dismissSystemBanner('${escapeAttr(config.key)}','${escapeAttr(state.version)}')" aria-label="Закрыть">×</button>
+      </div>
+    `;
+  }).join('');
+  stack.style.display = active.length ? '' : 'none';
 }
 
 function updateNavbarVisibility() {

@@ -890,6 +890,13 @@ async function sbUpdateDropshipper(id, name, workerName = '') {
   });
 }
 
+async function sbUpsertAppSetting(key, valueJson) {
+  return sbCreateRef('ref_app_settings', {
+    key: String(key || '').trim(),
+    value_json: valueJson || {},
+  });
+}
+
 // -- CAR DIRECTORY --------------------------------------------------
 async function sbFetchCarDirectory() {
   const pageSize = 1000;
@@ -999,7 +1006,7 @@ async function sbUpsertManualClient(client) {
 
 async function loadRefData() {
   try {
-    const [cars, wh, eq, ps, part, ss, carDir, drops] = await Promise.all([
+    const [cars, wh, eq, ps, part, ss, carDir, drops, settingsRows] = await Promise.all([
       sbFetchRefOptional('ref_cars'),
       sbFetchRefOptional('ref_warehouses'),
       sbFetchRefOptional('ref_equipment'),
@@ -1008,6 +1015,7 @@ async function loadRefData() {
       sbFetchRefOptional('ref_supplier_statuses'),
       sbFetchCarDirectory().catch(() => []),
       sbFetchRefOptional('ref_dropshippers'),
+      sbFetchRefOptional('ref_app_settings'),
     ]);
     refCars             = carDir.length ? carDir : cars;
     refWarehouses       = wh;
@@ -1017,6 +1025,13 @@ async function loadRefData() {
     refSupplierStatuses = ss;
     carDirectory        = carDir;
     refDropshippers     = ensureBuiltInDropshippers(drops);
+    appSettings         = Array.isArray(settingsRows)
+      ? settingsRows.reduce((acc, row) => {
+          const key = String(row?.key || '').trim();
+          if (key) acc[key] = row?.value_json && typeof row.value_json === 'object' ? row.value_json : {};
+          return acc;
+        }, {})
+      : {};
   } catch (e) {
     showToast('Ошибка загрузки справочников: ' + e.message, 'error');
   }
@@ -2105,6 +2120,7 @@ let orders      = [];
 let refCars             = [];
 let refWarehouses       = [];
 let refDropshippers     = [];
+let appSettings         = {};
 let carDirectory        = []; // справочник авто
 let refEquipment        = [];
 let refPaymentStatuses  = [];

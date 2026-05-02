@@ -9,6 +9,60 @@ let ownerManualSalaryEntriesOpen = false;
 let ownerSalarySelectedWorker = '';
 let ownerSalaryMonthCursorMap = {};
 
+function renderOwnerSystemBannerControls() {
+  if (currentRole !== 'owner') return '';
+  return `
+    <div class="owner-banner-controls">
+      ${SYSTEM_BANNER_CONFIGS.map(config => {
+        const state = getSystemBannerState(config.key);
+        const isActive = !!state?.enabled;
+        return `
+          <div class="owner-banner-card">
+            <div>
+              <div class="owner-banner-card-title">${escapeHtml(config.title)}</div>
+              <div class="owner-banner-card-text">${escapeHtml(config.message)}</div>
+            </div>
+            <div class="owner-banner-card-actions">
+              <span class="owner-banner-card-status ${isActive ? 'is-active' : ''}">${isActive ? 'Включен' : 'Выключен'}</span>
+              <button class="btn-primary" style="min-height:36px;padding:0 12px;border-radius:8px;font-size:12px;font-weight:800;" onclick="launchOwnerSystemBanner('${financeEscapeAttr(config.key)}')">Запустить</button>
+              <button class="btn-secondary" style="min-height:36px;padding:0 12px;border-radius:8px;font-size:12px;font-weight:800;" onclick="stopOwnerSystemBanner('${financeEscapeAttr(config.key)}')">Выключить</button>
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+}
+
+async function launchOwnerSystemBanner(key) {
+  if (currentRole !== 'owner' || !key) return;
+  try {
+    const payload = { enabled: true, version: Date.now() };
+    await sbUpsertAppSetting(key, payload);
+    appSettings[key] = payload;
+    renderSystemBanners();
+    renderFinance();
+    showToast('Баннер запущен');
+  } catch (e) {
+    showToast('Ошибка запуска баннера: ' + e.message, 'error');
+  }
+}
+
+async function stopOwnerSystemBanner(key) {
+  if (currentRole !== 'owner' || !key) return;
+  try {
+    const current = getSystemBannerState(key);
+    const payload = { enabled: false, version: current?.version || Date.now() };
+    await sbUpsertAppSetting(key, payload);
+    appSettings[key] = payload;
+    renderSystemBanners();
+    renderFinance();
+    showToast('Баннер выключен');
+  } catch (e) {
+    showToast('Ошибка выключения баннера: ' + e.message, 'error');
+  }
+}
+
 function toggleOwnerPendingSalaryPanel() {
   ownerPendingSalaryOpen = !ownerPendingSalaryOpen;
   renderOwnerSalaryScreen();
@@ -261,6 +315,7 @@ async function renderFinance() {
         <i data-lucide="trash-2" style="width:14px;height:14px;"></i> Удалить выполненные
       </button>
     </div>
+    ${renderOwnerSystemBannerControls()}
     <div id="backup-history-wrap" style="margin-bottom:16px;">
       <div id="backup-history-bar" style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--surface2);border-radius:12px;cursor:pointer;border:1px solid var(--border);" onclick="toggleBackupHistory()">
         <span style="font-size:13px;font-weight:600;display:flex;align-items:center;gap:7px;">
