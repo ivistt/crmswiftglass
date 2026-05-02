@@ -730,9 +730,17 @@ function getOrderIdSortValue(order) {
 
 function renderOrderCardServices(order) {
   const services = getOrderServiceSelections(order?.serviceType);
-  if (!services.length) return '';
+  const extraPills = [];
+  if (order?.tatuResponsible && Number(order?.tatu) > 0) {
+    extraPills.push(`<span class="order-service-pill">Тату: ${escapeHtml(getWorkerDisplayName(order.tatuResponsible) || order.tatuResponsible)}</span>`);
+  }
+  if (order?.toningResponsible && Number(order?.toning) > 0 && !order?.toningExternal) {
+    extraPills.push(`<span class="order-service-pill">Тонировка: ${escapeHtml(getWorkerDisplayName(order.toningResponsible) || order.toningResponsible)}</span>`);
+  }
+  if (!services.length && !extraPills.length) return '';
   return '<div class="order-card-services">'
     + services.map(item => `<span class="order-service-pill">${escapeHtml(formatOrderServiceLabel(item.name, item.qty))}</span>`).join('')
+    + extraPills.join('')
     + '</div>';
 }
 
@@ -1355,6 +1363,8 @@ function openOrderDetail(id) {
         ${field(`${icon('wrench')} Доп. работы`, o.extraWork)}
         ${field(`${icon('hash')} Доп услуги`, o.tatu)}
         ${field('Тонировка', o.toning)}
+        ${field('Ответственный за тату', getWorkerDisplayName(o.tatuResponsible || ''))}
+        ${field('Ответственный за тонировку', getWorkerDisplayName(o.toningResponsible || ''))}
         ${o.toningExternal ? field('Тонировка внешняя', 'Да') : ''}
         ${field(`${icon('truck')} Доставка`, o.delivery ? o.delivery + ' ₴' : '')}
         ${isSpecialistDetail ? field(`${icon('handshake')} Дропшиппер`, o.dropshipper) : ''}
@@ -2916,6 +2926,8 @@ function renderOrderSummary(order = null) {
         ['Ответственный', formatOrderSummaryValue(getWorkerDisplayName(draftOrder.responsible || ''))],
         ['Помощник', formatOrderSummaryValue(getWorkerDisplayName(draftOrder.assistant || ''))],
         ['Менеджер', formatOrderSummaryValue(getWorkerDisplayName(draftOrder.manager || ''))],
+        ['Ответственный за тату', formatOrderSummaryValue(getWorkerDisplayName(draftOrder.tatuResponsible || ''))],
+        ['Ответственный за тонировку', formatOrderSummaryValue(getWorkerDisplayName(draftOrder.toningResponsible || ''))],
       ],
     },
     {
