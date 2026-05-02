@@ -275,7 +275,7 @@ function resolveWorkerPermissionState(workerLike) {
 }
 
 function getCurrentWorkerRecord() {
-  return (workers || []).find(item => item.name === currentWorkerName) || {
+  return (workers || []).find(item => item.name === currentWorkerName || item.alias === currentWorkerName) || {
     name: currentWorkerName,
     systemRole: currentRole,
     permissions: {},
@@ -307,10 +307,10 @@ function workerCanHandleSpecialService(workerLike, type) {
   if (!workerName) return false;
   const state = resolveWorkerPermissionState(worker || { name: workerName, permissions: {}, systemRole: '' });
   if (type === 'tatu') {
-    return !!state.special_service_tatu || workerName === 'Roma';
+    return !!state.special_service_tatu;
   }
   if (type === 'toning') {
-    return !!state.special_service_toning || workerName === 'Lyosha';
+    return !!state.special_service_toning;
   }
   return false;
 }
@@ -325,8 +325,7 @@ function getOrderSpecialServiceAssignedWorker(order, type) {
     ? String(order.tatuResponsible || '').trim()
     : String(order.toningResponsible || '').trim();
   const doneBy = type === 'tatu' ? String(order.tatuDoneBy || '').trim() : String(order.toningDoneBy || '').trim();
-  const legacyDefault = type === 'tatu' ? 'Roma' : 'Lyosha';
-  const candidates = [explicitAssigned, doneBy, order.responsible, order.assistant, legacyDefault].filter(Boolean);
+  const candidates = [explicitAssigned, doneBy].filter(Boolean);
   return candidates.find(name => workerCanHandleSpecialService(name, type)) || '';
 }
 
@@ -589,8 +588,13 @@ async function sbDeleteWorkerSalary(id) {
 
 async function sbFetchCashLog(workerName, deletedMode = 'active') {
   const mode = deletedMode === 'only' ? 'only' : deletedMode === 'all' ? 'all' : 'active';
+  const resolvedWorkerName = String(
+    (workers || []).find(item => item.name === workerName || item.alias === workerName)?.name
+    || workerName
+    || ''
+  ).trim();
   const res = await fetch(
-    `${WORKER_URL}/api/cash?worker=${encodeURIComponent(workerName)}&deleted=${encodeURIComponent(mode)}`,
+    `${WORKER_URL}/api/cash?worker=${encodeURIComponent(resolvedWorkerName)}&deleted=${encodeURIComponent(mode)}`,
     { headers: getHeaders() }
   );
   if (!res.ok) await throwApiError(res);
@@ -1715,11 +1719,6 @@ function _calcToningBonus(workerName, order) {
   return Math.round((Number(order.toning) || 0) * rule.toningBonusPct);
 }
 
-// Обратная совместимость — старое имя функции
-function _calcRomaTatuBonus(order) {
-  return _calcTatuBonus('Roma', order);
-}
-
 // ЗП менеджера: ставка + % от маржи стекла
 // Начисляется только если он указан в поле order.manager
 function _calcManagerSalary(order) {
@@ -2124,43 +2123,16 @@ function getOrderSupplierPaidAmount(order) {
 
 function getPaymentCashRoute(method, fallbackWorkerName = '') {
   const normalized = normalizePaymentMethod(method);
+  const targetWorkerName = fallbackWorkerName || currentWorkerName || '';
   if (isCashPaymentMethod(normalized)) {
     return {
-      workerName: fallbackWorkerName || currentWorkerName || '',
+      workerName: targetWorkerName,
       cashAccount: CASH_ACCOUNT_CASH,
       requiresConfirmation: false,
     };
   }
-  if (isFopPaymentMethod(normalized)) {
-    return {
-      workerName: 'Oleg Starshiy',
-      cashAccount: CASH_ACCOUNT_FOP,
-      requiresConfirmation: true,
-    };
-  }
-  if (isSashaManagerCardPaymentMethod(normalized)) {
-    return {
-      workerName: 'Sasha Manager',
-      cashAccount: CASH_ACCOUNT_CASH,
-      requiresConfirmation: true,
-    };
-  }
-  if (isOlegCardPaymentMethod(normalized)) {
-    return {
-      workerName: 'Oleg Starshiy',
-      cashAccount: CASH_ACCOUNT_CASH,
-      requiresConfirmation: true,
-    };
-  }
-  if (isOwnerCardPaymentMethod(normalized)) {
-    return {
-      workerName: OWNER_PENDING_CASH_WORKER_NAME,
-      cashAccount: CASH_ACCOUNT_CASH,
-      requiresConfirmation: true,
-    };
-  }
   return {
-    workerName: OWNER_PENDING_CASH_WORKER_NAME,
+    workerName: targetWorkerName,
     cashAccount: CASH_ACCOUNT_CASH,
     requiresConfirmation: true,
   };

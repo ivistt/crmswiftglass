@@ -1731,8 +1731,55 @@ function getNewOrderPaymentsDelta(oldPayments = [], newPayments = []) {
   return added;
 }
 
+function getCurrentCashWorkerNameForOrder(order = null) {
+  const currentWorkerRecord = (workers || []).find(worker =>
+    worker && (worker.name === currentWorkerName || worker.alias === currentWorkerName)
+  ) || null;
+  const currentWorkerCashName = currentWorkerRecord?.name || currentWorkerName;
+  return currentRole === 'owner'
+    ? (order?.responsible || currentWorkerCashName)
+    : currentWorkerCashName;
+}
+
+function buildNewCashPaymentEntries(order, oldOrder = null) {
+  const entries = [];
+  const targetWorker = getCurrentCashWorkerNameForOrder(order);
+  const clientDelta = getNewOrderPaymentsDelta(oldOrder?.clientPayments || [], order?.clientPayments || []);
+  const supplierDelta = getNewOrderPaymentsDelta(oldOrder?.supplierPayments || [], order?.supplierPayments || []);
+
+  clientDelta.forEach(payment => {
+    if (!isCashPaymentMethod(payment?.method)) return;
+    const fDate = payment?.date ? formatDate(payment.date) : (order?.date ? formatDate(order.date) : '—');
+    const fClient = order?.client || '—';
+    const fCar = order?.car || '—';
+    entries.push({
+      worker_name: targetWorker,
+      amount: Number(payment.amount) || 0,
+      comment: `Оплата клиента наличкой ${order?.id || '—'}, ${fDate}, клиент: ${fClient}, авто: ${fCar}`,
+      cashType: 'client',
+    });
+  });
+
+  supplierDelta.forEach(payment => {
+    if (!isCashPaymentMethod(payment?.method)) return;
+    const fDate = payment?.date ? formatDate(payment.date) : (order?.date ? formatDate(order.date) : '—');
+    const fTime = order?.time || '—';
+    const fClient = order?.client || '—';
+    const fCar = order?.car || '—';
+    entries.push({
+      worker_name: targetWorker,
+      amount: -(Number(payment.amount) || 0),
+      comment: `Списание за стекло ${order?.id || '—'}, ${fDate} ${fTime}, клиент: ${fClient}, авто: ${fCar}, склад: ${order?.warehouse || '—'}`,
+      cashType: 'supplier',
+    });
+  });
+
+  return entries;
+}
+
 function buildNewNonCashPaymentEntries(order, oldOrder = null) {
   const entries = [];
+  const currentWorkerCashName = getCurrentCashWorkerNameForOrder(order);
   const clientDelta = getNewOrderPaymentsDelta(oldOrder?.clientPayments || [], order?.clientPayments || []);
   const supplierDelta = getNewOrderPaymentsDelta(oldOrder?.supplierPayments || [], order?.supplierPayments || []);
 
@@ -1742,7 +1789,7 @@ function buildNewNonCashPaymentEntries(order, oldOrder = null) {
       order,
       payment,
       paymentType: 'client',
-      fallbackWorkerName: order?.responsible || currentWorkerName,
+      fallbackWorkerName: currentRole === 'owner' ? (order?.responsible || currentWorkerCashName) : currentWorkerCashName,
     });
     if (payload) entries.push(payload);
   });
@@ -1753,7 +1800,7 @@ function buildNewNonCashPaymentEntries(order, oldOrder = null) {
       order,
       payment,
       paymentType: 'supplier',
-      fallbackWorkerName: order?.responsible || currentWorkerName,
+      fallbackWorkerName: currentRole === 'owner' ? (order?.responsible || currentWorkerCashName) : currentWorkerCashName,
     });
     if (payload) entries.push(payload);
   });
@@ -2352,6 +2399,24 @@ async function refreshCashStateAfterServerSave() {
   }
 }
 
+function mergeCreatedCashEntriesIntoCurrentWorkerCash(createdEntries = []) {
+  if (!Array.isArray(createdEntries) || !createdEntries.length || typeof workerCashLog === 'undefined') return;
+  const currentWorker = typeof getCurrentWorkerRecord === 'function' ? getCurrentWorkerRecord() : null;
+  const labels = [currentWorkerName, currentWorker?.name, currentWorker?.alias]
+    .map(value => String(value || '').trim())
+    .filter(Boolean);
+  if (!labels.length) return;
+  const normalizedLabels = new Set(labels.map(value => value.toLowerCase()));
+  const shouldAttach = entry => {
+    const owner = String(getCashEntryOwner(entry) || '').trim().toLowerCase();
+    return owner && normalizedLabels.has(owner);
+  };
+  const existingIds = new Set((workerCashLog || []).map(entry => String(entry?.id || '')));
+  const additions = createdEntries.filter(entry => entry && shouldAttach(entry) && !existingIds.has(String(entry.id || '')));
+  if (!additions.length) return;
+  workerCashLog = [...additions, ...(workerCashLog || [])];
+}
+
 async function persistImmediateOrderPaymentsUpdate({
   clientPayments = currentClientPayments,
   supplierPayments = currentSupplierPayments,
@@ -2381,15 +2446,16 @@ async function persistImmediateOrderPaymentsUpdate({
   const cashEntries = [];
   const confirmedClientPaid = sumConfirmedOrderPayments({ ...existingOrder, ...data }, data.clientPayments, 'client');
   const confirmedSupplierPaid = sumConfirmedOrderPayments({ ...existingOrder, ...data }, data.supplierPayments, 'supplier');
+  const addedCashEntries = buildNewCashPaymentEntries(data, existingOrder);
 
-  if ((currentRole === 'owner' || canCurrentUserManageOrderPayments(data)) && cashSupplierDiff !== 0) {
+  if ((currentRole === 'owner' || canCurrentUserManageOrderPayments(data)) && cashSupplierDiff < 0) {
     const amount = -cashSupplierDiff;
     const typeStr = cashSupplierDiff > 0 ? 'Списание' : 'Возврат';
     const fDate = data.date ? formatDate(data.date) : '—';
     const fTime = data.time || '—';
     const fClient = data.client || '—';
     const fCar = data.car || '—';
-    const targetWorker = currentRole === 'owner' ? (data.responsible || currentWorkerName) : currentWorkerName;
+    const targetWorker = getCurrentCashWorkerNameForOrder(data);
     cashEntries.push({
       worker_name: targetWorker,
       amount,
@@ -2398,12 +2464,12 @@ async function persistImmediateOrderPaymentsUpdate({
     });
   }
 
-  if ((currentRole === 'owner' || canCurrentUserManageOrderPayments(data)) && cashClientDiff !== 0) {
+  if ((currentRole === 'owner' || canCurrentUserManageOrderPayments(data)) && cashClientDiff < 0) {
     const typeStr = cashClientDiff > 0 ? 'Оплата клиента' : 'Возврат клиенту';
     const fDate = data.date ? formatDate(data.date) : '—';
     const fClient = data.client || '—';
     const fCar = data.car || '—';
-    const targetWorker = currentRole === 'owner' ? (data.responsible || currentWorkerName) : currentWorkerName;
+    const targetWorker = getCurrentCashWorkerNameForOrder(data);
     cashEntries.push({
       worker_name: targetWorker,
       amount: cashClientDiff,
@@ -2411,6 +2477,9 @@ async function persistImmediateOrderPaymentsUpdate({
       cashType: 'client',
     });
   }
+
+  const nonCashEntries = buildNewNonCashPaymentEntries(data, existingOrder);
+  const allCashEntries = [...addedCashEntries, ...cashEntries, ...nonCashEntries];
 
   data.debt = confirmedClientPaid;
   data.check = confirmedSupplierPaid;
@@ -2422,26 +2491,29 @@ async function persistImmediateOrderPaymentsUpdate({
     check: confirmedSupplierPaid,
   };
 
-  const shouldUseSaveWithCash = cashEntries.length > 0 && (currentRole === 'owner' || currentRole === 'manager');
+  const shouldUseSaveWithCash = allCashEntries.length > 0 && (currentRole === 'owner' || currentRole === 'manager');
   let saved;
   if (shouldUseSaveWithCash) {
     saved = (await sbSaveOrderWithCash(paymentPatchOrder, {
       isNew: false,
-      cashEntries,
+      cashEntries: allCashEntries,
       rollbackOrder: existingOrder,
     })).order;
   } else {
+    const insertedCashEntries = [];
     saved = await sbPatchOrderFields(editingOrderId, {
       client_payments: data.clientPayments,
       supplier_payments: data.supplierPayments,
       debt: confirmedClientPaid,
       check_sum: confirmedSupplierPaid,
     });
-    for (const cashEntry of cashEntries) {
-      await sbInsertCashEntry(cashEntry);
+    for (const cashEntry of allCashEntries) {
+      const inserted = await sbInsertCashEntry(cashEntry);
+      if (inserted) insertedCashEntries.push(inserted);
     }
+    mergeCreatedCashEntriesIntoCurrentWorkerCash(insertedCashEntries);
   }
-  const refreshedOrder = await refreshImmediatePaymentState(editingOrderId, { refreshCash: cashEntries.length > 0 });
+  const refreshedOrder = await refreshImmediatePaymentState(editingOrderId, { refreshCash: allCashEntries.length > 0 });
   const canonicalOrder = refreshedOrder || saved || orders.find(item => item.id === editingOrderId) || null;
   currentClientPayments = JSON.parse(JSON.stringify(canonicalOrder?.clientPayments || data.clientPayments || []));
   currentSupplierPayments = JSON.parse(JSON.stringify(canonicalOrder?.supplierPayments || data.supplierPayments || []));
