@@ -1017,16 +1017,16 @@ function _filterSpecialistOrdersByTab(list) {
     : list.filter(o => _isCurrentWorkerOrder(o) && o.inWork && !o.isCancelled);
 
   if (currentWorkerTab === 'actual') {
-    return ownOrders.filter(o => !o.workerDone);
+    return ownOrders.filter(o => !o.workerDone && o.date === today);
   }
   if (currentWorkerTab === 'today') {
-    return ownOrders.filter(o => o.date === today);
+    return ownOrders.filter(o => !o.workerDone && o.date === today);
   }
   if (currentWorkerTab === 'done') {
     return ownOrders.filter(o => o.workerDone);
   }
   if (currentWorkerTab === 'future') {
-    return ownOrders.filter(o => o.date && o.date > today);
+    return ownOrders.filter(o => !o.workerDone && o.date && o.date > today);
   }
   if (currentWorkerTab === 'past') {
     return ownOrders.filter(o => !o.workerDone && o.date && o.date < today);
@@ -3609,7 +3609,7 @@ async function saveOrder() {
     assistant:       document.getElementById('f-assistant')?.value || '',
     manager:         document.getElementById('f-manager')?.value || '',
     priceLocked:     (currentRole === 'senior') ? true : (existingOrder ? existingOrder.priceLocked : false),
-    toningExternal:  document.getElementById('f-toning-external')?.checked || false,
+    toningExternal:  existingOrder ? !!existingOrder.toningExternal : false,
     marginTotal:     getN('f-margin-total'),
     payoutDropshipper:     getN('f-payout-dropshipper'),
     payoutManagerGlass:    getN('f-payout-manager-glass'),
