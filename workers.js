@@ -349,11 +349,11 @@ function renderWorkers() {
 // ── УТИЛИТЫ ──────────────────────────────────────────────────
 
 function escapeAttr(str) {
-  return (str || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+  return String(str ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
 }
 
 function escapeHtml(str) {
-  return (str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 // ── МОДАЛ ДОБАВЛЕНИЯ СОТРУДНИКА ──────────────────────────────

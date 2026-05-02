@@ -373,8 +373,8 @@ async function sbSaveOrderWithCash(o, { isNew = false, cashEntries = [], rollbac
     headers: getHeaders(),
     body: JSON.stringify({
       is_new: !!isNew,
-      order: orderToRow(o),
-      rollback_order: rollbackOrder ? orderToRow(rollbackOrder) : null,
+      order: orderToRowSparse(o),
+      rollback_order: rollbackOrder ? orderToRowSparse(rollbackOrder) : null,
       cash_entries: cashEntries,
     }),
   });
@@ -1225,6 +1225,92 @@ function orderToRow(o) {
     client_payments:  o.clientPayments || [],
     supplier_payments:o.supplierPayments || [],
   };
+}
+
+function orderToRowSparse(o) {
+  if (!o || typeof o !== 'object') return {};
+  const full = orderToRow(o);
+  const sparse = {};
+  const mapping = [
+    ['id', 'id'],
+    ['date', 'date'],
+    ['responsible', 'responsible'],
+    ['client', 'client'],
+    ['phone', 'phone'],
+    ['address', 'address'],
+    ['vin', 'vin'],
+    ['extraNote', 'extra_note'],
+    ['car', 'car'],
+    ['code', 'code'],
+    ['glassManufacturer', 'glass_manufacturer'],
+    ['notes', 'notes'],
+    ['mount', 'mount'],
+    ['serviceType', 'service_type'],
+    ['molding', 'molding'],
+    ['extraWork', 'extra_work'],
+    ['tatu', 'tatu'],
+    ['tatuDone', 'tatu_done'],
+    ['tatuDoneBy', 'tatu_done_by'],
+    ['toning', 'toning'],
+    ['toningDone', 'toning_done'],
+    ['toningDoneBy', 'toning_done_by'],
+    ['delivery', 'delivery'],
+    ['author', 'author'],
+    ['paymentStatus', 'payment_status'],
+    ['check', 'check_sum'],
+    ['debt', 'debt'],
+    ['debtDate', 'debt_date'],
+    ['total', 'total'],
+    ['moldingAuthor', 'molding_author'],
+    ['partner', 'partner'],
+    ['supplierStatus', 'supplier_status'],
+    ['purchase', 'purchase'],
+    ['income', 'income'],
+    ['remainder', 'remainder'],
+    ['paymentMethod', 'payment_method'],
+    ['warehouse', 'warehouse'],
+    ['warehouseCode', 'warehouse_code'],
+    ['newPost', 'new_post'],
+    ['configuration', 'configuration'],
+    ['tatuStatus', 'tatu_status'],
+    ['toningStatus', 'toning_status'],
+    ['dropshipper', 'drop_shipper'],
+    ['dropshipperPayout', 'drop_shipper_payout'],
+    ['dropshipperPayments', 'drop_shipper_payments'],
+    ['toningExternal', 'toning_external'],
+    ['marginTotal', 'margin_total'],
+    ['payoutManagerGlass', 'payout_manager_glass'],
+    ['payoutRespGlass', 'payout_resp_glass'],
+    ['payoutLesha', 'payout_lesha'],
+    ['payoutRoma', 'payout_roma'],
+    ['payoutExtraResp', 'payout_extra_resp'],
+    ['payoutExtraAssist', 'payout_extra_assist'],
+    ['payoutMoldingResp', 'payout_molding_resp'],
+    ['payoutMoldingAssist', 'payout_molding_assist'],
+    ['priceLocked', 'price_locked'],
+    ['time', 'time'],
+    ['statusDone', 'status_done'],
+    ['inWork', 'in_work'],
+    ['callStatus', 'call_status'],
+    ['ownWarehouse', 'own_warehouse'],
+    ['workerDone', 'worker_done'],
+    ['assistant', 'assistant'],
+    ['isCancelled', 'is_cancelled'],
+    ['manager', 'manager'],
+    ['onlySale', 'only_sale'],
+    ['reworkData', 'rework_data'],
+    ['priorityTask', 'rework_data'],
+    ['clientPayments', 'client_payments'],
+    ['supplierPayments', 'supplier_payments'],
+  ];
+
+  mapping.forEach(([sourceKey, rowKey]) => {
+    if (Object.prototype.hasOwnProperty.call(o, sourceKey)) {
+      sparse[rowKey] = full[rowKey];
+    }
+  });
+
+  return sparse;
 }
 
 function rowToWorker(r) {

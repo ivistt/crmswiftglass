@@ -171,6 +171,7 @@ function renderSystemBanners() {
   if (!stack) {
     stack = document.createElement('div');
     stack.id = 'system-banner-stack';
+    stack.className = 'system-banner-stack';
     document.body.appendChild(stack);
   }
   const active = SYSTEM_BANNER_CONFIGS.filter(isSystemBannerVisible);

@@ -2389,7 +2389,7 @@ async function persistImmediateOrderPaymentsUpdate({
     const fTime = data.time || '—';
     const fClient = data.client || '—';
     const fCar = data.car || '—';
-    const targetWorker = data.responsible || currentWorkerName;
+    const targetWorker = currentRole === 'owner' ? (data.responsible || currentWorkerName) : currentWorkerName;
     cashEntries.push({
       worker_name: targetWorker,
       amount,
@@ -2403,7 +2403,7 @@ async function persistImmediateOrderPaymentsUpdate({
     const fDate = data.date ? formatDate(data.date) : '—';
     const fClient = data.client || '—';
     const fCar = data.car || '—';
-    const targetWorker = data.responsible || currentWorkerName;
+    const targetWorker = currentRole === 'owner' ? (data.responsible || currentWorkerName) : currentWorkerName;
     cashEntries.push({
       worker_name: targetWorker,
       amount: cashClientDiff,
@@ -2422,9 +2422,9 @@ async function persistImmediateOrderPaymentsUpdate({
     check: confirmedSupplierPaid,
   };
 
-  const shouldUseSaveWithCash = cashEntries.length > 0;
+  const shouldUseSaveWithCash = cashEntries.length > 0 && (currentRole === 'owner' || currentRole === 'manager');
   let saved;
-  if (shouldUseSaveWithCash && currentRole === 'owner') {
+  if (shouldUseSaveWithCash) {
     saved = (await sbSaveOrderWithCash(paymentPatchOrder, {
       isNew: false,
       cashEntries,
@@ -2437,10 +2437,8 @@ async function persistImmediateOrderPaymentsUpdate({
       debt: confirmedClientPaid,
       check_sum: confirmedSupplierPaid,
     });
-    if (cashEntries.length) {
-      for (const entry of cashEntries) {
-        await sbInsertCashEntry(entry);
-      }
+    for (const cashEntry of cashEntries) {
+      await sbInsertCashEntry(cashEntry);
     }
   }
   const refreshedOrder = await refreshImmediatePaymentState(editingOrderId, { refreshCash: cashEntries.length > 0 });
