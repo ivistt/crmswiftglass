@@ -321,15 +321,14 @@ function renderCashScreen() {
   const nonFopCashLog = (workerCashLog || []).filter(entry => !isFopCashEntry(entry));
   const currencyCashLog = nonFopCashLog.filter(isCurrencyCashEntry);
   const fopCashLog = (workerCashLog || []).filter(isFopCashEntry);
-  const olegCardCashLog = (workerCashLog || []).filter(isOlegCardCashEntry);
+  const pendingPersonalCashLog = (workerCashLog || []).filter(isPendingPersonalConfirmableCashEntry);
   const confirmedUnifiedCashLog = nonFopCashLog.filter(entry => {
     if (isCurrencyCashEntry(entry) && !isCurrencyCashTransferEntry(entry)) return false;
-    if (isOlegCardCashEntry(entry)) return getCashEntryApprovalStatus(entry) === 'confirmed';
+    if (isPendingPersonalConfirmableCashEntry(entry)) return false;
     return true;
   });
   const confirmedFopCashLog = fopCashLog.filter(entry => getCashEntryApprovalStatus(entry) === 'confirmed');
   const pendingFopCashLog = fopCashLog.filter(entry => getCashEntryApprovalStatus(entry) !== 'confirmed');
-  const pendingOlegCardCashLog = olegCardCashLog.filter(entry => getCashEntryApprovalStatus(entry) !== 'confirmed');
   const balance = calcCashBalance(confirmedUnifiedCashLog);
   const currencyBalance = calcCurrencyCashBalance(currencyCashLog);
   const fopBalance = calcCashBalance(confirmedFopCashLog);
@@ -344,15 +343,12 @@ function renderCashScreen() {
       title: 'Касса (наличка)',
       account: 'cash',
       buttonText: '+ Запись',
+      pendingEntries: pendingPersonalCashLog,
       extraButtonsHtml: '<button class="btn-secondary" style="font-size:12px;padding:6px 10px;" onclick="openCashEntryModal(\'currency-back\')">Из $</button>'
     })
     + renderCurrencyCashSection(currencyCashLog, currencyBalance, today)
     + (currentWorkerName === FOP_CASH_WORKER_NAME
       ? renderCashSection(confirmedFopCashLog, fopBalance, today, { title: 'Касса БАБЕНКО', account: 'fop', buttonText: '+ БАБЕНКО', pendingEntries: pendingFopCashLog })
-        + (pendingOlegCardCashLog.length ? renderFopPendingEntries(pendingOlegCardCashLog, {
-          pendingLabel: 'ОЖИДАЮТ ПОДТВЕРЖДЕНИЯ ПО КАРТЕ',
-          defaultPendingComment: 'КАРТА ОЛЕГ',
-        }) : '')
       : '')
     + renderWorkerDropshipperCashSection();
 
@@ -764,15 +760,19 @@ function isConfirmedFopCashEntry(entry) {
   return isFopCashEntry(entry) && getCashEntryApprovalStatus(entry) === 'confirmed';
 }
 
+function isPendingPersonalConfirmableCashEntry(entry) {
+  if (!entry || isCurrencyCashEntry(entry)) return false;
+  return isConfirmableCashEntry(entry) && getCashEntryApprovalStatus(entry) !== 'confirmed';
+}
+
 function renderManagerCashSections() {
   const today = getLocalDateString();
   const nonFopCashLog = (workerCashLog || []).filter(entry => !isFopCashEntry(entry));
   const currencyCashLog = nonFopCashLog.filter(isCurrencyCashEntry);
-  const cardCashLog = (workerCashLog || []).filter(isManagerCardCashEntry);
-  const pendingCardCashLog = cardCashLog.filter(entry => getCashEntryApprovalStatus(entry) !== 'confirmed');
+  const pendingCardCashLog = (workerCashLog || []).filter(isPendingPersonalConfirmableCashEntry);
   const confirmedUnifiedCashLog = nonFopCashLog.filter(entry => {
     if (isCurrencyCashEntry(entry) && !isCurrencyCashTransferEntry(entry)) return false;
-    if (isManagerCardCashEntry(entry)) return getCashEntryApprovalStatus(entry) === 'confirmed';
+    if (isPendingPersonalConfirmableCashEntry(entry)) return false;
     return true;
   });
   return renderCashSection(confirmedUnifiedCashLog, calcCashBalance(confirmedUnifiedCashLog), today, {
@@ -781,8 +781,8 @@ function renderManagerCashSections() {
       buttonText: '+ Запись',
   }) + renderCurrencyCashSection(currencyCashLog, calcCurrencyCashBalance(currencyCashLog), today)
     + (pendingCardCashLog.length ? renderFopPendingEntries(pendingCardCashLog, {
-      pendingLabel: 'ОЖИДАЮТ ПОДТВЕРЖДЕНИЯ ПО КАРТЕ',
-      defaultPendingComment: 'КАРТА САША',
+      pendingLabel: 'ОЖИДАЮТ ПОДТВЕРЖДЕНИЯ',
+      defaultPendingComment: 'ОЖИДАЕТ ПОДТВЕРЖДЕНИЯ',
     }) : '');
 }
 
@@ -942,12 +942,12 @@ function renderFopPendingEntries(entries, options = {}) {
     const amount = Number(entry.amount) || 0;
     const sign = amount >= 0 ? '+' : '';
     const color = amount >= 0 ? 'var(--accent)' : '#ef4444';
-    return '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);">'
-      + '<div style="min-width:0;">'
+    return '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:10px 0;border-bottom:1px solid var(--border);">'
+      + '<div style="min-width:0;flex:1 1 220px;">'
       + '<div style="font-size:13px;color:var(--text2);font-weight:700;">' + escapeHtml(entry.comment || defaultComment) + '</div>'
       + '<div style="font-size:11px;color:var(--text3);margin-top:2px;">' + escapeHtml(entry.fop_date || _cashEntryDate(entry) || '') + '</div>'
       + '</div>'
-      + '<div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">'
+      + '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end;flex:1 1 180px;">'
       + '<div style="font-size:15px;font-weight:900;color:' + color + ';white-space:nowrap;">' + sign + amount.toLocaleString('ru') + ' \u20B4</div>'
       + '<button class="btn-primary" style="min-height:34px;padding:0 12px;border-radius:8px;font-size:12px;font-weight:800;" onclick="confirmFopCashEntry(\'' + escapeJsString(entry.id) + '\')">Подтвердить</button>'
       + '</div>'

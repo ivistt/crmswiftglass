@@ -385,6 +385,15 @@ async function sbSaveOrderWithCash(o, { isNew = false, cashEntries = [], rollbac
   };
 }
 
+async function sbBackfillOrderCashEntries() {
+  const res = await fetch(`${WORKER_URL}/api/admin/backfill-order-cash`, {
+    method: 'POST',
+    headers: getHeaders(),
+  });
+  if (!res.ok) await throwApiError(res);
+  return res.json();
+}
+
 async function sbPatchOrderFields(id, fields) {
   const res = await fetch(`${WORKER_URL}/api/orders/${encodeURIComponent(id)}`, {
     method: 'PATCH',
@@ -636,6 +645,16 @@ async function sbDeleteCashEntry(id) {
     headers: getHeaders(),
   });
   if (!res.ok) await throwApiError(res);
+}
+
+async function sbDeleteCashEntriesBySourceKeys(sourceKeys = []) {
+  const res = await fetch(`${WORKER_URL}/api/cash/delete-by-source-keys`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ source_keys: sourceKeys }),
+  });
+  if (!res.ok) await throwApiError(res);
+  return res.json();
 }
 
 const FX_USD_CASH_PREFIX = 'FXUSD|';
@@ -2101,6 +2120,15 @@ function isOrderPaymentConfirmed(order, payment, paymentType = 'client') {
   );
 }
 
+function getOrderPaymentCashEntry(order, payment, paymentType = 'client') {
+  const method = normalizePaymentMethod(payment?.method || '');
+  if (!method || !isConfirmablePaymentMethod(method)) return null;
+  const sourceKey = buildPaymentSourceKey(order?.id || '', method, paymentType, payment);
+  return Array.isArray(window.allCashLog)
+    ? (window.allCashLog.find(entry => String(entry?.fop_source_key || '') === sourceKey) || null)
+    : null;
+}
+
 function sumConfirmedOrderPayments(order, payments = [], paymentType = 'client') {
   return (payments || []).reduce((sum, payment) => {
     const amount = Number(payment?.amount) || 0;
@@ -2129,6 +2157,34 @@ function getPaymentCashRoute(method, fallbackWorkerName = '') {
       workerName: targetWorkerName,
       cashAccount: CASH_ACCOUNT_CASH,
       requiresConfirmation: false,
+    };
+  }
+  if (isOwnerCardPaymentMethod(normalized)) {
+    return {
+      workerName: OWNER_PENDING_CASH_WORKER_NAME,
+      cashAccount: CASH_ACCOUNT_CASH,
+      requiresConfirmation: true,
+    };
+  }
+  if (isSashaManagerCardPaymentMethod(normalized)) {
+    return {
+      workerName: 'Sasha Manager',
+      cashAccount: CASH_ACCOUNT_CASH,
+      requiresConfirmation: true,
+    };
+  }
+  if (isOlegCardPaymentMethod(normalized)) {
+    return {
+      workerName: 'Oleg Starshiy',
+      cashAccount: CASH_ACCOUNT_CASH,
+      requiresConfirmation: true,
+    };
+  }
+  if (isFopPaymentMethod(normalized)) {
+    return {
+      workerName: 'Oleg Starshiy',
+      cashAccount: CASH_ACCOUNT_FOP,
+      requiresConfirmation: true,
     };
   }
   return {

@@ -1017,7 +1017,7 @@ function _filterSpecialistOrdersByTab(list) {
     : list.filter(o => _isCurrentWorkerOrder(o) && o.inWork && !o.isCancelled);
 
   if (currentWorkerTab === 'actual') {
-    return ownOrders.filter(o => !o.workerDone && o.date === today);
+    return ownOrders.filter(o => !o.workerDone);
   }
   if (currentWorkerTab === 'today') {
     return ownOrders.filter(o => !o.workerDone && o.date === today);
@@ -1731,6 +1731,44 @@ function getNewOrderPaymentsDelta(oldPayments = [], newPayments = []) {
   return added;
 }
 
+function getRemovedOrderPaymentsDelta(oldPayments = [], newPayments = []) {
+  const seen = new Map();
+  (newPayments || []).forEach(payment => {
+    const key = getOrderPaymentSignature(payment);
+    seen.set(key, (seen.get(key) || 0) + 1);
+  });
+  const removed = [];
+  (oldPayments || []).forEach(payment => {
+    const key = getOrderPaymentSignature(payment);
+    const left = seen.get(key) || 0;
+    if (left > 0) {
+      seen.set(key, left - 1);
+      return;
+    }
+    removed.push(payment);
+  });
+  return removed;
+}
+
+function getRemovedOrderPaymentsDelta(oldPayments = [], newPayments = []) {
+  const seen = new Map();
+  (newPayments || []).forEach(payment => {
+    const key = getOrderPaymentSignature(payment);
+    seen.set(key, (seen.get(key) || 0) + 1);
+  });
+  const removed = [];
+  (oldPayments || []).forEach(payment => {
+    const key = getOrderPaymentSignature(payment);
+    const left = seen.get(key) || 0;
+    if (left > 0) {
+      seen.set(key, left - 1);
+      return;
+    }
+    removed.push(payment);
+  });
+  return removed;
+}
+
 function getCurrentCashWorkerNameForOrder(order = null) {
   const currentWorkerRecord = (workers || []).find(worker =>
     worker && (worker.name === currentWorkerName || worker.alias === currentWorkerName)
@@ -1752,10 +1790,16 @@ function buildNewCashPaymentEntries(order, oldOrder = null) {
     const fDate = payment?.date ? formatDate(payment.date) : (order?.date ? formatDate(order.date) : '—');
     const fClient = order?.client || '—';
     const fCar = order?.car || '—';
+    const sourceKey = buildPaymentSourceKey(order?.id || '', payment?.method || '', 'client', payment);
     entries.push({
       worker_name: targetWorker,
       amount: Number(payment.amount) || 0,
       comment: `Оплата клиента наличкой ${order?.id || '—'}, ${fDate}, клиент: ${fClient}, авто: ${fCar}`,
+      fop_source_key: sourceKey,
+      fop_date: payment?.date || order?.date || null,
+      payment_method: normalizePaymentMethod(payment?.method || ''),
+      order_id: order?.id || null,
+      source_type: 'order',
       cashType: 'client',
     });
   });
@@ -1766,10 +1810,16 @@ function buildNewCashPaymentEntries(order, oldOrder = null) {
     const fTime = order?.time || '—';
     const fClient = order?.client || '—';
     const fCar = order?.car || '—';
+    const sourceKey = buildPaymentSourceKey(order?.id || '', payment?.method || '', 'supplier', payment);
     entries.push({
       worker_name: targetWorker,
       amount: -(Number(payment.amount) || 0),
       comment: `Списание за стекло ${order?.id || '—'}, ${fDate} ${fTime}, клиент: ${fClient}, авто: ${fCar}, склад: ${order?.warehouse || '—'}`,
+      fop_source_key: sourceKey,
+      fop_date: payment?.date || order?.date || null,
+      payment_method: normalizePaymentMethod(payment?.method || ''),
+      order_id: order?.id || null,
+      source_type: 'order',
       cashType: 'supplier',
     });
   });
@@ -1806,6 +1856,22 @@ function buildNewNonCashPaymentEntries(order, oldOrder = null) {
   });
 
   return entries;
+}
+
+function getRemovedPaymentSourceKeys(order, oldOrder = null) {
+  const sourceKeys = [];
+  const orderId = order?.id || oldOrder?.id || '';
+  getRemovedOrderPaymentsDelta(oldOrder?.clientPayments || [], order?.clientPayments || []).forEach(payment => {
+    const method = normalizePaymentMethod(payment?.method || '');
+    if (!method) return;
+    sourceKeys.push(buildPaymentSourceKey(orderId, method, 'client', payment));
+  });
+  getRemovedOrderPaymentsDelta(oldOrder?.supplierPayments || [], order?.supplierPayments || []).forEach(payment => {
+    const method = normalizePaymentMethod(payment?.method || '');
+    if (!method) return;
+    sourceKeys.push(buildPaymentSourceKey(orderId, method, 'supplier', payment));
+  });
+  return Array.from(new Set(sourceKeys.filter(Boolean)));
 }
 
 async function addCashEntriesForDuplicatedOrder(order) {
@@ -2479,6 +2545,7 @@ async function persistImmediateOrderPaymentsUpdate({
   }
 
   const nonCashEntries = buildNewNonCashPaymentEntries(data, existingOrder);
+  const removedSourceKeys = getRemovedPaymentSourceKeys(data, existingOrder);
   const allCashEntries = [...addedCashEntries, ...cashEntries, ...nonCashEntries];
 
   data.debt = confirmedClientPaid;
@@ -2512,6 +2579,9 @@ async function persistImmediateOrderPaymentsUpdate({
       if (inserted) insertedCashEntries.push(inserted);
     }
     mergeCreatedCashEntriesIntoCurrentWorkerCash(insertedCashEntries);
+  }
+  if (removedSourceKeys.length) {
+    await sbDeleteCashEntriesBySourceKeys(removedSourceKeys);
   }
   const refreshedOrder = await refreshImmediatePaymentState(editingOrderId, { refreshCash: allCashEntries.length > 0 });
   const canonicalOrder = refreshedOrder || saved || orders.find(item => item.id === editingOrderId) || null;
