@@ -136,6 +136,9 @@ function getFriendlyApiErrorMessage(raw, status = 0) {
   let code = text;
   try {
     const parsed = JSON.parse(text);
+    if (parsed?.telegram_response) {
+      return `Telegram: ${parsed.telegram_response}`;
+    }
     code = parsed?.error || parsed?.message || text;
   } catch (e) {
     // plain text response
@@ -190,30 +193,39 @@ function parseWorkerNoteMeta(rawNote) {
   const source = String(rawNote || '');
   const start = source.indexOf(WORKER_PERMISSIONS_META_PREFIX);
   if (start === -1) {
-    return { note: source.trim(), permissions: {} };
+    return { note: source.trim(), permissions: {}, telegramNick: '' };
   }
   const end = source.indexOf(WORKER_PERMISSIONS_META_SUFFIX, start);
   if (end === -1) {
-    return { note: source.trim(), permissions: {} };
+    return { note: source.trim(), permissions: {}, telegramNick: '' };
   }
   const encoded = source.slice(start + WORKER_PERMISSIONS_META_PREFIX.length, end);
   const note = (source.slice(0, start) + source.slice(end + WORKER_PERMISSIONS_META_SUFFIX.length)).trim();
   try {
     const decoded = JSON.parse(atob(encoded));
+    const meta = decoded && typeof decoded === 'object' && !Array.isArray(decoded) ? decoded : {};
+    const isLegacyPermissionsOnly = !Object.prototype.hasOwnProperty.call(meta, 'permissions') && !Object.prototype.hasOwnProperty.call(meta, 'telegramNick');
     return {
       note,
-      permissions: decoded && typeof decoded === 'object' && !Array.isArray(decoded) ? decoded : {},
+      permissions: isLegacyPermissionsOnly
+        ? meta
+        : ((meta.permissions && typeof meta.permissions === 'object' && !Array.isArray(meta.permissions)) ? meta.permissions : {}),
+      telegramNick: String(isLegacyPermissionsOnly ? '' : (meta.telegramNick || '')).trim().replace(/^@+/, ''),
     };
   } catch (e) {
-    return { note, permissions: {} };
+    return { note, permissions: {}, telegramNick: '' };
   }
 }
 
-function buildWorkerNoteWithMeta(note, permissions) {
+function buildWorkerNoteWithMeta(note, permissions, telegramNick = '') {
   const cleanNote = String(note || '').trim();
   const cleanPermissions = permissions && typeof permissions === 'object' ? permissions : {};
-  if (!Object.keys(cleanPermissions).length) return cleanNote;
-  const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(cleanPermissions))));
+  const cleanTelegramNick = String(telegramNick || '').trim().replace(/^@+/, '');
+  const meta = {};
+  if (Object.keys(cleanPermissions).length) meta.permissions = cleanPermissions;
+  if (cleanTelegramNick) meta.telegramNick = cleanTelegramNick;
+  if (!Object.keys(meta).length) return cleanNote;
+  const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(meta))));
   return `${cleanNote}${cleanNote ? '\n' : ''}${WORKER_PERMISSIONS_META_PREFIX}${encoded}${WORKER_PERMISSIONS_META_SUFFIX}`;
 }
 
@@ -452,10 +464,17 @@ async function sbSetWorkerPin(workerId, pin) {
 }
 
 async function sbInsertWorker(entry) {
+  const payload = { ...(entry || {}) };
+  if (payload.note !== undefined || payload.permissions !== undefined) {
+    payload.note = buildWorkerNoteWithMeta(payload.note || '', payload.permissions || {});
+  }
+  if (payload.telegramNick !== undefined) payload.telegram_nick = String(payload.telegramNick || '').trim().replace(/^@+/, '');
+  delete payload.permissions;
+  delete payload.telegramNick;
   const res = await fetch(`${WORKER_URL}/api/workers`, {
     method: 'POST',
     headers: getHeaders(),
-    body: JSON.stringify(entry),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) await throwApiError(res);
   const rows = await res.json();
@@ -470,6 +489,7 @@ async function sbUpdateWorker(workerId, updates) {
   if (updates.salaryFormula !== undefined) body.salary_formula = updates.salaryFormula || '';
   if (updates.assistant !== undefined) body.assistant = updates.assistant || '';
   if (updates.alias !== undefined) body.alias = updates.alias || '';
+  if (updates.telegramNick !== undefined) body.telegram_nick = String(updates.telegramNick || '').trim().replace(/^@+/, '');
   if (updates.note !== undefined || updates.permissions !== undefined) {
     body.note = buildWorkerNoteWithMeta(
       updates.note !== undefined ? updates.note : '',
@@ -920,6 +940,16 @@ async function sbUpsertAppSetting(key, valueJson) {
   });
 }
 
+async function sbSendTelegramTest(text = 'Тестовое сообщение из SwiftGlass') {
+  const res = await fetch(`${WORKER_URL}/api/admin/test-telegram`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ text }),
+  });
+  if (!res.ok) await throwApiError(res);
+  return res.json();
+}
+
 // -- CAR DIRECTORY --------------------------------------------------
 async function sbFetchCarDirectory() {
   const pageSize = 1000;
@@ -1346,6 +1376,7 @@ function rowToWorker(r) {
     systemRole:    r.system_role   || 'junior',
     note:          noteMeta.note,
     permissions:   noteMeta.permissions || {},
+    telegramNick:  String(r.telegram_nick || noteMeta.telegramNick || '').trim().replace(/^@+/, ''),
     salaryFormula: r.salary_formula || '',
     assistant:     r.assistant     || '',
   };
@@ -1358,6 +1389,7 @@ function workerToRow(w) {
     role:           w.role          || '',
     system_role:    w.systemRole    || 'junior',
     note:           buildWorkerNoteWithMeta(w.note, w.permissions),
+    telegram_nick:  String(w.telegramNick || '').trim().replace(/^@+/, ''),
     salary_formula: w.salaryFormula || '',
     assistant:      w.assistant     || '',
   };

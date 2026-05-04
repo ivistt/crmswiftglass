@@ -2583,7 +2583,7 @@ async function persistImmediateOrderPaymentsUpdate({
   if (removedSourceKeys.length) {
     await sbDeleteCashEntriesBySourceKeys(removedSourceKeys);
   }
-  const refreshedOrder = await refreshImmediatePaymentState(editingOrderId, { refreshCash: allCashEntries.length > 0 });
+  const refreshedOrder = await refreshImmediatePaymentState(editingOrderId, { refreshCash: allCashEntries.length > 0 || removedSourceKeys.length > 0 });
   const canonicalOrder = refreshedOrder || saved || orders.find(item => item.id === editingOrderId) || null;
   currentClientPayments = JSON.parse(JSON.stringify(canonicalOrder?.clientPayments || data.clientPayments || []));
   currentSupplierPayments = JSON.parse(JSON.stringify(canonicalOrder?.supplierPayments || data.supplierPayments || []));

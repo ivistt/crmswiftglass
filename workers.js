@@ -360,6 +360,7 @@ function openWorkerModal() {
   if (!m) return;
   document.getElementById('w-name').value = '';
   document.getElementById('w-alias').value = '';
+  document.getElementById('w-telegram').value = '';
   document.getElementById('w-role').value = 'Старший специалист';
   document.getElementById('w-system-role').value = 'senior';
   document.getElementById('w-note').value = '';
@@ -374,6 +375,7 @@ function closeWorkerModal() {
 async function saveWorker() {
   const name = document.getElementById('w-name').value.trim();
   const alias = document.getElementById('w-alias').value.trim();
+  const telegramNick = String(document.getElementById('w-telegram')?.value || '').trim().replace(/^@+/, '');
   const role = document.getElementById('w-role').value;
   const sysRole = document.getElementById('w-system-role').value;
   const note = document.getElementById('w-note').value.trim();
@@ -387,6 +389,7 @@ async function saveWorker() {
     const w = await sbInsertWorker({
       name: name,
       alias: alias,
+      telegramNick,
       role: role,
       system_role: sysRole,
       note: note
@@ -438,6 +441,11 @@ function openWorkerEditModal(workerId) {
           <div class="form-group">
             <label class="form-label">${icon('star')} Псевдоним</label>
             <input class="form-input" type="text" id="we-alias" placeholder="Например: 🐻 Василий">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">${icon('send')} Telegram @ник</label>
+            <input class="form-input" type="text" id="we-telegram" placeholder="username">
           </div>
 
           <div class="form-group">
@@ -519,6 +527,7 @@ function openWorkerEditModal(workerId) {
   document.getElementById('worker-edit-name-display').textContent = getWorkerDisplayName(w.name);
   document.getElementById('we-password').value = '';
   document.getElementById('we-alias').value = w.alias || '';
+  document.getElementById('we-telegram').value = w.telegramNick || '';
   document.getElementById('we-display-role').value = w.role || 'Старший специалист';
   document.getElementById('we-role').value = w.systemRole || 'senior';
   // Показываем условия ЗП
@@ -613,6 +622,7 @@ async function saveWorkerEdit() {
 
   const password  = document.getElementById('we-password').value.trim();
   const alias     = document.getElementById('we-alias')?.value.trim() || '';
+  const telegramNick = String(document.getElementById('we-telegram')?.value || '').trim().replace(/^@+/, '');
   const displayRole = document.getElementById('we-display-role')?.value || '';
   const role      = document.getElementById('we-role').value;
   const assistant = document.getElementById('we-assistant')?.value || '';
@@ -629,6 +639,7 @@ async function saveWorkerEdit() {
       role: displayRole,
       systemRole: role,
       alias: alias,
+      telegramNick,
       assistant: assistant,
       note: w.note || '',
       permissions,
@@ -643,6 +654,7 @@ async function saveWorkerEdit() {
     w.role = displayRole;
     w.systemRole = role;
     w.alias = alias;
+    w.telegramNick = telegramNick;
     w.assistant = assistant;
     w.permissions = permissions;
     w.salaryFormula = salaryFormula;

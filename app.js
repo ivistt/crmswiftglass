@@ -3163,9 +3163,30 @@ function renderOwnerSettingsScreen() {
         <div class="owner-settings-profile-value">Владелец</div>
       </div>
     </div>
+    <div class="owner-banner-controls" style="margin-bottom:16px;">
+      <div class="owner-banner-card">
+        <div>
+          <div class="owner-banner-card-title">Telegram</div>
+          <div class="owner-banner-card-text">Проверить, что бот вообще пишет в группу</div>
+        </div>
+        <div class="owner-banner-card-actions">
+          <button class="btn-primary" style="min-height:36px;padding:0 12px;border-radius:8px;font-size:12px;font-weight:800;" onclick="sendOwnerTelegramTest()">Отправить тест</button>
+        </div>
+      </div>
+    </div>
     ${typeof renderOwnerSystemBannerControls === 'function' ? renderOwnerSystemBannerControls() : ''}
   `;
   initIcons();
+}
+
+async function sendOwnerTelegramTest() {
+  if (currentRole !== 'owner') return;
+  try {
+    await sbSendTelegramTest();
+    showToast('Тест отправлен');
+  } catch (e) {
+    showToast('Telegram: ' + e.message, 'error');
+  }
 }
 
 function openCarDirectoryScreen() {
