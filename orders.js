@@ -2546,7 +2546,7 @@ async function persistImmediateOrderPaymentsUpdate({
 
   const nonCashEntries = buildNewNonCashPaymentEntries(data, existingOrder);
   const removedSourceKeys = getRemovedPaymentSourceKeys(data, existingOrder);
-  const allCashEntries = [...addedCashEntries, ...cashEntries, ...nonCashEntries];
+  const directCashEntries = [...addedCashEntries, ...cashEntries];
 
   data.debt = confirmedClientPaid;
   data.check = confirmedSupplierPaid;
@@ -2558,12 +2558,12 @@ async function persistImmediateOrderPaymentsUpdate({
     check: confirmedSupplierPaid,
   };
 
-  const shouldUseSaveWithCash = allCashEntries.length > 0 && (currentRole === 'owner' || currentRole === 'manager');
+  const shouldUseSaveWithCash = directCashEntries.length > 0 && (currentRole === 'owner' || currentRole === 'manager');
   let saved;
   if (shouldUseSaveWithCash) {
     saved = (await sbSaveOrderWithCash(paymentPatchOrder, {
       isNew: false,
-      cashEntries: allCashEntries,
+      cashEntries: directCashEntries,
       rollbackOrder: existingOrder,
     })).order;
   } else {
@@ -2574,7 +2574,7 @@ async function persistImmediateOrderPaymentsUpdate({
       debt: confirmedClientPaid,
       check_sum: confirmedSupplierPaid,
     });
-    for (const cashEntry of allCashEntries) {
+    for (const cashEntry of directCashEntries) {
       const inserted = await sbInsertCashEntry(cashEntry);
       if (inserted) insertedCashEntries.push(inserted);
     }
@@ -2583,7 +2583,9 @@ async function persistImmediateOrderPaymentsUpdate({
   if (removedSourceKeys.length) {
     await sbDeleteCashEntriesBySourceKeys(removedSourceKeys);
   }
-  const refreshedOrder = await refreshImmediatePaymentState(editingOrderId, { refreshCash: allCashEntries.length > 0 || removedSourceKeys.length > 0 });
+  const refreshedOrder = await refreshImmediatePaymentState(editingOrderId, {
+    refreshCash: directCashEntries.length > 0 || nonCashEntries.length > 0 || removedSourceKeys.length > 0,
+  });
   const canonicalOrder = refreshedOrder || saved || orders.find(item => item.id === editingOrderId) || null;
   currentClientPayments = JSON.parse(JSON.stringify(canonicalOrder?.clientPayments || data.clientPayments || []));
   currentSupplierPayments = JSON.parse(JSON.stringify(canonicalOrder?.supplierPayments || data.supplierPayments || []));
