@@ -2296,7 +2296,7 @@ function getOrderPaymentCashRouteForSync(method, fallbackWorkerName = '') {
   };
 }
 
-function buildOrderDerivedCashEntries(order) {
+function buildOrderDerivedCashEntries(order, cardMethodAssignments = {}) {
   if (!order?.id) return [];
   const entries = [];
   const fallbackWorkerName = String(order?.responsible || '').trim();
@@ -2309,7 +2309,10 @@ function buildOrderDerivedCashEntries(order) {
     const amount = Number(payment?.amount) || 0;
     const method = normalizeCashPaymentMethod(payment?.method);
     if (!amount || !method || isCashPaymentMethodForSync(method)) return;
-    const route = getOrderPaymentCashRouteForSync(method, fallbackWorkerName);
+    const route = getOrderPaymentCashRouteForSync(
+      method,
+      cardMethodAssignments[normalizeCashPaymentMethod(method)] || fallbackWorkerName
+    );
     if (!route.worker_name) return;
     const paymentDate = String(payment?.date || orderDate || '').trim();
     const dateLabel = paymentDate
@@ -2376,7 +2379,8 @@ async function rollbackOrderSaveWithCash({ sb, sbHeaders, orderId, isNew, rollba
 async function syncOrderFopCashEntries(order, sb, sbHeaders) {
   await deleteUnconfirmedOrderFopCashEntries(order?.id, sb, sbHeaders);
   if (!order?.id || order?.is_cancelled || !order?.in_work) return [];
-  const entries = buildOrderDerivedCashEntries(order);
+  const cardMethodAssignments = await getCardMethodAssignmentsMap(sb, sbHeaders);
+  const entries = buildOrderDerivedCashEntries(order, cardMethodAssignments);
   if (!entries.length) return [];
   await fetch(`${sb}/rest/v1/cash_log?on_conflict=fop_source_key`, {
     method: 'POST',
@@ -2387,6 +2391,24 @@ async function syncOrderFopCashEntries(order, sb, sbHeaders) {
     body: JSON.stringify(entries),
   });
   return [];
+}
+
+async function getCardMethodAssignmentsMap(sb, sbHeaders) {
+  const res = await fetch(
+    `${sb}/rest/v1/ref_app_settings?key=eq.cash_card_methods&select=value_json&limit=1`,
+    { headers: sbHeaders }
+  );
+  const rows = await res.json().catch(() => []);
+  const valueJson = Array.isArray(rows) && rows[0] && rows[0].value_json && typeof rows[0].value_json === 'object'
+    ? rows[0].value_json
+    : {};
+  const methods = Array.isArray(valueJson.methods) ? valueJson.methods : [];
+  return methods.reduce((acc, item) => {
+    const method = normalizeCashPaymentMethod(item?.method || item?.label || '');
+    const workerName = String(item?.workerName || '').trim();
+    if (method && workerName) acc[method] = workerName;
+    return acc;
+  }, {});
 }
 
 function getOrderSourcePrefixes(orderId, suffix = '*') {

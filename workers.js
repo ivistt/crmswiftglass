@@ -134,6 +134,97 @@ const WORKER_SALARY_RULE_DEFINITIONS = [
   { key: 'serviceAdjustments.glue', label: 'Вклейка доплата', kind: 'moneySigned' },
 ];
 
+let _workerCardMethodsDraft = [];
+
+function getWorkerCardMethodsConfig() {
+  const methods = typeof getCashCardMethodsSetting === 'function' ? getCashCardMethodsSetting() : [];
+  return methods.map(item => ({
+    id: String(item.id || '').trim(),
+    method: String(item.method || '').trim(),
+    requisites: String(item.requisites || '').trim(),
+    workerName: String(item.workerName || '').trim(),
+  })).filter(item => item.id && item.method);
+}
+
+function ensureWorkerCardMethodsDraft() {
+  if (!_workerCardMethodsDraft.length) {
+    _workerCardMethodsDraft = getWorkerCardMethodsConfig();
+  }
+}
+
+function renderWorkerCardMethodsRows(workerName = '') {
+  ensureWorkerCardMethodsDraft();
+  if (!_workerCardMethodsDraft.length) {
+    return '<div style="font-size:12px;color:var(--text3);">Карточные способы не добавлены</div>';
+  }
+  return _workerCardMethodsDraft.map((item, index) => {
+    const assigned = String(item.workerName || '').trim() === String(workerName || '').trim();
+    return `
+      <div class="worker-setting-row" style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:8px;align-items:end;">
+        <label style="display:flex;flex-direction:column;gap:5px;min-width:0;">
+          <span class="form-label" style="margin:0;">Название</span>
+          <input class="form-input" type="text" value="${escapeAttr(item.method)}" onchange="updateWorkerCardMethodField(${index}, 'method', this.value)">
+        </label>
+        <label style="display:flex;flex-direction:column;gap:5px;min-width:0;">
+          <span class="form-label" style="margin:0;">Реквизиты</span>
+          <input class="form-input" type="text" value="${escapeAttr(item.requisites || '')}" onchange="updateWorkerCardMethodField(${index}, 'requisites', this.value)">
+        </label>
+        <label class="checkbox" style="align-self:center;padding-bottom:6px;">
+          <input type="checkbox" ${assigned ? 'checked' : ''} onchange="toggleWorkerCardMethodAssignment(${index}, this.checked)">
+          <span>Сотруднику</span>
+        </label>
+      </div>
+    `;
+  }).join('');
+}
+
+function updateWorkerCardMethodField(index, field, value) {
+  ensureWorkerCardMethodsDraft();
+  const item = _workerCardMethodsDraft[index];
+  if (!item) return;
+  if (field === 'method') item.method = String(value || '').trim();
+  if (field === 'requisites') item.requisites = String(value || '').trim();
+}
+
+function toggleWorkerCardMethodAssignment(index, checked) {
+  ensureWorkerCardMethodsDraft();
+  const workerName = String(document.getElementById('worker-edit-name-display')?.dataset.workerName || '').trim();
+  const item = _workerCardMethodsDraft[index];
+  if (!item) return;
+  if (checked) item.workerName = workerName;
+  else if (String(item.workerName || '').trim() === workerName) item.workerName = '';
+}
+
+function addWorkerCardMethodRow() {
+  ensureWorkerCardMethodsDraft();
+  const workerName = String(document.getElementById('worker-edit-name-display')?.dataset.workerName || '').trim();
+  _workerCardMethodsDraft.push({
+    id: `card_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`,
+    method: '',
+    requisites: '',
+    workerName,
+  });
+  renderWorkerCardMethodsEditor(workerName);
+}
+
+function renderWorkerCardMethodsEditor(workerName = '') {
+  const container = document.getElementById('we-card-methods-card');
+  if (!container) return;
+  container.innerHTML = renderWorkerCardMethodsRows(workerName);
+}
+
+function collectWorkerCardMethodsConfig() {
+  ensureWorkerCardMethodsDraft();
+  return _workerCardMethodsDraft
+    .map(item => ({
+      id: String(item.id || '').trim(),
+      method: normalizePaymentMethod(item.method || ''),
+      requisites: String(item.requisites || '').trim(),
+      workerName: String(item.workerName || '').trim(),
+    }))
+    .filter(item => item.id && item.method && !isCashPaymentMethod(item.method) && !isFopPaymentMethod(item.method));
+}
+
 function getWorkerPermissionPreset(systemRole) {
   return { ...(WORKER_ROLE_PERMISSION_PRESETS[systemRole] || WORKER_ROLE_PERMISSION_PRESETS.junior) };
 }
@@ -492,6 +583,14 @@ function openWorkerEditModal(workerId) {
             <div class="worker-permissions-card" id="we-permissions-card"></div>
           </div>
 
+          <div class="form-group">
+            <label class="form-label">${icon('credit-card')} Карточные способы оплаты</label>
+            <div class="worker-permissions-card" id="we-card-methods-card"></div>
+            <div style="display:flex;justify-content:flex-end;margin-top:8px;">
+              <button class="btn-secondary" type="button" onclick="addWorkerCardMethodRow()">+ Добавить карту</button>
+            </div>
+          </div>
+
           <!-- Проблемы -->
           <div>
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
@@ -524,7 +623,9 @@ function openWorkerEditModal(workerId) {
   }
 
   // Заполняем поля
-  document.getElementById('worker-edit-name-display').textContent = getWorkerDisplayName(w.name);
+  const workerNameEl = document.getElementById('worker-edit-name-display');
+  workerNameEl.textContent = getWorkerDisplayName(w.name);
+  workerNameEl.dataset.workerName = w.name;
   document.getElementById('we-password').value = '';
   document.getElementById('we-alias').value = w.alias || '';
   document.getElementById('we-telegram').value = w.telegramNick || '';
@@ -534,6 +635,8 @@ function openWorkerEditModal(workerId) {
   _renderWeSalaryRule(w);
   const permissionsCard = document.getElementById('we-permissions-card');
   if (permissionsCard) permissionsCard.innerHTML = renderWorkerPermissionRows(w);
+  _workerCardMethodsDraft = getWorkerCardMethodsConfig();
+  renderWorkerCardMethodsEditor(w.name);
   document.getElementById('we-error').style.display = 'none';
 
   // Заполняем список помощников (только junior)
@@ -627,6 +730,10 @@ async function saveWorkerEdit() {
   const role      = document.getElementById('we-role').value;
   const assistant = document.getElementById('we-assistant')?.value || '';
   const permissions = collectWorkerPermissionState();
+  const cardMethodsConfig = collectWorkerCardMethodsConfig();
+  const assignedCardMethodIds = cardMethodsConfig
+    .filter(item => String(item.workerName || '').trim() === String(w.name || '').trim())
+    .map(item => item.id);
   const salaryFormula = typeof buildWorkerSalaryFormula === 'function'
     ? buildWorkerSalaryFormula(collectWorkerSalaryRuleState())
     : '';
@@ -635,6 +742,8 @@ async function saveWorkerEdit() {
   if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
 
   try {
+    await sbUpsertAppSetting(APP_SETTING_CASH_CARD_METHODS_KEY, { methods: cardMethodsConfig });
+    appSettings[APP_SETTING_CASH_CARD_METHODS_KEY] = { methods: cardMethodsConfig };
     const updates = {
       role: displayRole,
       systemRole: role,
@@ -643,6 +752,7 @@ async function saveWorkerEdit() {
       assistant: assistant,
       note: w.note || '',
       permissions,
+      cashCardMethodIds: assignedCardMethodIds,
       salaryFormula,
     };
     if (password) updates.password = password;
@@ -657,6 +767,7 @@ async function saveWorkerEdit() {
     w.telegramNick = telegramNick;
     w.assistant = assistant;
     w.permissions = permissions;
+    w.cashCardMethodIds = assignedCardMethodIds;
     w.salaryFormula = salaryFormula;
 
     closeWorkerEditModal();

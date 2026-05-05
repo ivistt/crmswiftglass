@@ -322,14 +322,18 @@ function renderCashScreen() {
   const currencyCashLog = nonFopCashLog.filter(isCurrencyCashEntry);
   const fopCashLog = (workerCashLog || []).filter(isFopCashEntry);
   const pendingPersonalCashLog = (workerCashLog || []).filter(isPendingPersonalConfirmableCashEntry);
+  const pendingCardCashLog = pendingPersonalCashLog.filter(isCardCashEntry);
   const confirmedUnifiedCashLog = nonFopCashLog.filter(entry => {
     if (isCurrencyCashEntry(entry) && !isCurrencyCashTransferEntry(entry)) return false;
     if (isPendingPersonalConfirmableCashEntry(entry)) return false;
     return true;
   });
+  const confirmedCardCashLog = confirmedUnifiedCashLog.filter(isCardCashEntry);
+  const confirmedCashOnlyLog = confirmedUnifiedCashLog.filter(entry => !isCardCashEntry(entry));
   const confirmedFopCashLog = fopCashLog.filter(entry => getCashEntryApprovalStatus(entry) === 'confirmed');
   const pendingFopCashLog = fopCashLog.filter(entry => getCashEntryApprovalStatus(entry) !== 'confirmed');
-  const balance = calcCashBalance(confirmedUnifiedCashLog);
+  const cashBalance = calcCashBalance(confirmedCashOnlyLog);
+  const cardBalance = calcCashBalance(confirmedCardCashLog);
   const currencyBalance = calcCurrencyCashBalance(currencyCashLog);
   const fopBalance = calcCashBalance(confirmedFopCashLog);
 
@@ -339,12 +343,20 @@ function renderCashScreen() {
     + '<div><div style="font-size:20px;font-weight:800;">' + getWorkerDisplayName(currentWorkerName) + '</div>'
     + '<div style="font-size:13px;color:var(--text3);margin-top:2px;">Касса</div></div>'
     + '</div>'
-    + renderCashSection(confirmedUnifiedCashLog, balance, today, {
+    + renderCashSection(confirmedCashOnlyLog, cashBalance, today, {
       title: 'Касса (наличка)',
       account: 'cash',
       buttonText: '+ Запись',
-      pendingEntries: pendingPersonalCashLog,
       extraButtonsHtml: '<button class="btn-secondary" style="font-size:12px;padding:6px 10px;" onclick="openCashEntryModal(\'currency-back\')">Из $</button>'
+    })
+    + renderCashSection(confirmedCardCashLog, cardBalance, today, {
+      title: 'Касса (карта)',
+      account: 'cash',
+      buttonText: '+ Запись',
+      pendingEntries: pendingCardCashLog,
+      pendingLabel: 'ОЖИДАЮТ ПОДТВЕРЖДЕНИЯ (КАРТА)',
+      defaultPendingComment: 'Карта',
+      archiveKeyPrefix: 'cash-card',
     })
     + renderCurrencyCashSection(currencyCashLog, currencyBalance, today)
     + (currentWorkerName === FOP_CASH_WORKER_NAME
@@ -765,25 +777,39 @@ function isPendingPersonalConfirmableCashEntry(entry) {
   return isConfirmableCashEntry(entry) && getCashEntryApprovalStatus(entry) !== 'confirmed';
 }
 
+function isCardCashEntry(entry) {
+  if (!entry || isCurrencyCashEntry(entry)) return false;
+  if (getCashEntryAccountType(entry) !== CASH_ACCOUNT_CASH) return false;
+  const paymentMethod = getCashEntryPaymentMethod(entry);
+  if (!paymentMethod) return false;
+  return !isCashPaymentMethod(paymentMethod) && !isFopPaymentMethod(paymentMethod);
+}
+
 function renderManagerCashSections() {
   const today = getLocalDateString();
   const nonFopCashLog = (workerCashLog || []).filter(entry => !isFopCashEntry(entry));
   const currencyCashLog = nonFopCashLog.filter(isCurrencyCashEntry);
-  const pendingCardCashLog = (workerCashLog || []).filter(isPendingPersonalConfirmableCashEntry);
+  const pendingCardCashLog = (workerCashLog || []).filter(isPendingPersonalConfirmableCashEntry).filter(isCardCashEntry);
   const confirmedUnifiedCashLog = nonFopCashLog.filter(entry => {
     if (isCurrencyCashEntry(entry) && !isCurrencyCashTransferEntry(entry)) return false;
     if (isPendingPersonalConfirmableCashEntry(entry)) return false;
     return true;
   });
-  return renderCashSection(confirmedUnifiedCashLog, calcCashBalance(confirmedUnifiedCashLog), today, {
+  const confirmedCardCashLog = confirmedUnifiedCashLog.filter(isCardCashEntry);
+  const confirmedCashOnlyLog = confirmedUnifiedCashLog.filter(entry => !isCardCashEntry(entry));
+  return renderCashSection(confirmedCashOnlyLog, calcCashBalance(confirmedCashOnlyLog), today, {
       title: 'Касса',
       account: 'cash',
       buttonText: '+ Запись',
-  }) + renderCurrencyCashSection(currencyCashLog, calcCurrencyCashBalance(currencyCashLog), today)
-    + (pendingCardCashLog.length ? renderFopPendingEntries(pendingCardCashLog, {
-      pendingLabel: 'ОЖИДАЮТ ПОДТВЕРЖДЕНИЯ',
-      defaultPendingComment: 'ОЖИДАЕТ ПОДТВЕРЖДЕНИЯ',
-    }) : '');
+  }) + renderCashSection(confirmedCardCashLog, calcCashBalance(confirmedCardCashLog), today, {
+      title: 'Касса (карта)',
+      account: 'cash',
+      buttonText: '+ Запись',
+      pendingEntries: pendingCardCashLog,
+      pendingLabel: 'ОЖИДАЮТ ПОДТВЕРЖДЕНИЯ (КАРТА)',
+      defaultPendingComment: 'Карта',
+      archiveKeyPrefix: 'manager-cash-card',
+    }) + renderCurrencyCashSection(currencyCashLog, calcCurrencyCashBalance(currencyCashLog), today);
 }
 
 function getCurrentWorkerDropshipperNames() {

@@ -912,7 +912,7 @@ const DROPSHIPPER_CASH_PAYMENT_WORKERS = {
 };
 
 function getDropshipperPaymentMethods() {
-  const base = PAYMENT_METHOD_OPTIONS || [];
+  const base = getPaymentMethodOptions() || [];
   return ['Оплата наличка Олег', 'Оплата наличка Лёша', ...base];
 }
 

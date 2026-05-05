@@ -2579,7 +2579,7 @@ function renderOwnerPaymentFilters() {
 }
 
 function renderOwnerManualPaymentForm() {
-  const methods = (PAYMENT_METHOD_OPTIONS || []).map(normalizePaymentMethod);
+  const methods = (getPaymentMethodOptions() || []).map(normalizePaymentMethod);
   return `
     <div class="owner-manual-payment-card">
       <div class="owner-manual-payment-title">Ручная запись</div>

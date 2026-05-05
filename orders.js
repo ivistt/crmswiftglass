@@ -2139,6 +2139,8 @@ function populateRefSelects() {
     if (cur) psSel.value = cur;
   }
 
+  refreshOrderPaymentMethodSelects();
+
   // Дропшипперы
   const dsSel = document.getElementById('f-dropshipper');
   if (dsSel) {
@@ -2206,6 +2208,26 @@ function populateRefSelects() {
 
   populateSpecialServiceResponsibleSelects();
   populateOrderWorkerFilter();
+}
+
+function refreshOrderPaymentMethodSelects() {
+  const methods = (typeof getPaymentMethodOptions === 'function' ? getPaymentMethodOptions() : PAYMENT_METHOD_OPTIONS || [])
+    .map(normalizePaymentMethod)
+    .filter(Boolean);
+  const uniqueMethods = [...new Set(methods)];
+  const applyOptions = (selectId) => {
+    const select = document.getElementById(selectId);
+    if (!select) return;
+    const current = normalizePaymentMethod(select.value || '');
+    select.innerHTML = '<option value="">— выбрать —</option>' + uniqueMethods
+      .map(method => `<option value="${escapeAttr(method)}">${escapeHtml(method)}</option>`)
+      .join('');
+    if (current && uniqueMethods.includes(current)) {
+      select.value = current;
+    }
+  };
+  applyOptions('f-payment-method');
+  applyOptions('f-new-supplier-payment-method');
 }
 
 function setServiceTypeSelection(value = '') {

@@ -5,6 +5,7 @@
 const WORKER_URL = 'https://swiftglass-crm.skifchaqwerty.workers.dev';
 const WORKER_PERMISSIONS_META_PREFIX = '[[CRM_PERMS:';
 const WORKER_PERMISSIONS_META_SUFFIX = ']]';
+const APP_SETTING_CASH_CARD_METHODS_KEY = 'cash_card_methods';
 const WORKER_PERMISSION_PRESETS = {
   manager: {
     orders_view_all: true,
@@ -204,26 +205,35 @@ function parseWorkerNoteMeta(rawNote) {
   try {
     const decoded = JSON.parse(atob(encoded));
     const meta = decoded && typeof decoded === 'object' && !Array.isArray(decoded) ? decoded : {};
-    const isLegacyPermissionsOnly = !Object.prototype.hasOwnProperty.call(meta, 'permissions') && !Object.prototype.hasOwnProperty.call(meta, 'telegramNick');
+    const isLegacyPermissionsOnly = !Object.prototype.hasOwnProperty.call(meta, 'permissions')
+      && !Object.prototype.hasOwnProperty.call(meta, 'telegramNick')
+      && !Object.prototype.hasOwnProperty.call(meta, 'cashCardMethodIds');
     return {
       note,
       permissions: isLegacyPermissionsOnly
         ? meta
         : ((meta.permissions && typeof meta.permissions === 'object' && !Array.isArray(meta.permissions)) ? meta.permissions : {}),
       telegramNick: String(isLegacyPermissionsOnly ? '' : (meta.telegramNick || '')).trim().replace(/^@+/, ''),
+      cashCardMethodIds: Array.isArray(meta.cashCardMethodIds)
+        ? meta.cashCardMethodIds.map(id => String(id || '').trim()).filter(Boolean)
+        : [],
     };
   } catch (e) {
-    return { note, permissions: {}, telegramNick: '' };
+    return { note, permissions: {}, telegramNick: '', cashCardMethodIds: [] };
   }
 }
 
-function buildWorkerNoteWithMeta(note, permissions, telegramNick = '') {
+function buildWorkerNoteWithMeta(note, permissions, telegramNick = '', cashCardMethodIds = []) {
   const cleanNote = String(note || '').trim();
   const cleanPermissions = permissions && typeof permissions === 'object' ? permissions : {};
   const cleanTelegramNick = String(telegramNick || '').trim().replace(/^@+/, '');
+  const cleanCashCardMethodIds = Array.isArray(cashCardMethodIds)
+    ? Array.from(new Set(cashCardMethodIds.map(id => String(id || '').trim()).filter(Boolean)))
+    : [];
   const meta = {};
   if (Object.keys(cleanPermissions).length) meta.permissions = cleanPermissions;
   if (cleanTelegramNick) meta.telegramNick = cleanTelegramNick;
+  if (cleanCashCardMethodIds.length) meta.cashCardMethodIds = cleanCashCardMethodIds;
   if (!Object.keys(meta).length) return cleanNote;
   const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(meta))));
   return `${cleanNote}${cleanNote ? '\n' : ''}${WORKER_PERMISSIONS_META_PREFIX}${encoded}${WORKER_PERMISSIONS_META_SUFFIX}`;
@@ -465,12 +475,18 @@ async function sbSetWorkerPin(workerId, pin) {
 
 async function sbInsertWorker(entry) {
   const payload = { ...(entry || {}) };
-  if (payload.note !== undefined || payload.permissions !== undefined) {
-    payload.note = buildWorkerNoteWithMeta(payload.note || '', payload.permissions || {});
+  if (payload.note !== undefined || payload.permissions !== undefined || payload.cashCardMethodIds !== undefined) {
+    payload.note = buildWorkerNoteWithMeta(
+      payload.note || '',
+      payload.permissions || {},
+      payload.telegramNick || '',
+      payload.cashCardMethodIds || []
+    );
   }
   if (payload.telegramNick !== undefined) payload.telegram_nick = String(payload.telegramNick || '').trim().replace(/^@+/, '');
   delete payload.permissions;
   delete payload.telegramNick;
+  delete payload.cashCardMethodIds;
   const res = await fetch(`${WORKER_URL}/api/workers`, {
     method: 'POST',
     headers: getHeaders(),
@@ -490,10 +506,12 @@ async function sbUpdateWorker(workerId, updates) {
   if (updates.assistant !== undefined) body.assistant = updates.assistant || '';
   if (updates.alias !== undefined) body.alias = updates.alias || '';
   if (updates.telegramNick !== undefined) body.telegram_nick = String(updates.telegramNick || '').trim().replace(/^@+/, '');
-  if (updates.note !== undefined || updates.permissions !== undefined) {
+  if (updates.note !== undefined || updates.permissions !== undefined || updates.cashCardMethodIds !== undefined) {
     body.note = buildWorkerNoteWithMeta(
       updates.note !== undefined ? updates.note : '',
-      updates.permissions !== undefined ? updates.permissions : {}
+      updates.permissions !== undefined ? updates.permissions : {},
+      updates.telegramNick !== undefined ? updates.telegramNick : '',
+      updates.cashCardMethodIds !== undefined ? updates.cashCardMethodIds : []
     );
   }
   // Пароль обновляется через set-pin если передан
@@ -1377,6 +1395,7 @@ function rowToWorker(r) {
     note:          noteMeta.note,
     permissions:   noteMeta.permissions || {},
     telegramNick:  String(r.telegram_nick || noteMeta.telegramNick || '').trim().replace(/^@+/, ''),
+    cashCardMethodIds: Array.isArray(noteMeta.cashCardMethodIds) ? noteMeta.cashCardMethodIds : [],
     salaryFormula: r.salary_formula || '',
     assistant:     r.assistant     || '',
   };
@@ -1388,7 +1407,7 @@ function workerToRow(w) {
     alias:          w.alias         || '',
     role:           w.role          || '',
     system_role:    w.systemRole    || 'junior',
-    note:           buildWorkerNoteWithMeta(w.note, w.permissions),
+    note:           buildWorkerNoteWithMeta(w.note, w.permissions, w.telegramNick, w.cashCardMethodIds),
     telegram_nick:  String(w.telegramNick || '').trim().replace(/^@+/, ''),
     salary_formula: w.salaryFormula || '',
     assistant:      w.assistant     || '',
@@ -2004,6 +2023,40 @@ function normalizePaymentMethod(method) {
   return value;
 }
 
+function getCashCardMethodsSetting() {
+  const raw = appSettings?.[APP_SETTING_CASH_CARD_METHODS_KEY];
+  if (!raw || typeof raw !== 'object') return [];
+  const list = Array.isArray(raw.methods) ? raw.methods : [];
+  return list.map((item, index) => {
+    const method = normalizePaymentMethod(item?.method || item?.label || '');
+    if (!method || isCashPaymentMethod(method) || isFopPaymentMethod(method)) return null;
+    return {
+      id: String(item?.id || `card_${index + 1}`).trim(),
+      method,
+      requisites: String(item?.requisites || '').trim(),
+      workerName: String(item?.workerName || '').trim(),
+    };
+  }).filter(Boolean);
+}
+
+function getConfiguredCardMethodByLabel(method) {
+  const normalized = normalizePaymentMethod(method);
+  if (!normalized) return null;
+  return getCashCardMethodsSetting().find(item => item.method === normalized) || null;
+}
+
+function getPaymentMethodOptions() {
+  const merged = [...PAYMENT_METHOD_OPTIONS];
+  const seen = new Set(merged.map(item => normalizePaymentMethod(item)).filter(Boolean));
+  getCashCardMethodsSetting().forEach(item => {
+    if (!seen.has(item.method)) {
+      merged.push(item.method);
+      seen.add(item.method);
+    }
+  });
+  return merged;
+}
+
 function isCashPaymentMethod(method) {
   return normalizePaymentMethod(method) === '🪙 Наличка';
 }
@@ -2184,11 +2237,19 @@ function getOrderSupplierPaidAmount(order) {
 function getPaymentCashRoute(method, fallbackWorkerName = '') {
   const normalized = normalizePaymentMethod(method);
   const targetWorkerName = fallbackWorkerName || currentWorkerName || '';
+  const configuredCard = getConfiguredCardMethodByLabel(normalized);
   if (isCashPaymentMethod(normalized)) {
     return {
       workerName: targetWorkerName,
       cashAccount: CASH_ACCOUNT_CASH,
       requiresConfirmation: false,
+    };
+  }
+  if (configuredCard?.workerName) {
+    return {
+      workerName: configuredCard.workerName,
+      cashAccount: CASH_ACCOUNT_CASH,
+      requiresConfirmation: true,
     };
   }
   if (isOwnerCardPaymentMethod(normalized)) {
