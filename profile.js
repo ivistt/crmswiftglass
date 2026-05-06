@@ -1887,6 +1887,9 @@ function renderSalaryRuleCard(workerName) {
   if (rule.moldingPct) {
     parts.push({ label: 'Молдинг', value: Math.round(rule.moldingPct * 100) + '%' });
   }
+  const hasExtraWorkPct = rule && Object.prototype.hasOwnProperty.call(rule, 'extraWorkPct');
+  const extraWorkPct = hasExtraWorkPct ? (Number(rule.extraWorkPct) || 0) : 0.2;
+  parts.push({ label: 'Доп. работы', value: Math.round(extraWorkPct * 100) + '%' });
   if (rule.tatuBonusPct) {
     parts.push({ label: 'Бонус тату', value: Math.round(rule.tatuBonusPct * 100) + '%' });
   }
@@ -1912,6 +1915,7 @@ function renderSalaryRuleCard(workerName) {
   if (rule.baseIfResp) formulaParts.push(rule.baseIfResp + ' ₴ (если отв.)');
   if (rule.glassMarginPct) formulaParts.push('маржа × ' + Math.round(rule.glassMarginPct * 100) + '%');
   if (rule.moldingPct) formulaParts.push('молдинг × ' + Math.round(rule.moldingPct * 100) + '%');
+  formulaParts.push('доп. работы × ' + Math.round(extraWorkPct * 100) + '%');
   if (rule.servicesPct) formulaParts.push('услуги × ' + Math.round(rule.servicesPct * 100) + '%');
   if (rule.selectedServices) formulaParts.push('выбранные услуги');
   const formulaStr = formulaParts.join(' + ') || '—';

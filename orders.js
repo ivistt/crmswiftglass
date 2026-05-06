@@ -2970,6 +2970,13 @@ function getWorkerOrderSalaryPreviewBreakdown(workerName, order) {
       });
     }
 
+    const extraWorkAmount = typeof _extraWorkSalary === 'function'
+      ? _extraWorkSalary(order, workerName)
+      : Math.round((Number(order?.extraWork) || 0) * 0.2);
+    if (extraWorkAmount > 0) {
+      parts.push({ label: 'Доп. работы 20%', amount: extraWorkAmount });
+    }
+
     const glassMargin = order.dropshipper ? 0 : (typeof _orderGlassMargin === 'function' ? _orderGlassMargin(order) : 0);
     const fromGlass = Math.round(glassMargin * (rule.glassMarginPct || 0));
     if (fromGlass > 0) parts.push({ label: 'Маржа стекла ' + Math.round((rule.glassMarginPct || 0) * 100) + '%', amount: fromGlass });

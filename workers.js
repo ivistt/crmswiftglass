@@ -132,6 +132,7 @@ const WORKER_SALARY_RULE_DEFINITIONS = [
   { key: 'attendanceBase', label: 'Ставка за смену', kind: 'money' },
   { key: 'glassMarginPct', label: 'Маржа стекла', kind: 'percent' },
   { key: 'moldingPct', label: 'Молдинг', kind: 'percent' },
+  { key: 'extraWorkPct', label: 'Доп. работы', kind: 'percent' },
   { key: 'tatuBonusPct', label: 'Бонус тату', kind: 'percent' },
   { key: 'toningBonusPct', label: 'Бонус тонировки', kind: 'percent' },
   { key: 'serviceAdjustments.mount', label: 'Монтаж доплата', kind: 'moneySigned' },
@@ -195,6 +196,7 @@ function getWorkerSalaryRuleState(workerLike) {
     attendanceBase: Number(rule.attendanceBase || rule.dailyBaseIfCompleted) || 0,
     glassMarginPct: Math.round((Number(rule.glassMarginPct) || 0) * 100),
     moldingPct: Math.round((Number(rule.moldingPct) || 0) * 100),
+    extraWorkPct: Math.round((Number(rule.extraWorkPct) || 0.2) * 100),
     tatuBonusPct: Math.round((Number(rule.tatuBonusPct) || 0) * 100),
     toningBonusPct: Math.round((Number(rule.toningBonusPct) || 0) * 100),
     'serviceAdjustments.mount': Number(serviceAdjustments.mount) || 0,
@@ -298,6 +300,7 @@ function collectWorkerSalaryRuleState() {
     dailyBaseIfCompleted: 0,
     glassMarginPct: readNumber('glassMarginPct', true),
     moldingPct: readNumber('moldingPct', true),
+    extraWorkPct: readNumber('extraWorkPct', true),
     tatuBonusPct: readNumber('tatuBonusPct', true),
     toningBonusPct: readNumber('toningBonusPct', true),
     serviceAdjustments: {

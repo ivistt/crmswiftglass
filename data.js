@@ -1535,6 +1535,7 @@ function sanitizeWorkerSalaryRuleConfig(rawRule) {
     dailyBaseIfCompleted: Number(rule.dailyBaseIfCompleted) || 0,
     glassMarginPct: Number(rule.glassMarginPct) || 0,
     moldingPct: Number(rule.moldingPct) || 0,
+    extraWorkPct: Number(rule.extraWorkPct) || 0,
     tatuBonusPct: Number(rule.tatuBonusPct) || 0,
     toningBonusPct: Number(rule.toningBonusPct) || 0,
     serviceAdjustments: {
@@ -1561,6 +1562,7 @@ function buildWorkerSalaryFormula(rule) {
     dailyBaseIfCompleted: Number(safeRule.dailyBaseIfCompleted) || 0,
     glassMarginPct: Number(safeRule.glassMarginPct) || 0,
     moldingPct: Number(safeRule.moldingPct) || 0,
+    extraWorkPct: Number(safeRule.extraWorkPct) || 0,
     tatuBonusPct: Number(safeRule.tatuBonusPct) || 0,
     toningBonusPct: Number(safeRule.toningBonusPct) || 0,
     serviceAdjustments: {
@@ -1698,8 +1700,14 @@ function _customServiceSalary(order) {
   return Math.round((Number(order?.mount) || 0) * 0.2);
 }
 
-function _extraWorkSalary(order) {
-  return Math.round((Number(order?.extraWork) || 0) * 0.2);
+function _extraWorkSalary(order, workerName = '') {
+  const rule = workerName ? getSalaryRule(workerName) : {};
+  const hasPersonalPct = rule && Object.prototype.hasOwnProperty.call(rule, 'extraWorkPct');
+  const pct = hasPersonalPct ? (Number(rule?.extraWorkPct) || 0) : 0.2;
+  const amount = Math.round((Number(order?.extraWork) || 0) * pct);
+  if (!amount || pct < 0) return 0;
+  if (!workerName) return amount;
+  return (order?.responsible === workerName || order?.assistant === workerName) ? amount : 0;
 }
 
 function _selectedServicesSalary(workerName, order) {
@@ -1752,7 +1760,7 @@ function calcOrderSalary(workerName, order) {
   const fromGlass   = Math.round(glassMargin * (rule.glassMarginPct || 0));
   const fromMolding = Math.round(molding * (rule.moldingPct || 0));
   const fromServ    = _selectedServicesSalary(workerName, order);
-  const extraWork   = _extraWorkSalary(order);
+  const extraWork   = _extraWorkSalary(order, workerName);
 
   return fromGlass + fromMolding + fromServ + extraWork;
 }
@@ -1786,7 +1794,7 @@ function getWorkerOrderSalaryBreakdown(workerName, order) {
       if (hasCustomSalaryService(order)) {
         parts.push({ label: 'Нестандартные работы 20% от монтажа', amount: _customServiceSalary(order) });
       }
-      const extraWorkSalary = _extraWorkSalary(order);
+      const extraWorkSalary = _extraWorkSalary(order, workerName);
       if (extraWorkSalary > 0) {
         parts.push({ label: 'Доп. работы 20%', amount: extraWorkSalary });
       }
