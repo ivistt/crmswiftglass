@@ -29,6 +29,7 @@ const WORKER_PERMISSION_PRESETS = {
     special_service_status: false,
     special_service_tatu: false,
     special_service_toning: false,
+    own_warehouse_view: false,
   },
   senior: {
     orders_view_all: false,
@@ -53,6 +54,7 @@ const WORKER_PERMISSION_PRESETS = {
     special_service_status: false,
     special_service_tatu: false,
     special_service_toning: false,
+    own_warehouse_view: false,
   },
   junior: {
     orders_view_all: false,
@@ -77,6 +79,7 @@ const WORKER_PERMISSION_PRESETS = {
     special_service_status: false,
     special_service_tatu: false,
     special_service_toning: false,
+    own_warehouse_view: false,
   },
   extra: {
     orders_view_all: false,
@@ -101,6 +104,7 @@ const WORKER_PERMISSION_PRESETS = {
     special_service_status: false,
     special_service_tatu: false,
     special_service_toning: false,
+    own_warehouse_view: false,
   },
 };
 
@@ -240,24 +244,7 @@ function hasExplicitWorkerPermissions(workerLike) {
 
 function applyLegacyWorkerPermissionFallback(state, workerLike) {
   const next = { ...(state || {}) };
-  const name = String(workerLike?.name || '').trim();
   const role = String(workerLike?.systemRole || workerLike?.system_role || workerLike?.role || '').trim();
-  if (name === 'Sasha Manager') {
-    next.dropshippers_manage = true;
-    next.groups_view = true;
-    next.calendar_view = true;
-    next.personal_cash_view = true;
-    next.cash_add_entries = true;
-  }
-  if (name === 'Roma' || name === 'Lyosha') {
-    next.special_service_status = true;
-  }
-  if (name === 'Roma') {
-    next.special_service_tatu = true;
-  }
-  if (name === 'Lyosha') {
-    next.special_service_toning = true;
-  }
   if (role === 'senior' || role === 'extra') {
     next.personal_cash_view = true;
     next.cash_add_entries = true;
@@ -310,7 +297,26 @@ function currentUserCanViewAllOrders() {
 function getWorkerRecordByName(name) {
   const workerName = String(name || '').trim();
   if (!workerName) return null;
-  return (workers || []).find(item => item.name === workerName) || null;
+  const normalized = workerName.toLowerCase();
+  return (workers || []).find(item =>
+    String(item?.name || '').trim().toLowerCase() === normalized
+    || String(item?.alias || '').trim().toLowerCase() === normalized
+  ) || null;
+}
+
+function getWorkerIdByName(name) {
+  const worker = getWorkerRecordByName(name);
+  return worker?.id || null;
+}
+
+function getWorkerRecordById(id) {
+  const workerId = String(id || '').trim();
+  if (!workerId) return null;
+  return (workers || []).find(item => String(item?.id || '') === workerId) || null;
+}
+
+function getWorkerNameById(id) {
+  return getWorkerRecordById(id)?.name || '';
 }
 
 function workerCanHandleSpecialService(workerLike, type) {
@@ -336,9 +342,17 @@ function getOrderSpecialServiceAssignedWorker(order, type) {
   const explicitAssigned = type === 'tatu'
     ? String(order.tatuResponsible || '').trim()
     : String(order.toningResponsible || '').trim();
+  const explicitAssignedById = type === 'tatu'
+    ? getWorkerNameById(order.tatuResponsibleWorkerId)
+    : getWorkerNameById(order.toningResponsibleWorkerId);
   const doneBy = type === 'tatu' ? String(order.tatuDoneBy || '').trim() : String(order.toningDoneBy || '').trim();
-  const candidates = [explicitAssigned, doneBy].filter(Boolean);
-  return candidates.find(name => workerCanHandleSpecialService(name, type)) || '';
+  const candidates = [explicitAssigned, explicitAssignedById, doneBy].filter(Boolean);
+  for (const candidate of candidates) {
+    const worker = getWorkerRecordByName(candidate);
+    const name = worker?.name || candidate;
+    if (workerCanHandleSpecialService(worker || name, type)) return name;
+  }
+  return '';
 }
 
 function currentUserHasAnyDashboardPermission() {
@@ -583,10 +597,14 @@ async function sbFetchSalariesByOrder(orderId, options = {}) {
 }
 
 async function sbInsertWorkerSalary(entry) {
+  const payload = { ...(entry || {}) };
+  if (!payload.worker_id && payload.worker_name) {
+    payload.worker_id = getWorkerIdByName(payload.worker_name);
+  }
   const res = await fetch(`${WORKER_URL}/api/salaries`, {
     method: 'POST',
     headers: getHeaders(),
-    body: JSON.stringify(entry),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) await throwApiError(res);
   const rows = await res.json();
@@ -949,6 +967,10 @@ async function sbCreateDropshipper(name, workerName = '') {
   });
 }
 
+async function sbCreateServiceRate(payload) {
+  return sbCreateRef('ref_service_rates', payload || {});
+}
+
 async function sbUpdateRef(table, id, payload) {
   const res = await fetch(`${WORKER_URL}/api/ref/${table}/${encodeURIComponent(id)}`, {
     method: 'PATCH',
@@ -969,6 +991,10 @@ async function sbUpdateDropshipper(id, name, workerName = '') {
     name,
     worker_name: String(workerName || '').trim() || null,
   });
+}
+
+async function sbUpdateServiceRate(id, payload) {
+  return sbUpdateRef('ref_service_rates', id, payload || {});
 }
 
 async function sbUpsertAppSetting(key, valueJson) {
@@ -1097,7 +1123,7 @@ async function sbUpsertManualClient(client) {
 
 async function loadRefData() {
   try {
-    const [cars, wh, eq, ps, part, ss, carDir, drops, settingsRows, paymentMethodRows] = await Promise.all([
+    const [cars, wh, eq, ps, part, ss, carDir, drops, settingsRows, paymentMethodRows, serviceRateRows] = await Promise.all([
       sbFetchRefOptional('ref_cars'),
       sbFetchRefOptional('ref_warehouses'),
       sbFetchRefOptional('ref_equipment'),
@@ -1108,6 +1134,7 @@ async function loadRefData() {
       sbFetchRefOptional('ref_dropshippers'),
       sbFetchRefOptional('ref_app_settings'),
       sbFetchPaymentMethods().catch(() => []),
+      sbFetchRefOptional('ref_service_rates'),
     ]);
     refCars             = carDir.length ? carDir : cars;
     refWarehouses       = wh;
@@ -1116,6 +1143,7 @@ async function loadRefData() {
     refPartners         = part;
     refSupplierStatuses = ss;
     paymentMethods      = Array.isArray(paymentMethodRows) ? paymentMethodRows : [];
+    refServiceRates     = Array.isArray(serviceRateRows) ? serviceRateRows : [];
     carDirectory        = carDir;
     refDropshippers     = ensureBuiltInDropshippers(drops);
     appSettings         = Array.isArray(settingsRows)
@@ -1163,6 +1191,7 @@ function rowToOrder(r) {
     id:              r.id,
     date:            r.date,
     responsible:     r.responsible,
+    responsibleWorkerId: r.responsible_worker_id || null,
     client:          r.client,
     phone:           r.phone,
     address:         r.address || '',
@@ -1177,10 +1206,10 @@ function rowToOrder(r) {
     molding:         r.molding,
     extraWork:       r.extra_work,
     tatu:            r.tatu,
-    tatuDone:        r.tatu_done || false,
+    tatuDone:        r.tatu_done ?? r.tatu_status ?? false,
     tatuDoneBy:      r.tatu_done_by || '',
     toning:          r.toning,
-    toningDone:      r.toning_done || false,
+    toningDone:      r.toning_done ?? r.toning_status ?? false,
     toningDoneBy:    r.toning_done_by || '',
     delivery:        r.delivery       || 0,
     author:          r.author,
@@ -1202,8 +1231,10 @@ function rowToOrder(r) {
     configuration:   configurationMeta.configuration,
     tatuStatus:      r.tatu_status ?? configurationMeta.tatuStatus ?? false,
     toningStatus:    r.toning_status ?? configurationMeta.toningStatus ?? false,
-    tatuResponsible: configurationMeta.tatuResponsible || '',
-    toningResponsible: configurationMeta.toningResponsible || '',
+    tatuResponsible: configurationMeta.tatuResponsible || getWorkerNameById(r.tatu_responsible_worker_id) || '',
+    tatuResponsibleWorkerId: r.tatu_responsible_worker_id || null,
+    toningResponsible: configurationMeta.toningResponsible || getWorkerNameById(r.toning_responsible_worker_id) || '',
+    toningResponsibleWorkerId: r.toning_responsible_worker_id || null,
     warehouseDelta:  r.warehouse_delta,
     dropshipper:     r.drop_shipper,
     dropshipperPayout: r.drop_shipper_payout || 0,
@@ -1226,8 +1257,10 @@ function rowToOrder(r) {
     ownWarehouse:    r.own_warehouse || false,
     workerDone:      r.worker_done || false,
     assistant:       r.assistant || '',
+    assistantWorkerId: r.assistant_worker_id || null,
     isCancelled:     r.is_cancelled || false,
     manager:         r.manager || '',
+    managerWorkerId: r.manager_worker_id || null,
     onlySale:        r.only_sale || false,
     reworkData:      r.rework_data || {},
     priorityTask:    !!r.rework_data?.priorityTask,
@@ -1246,6 +1279,7 @@ function orderToRow(o) {
     id:               o.id,
     date:             o.date,
     responsible:      o.responsible,
+    responsible_worker_id: o.responsibleWorkerId || getWorkerIdByName(o.responsible),
     client:           o.client,
     phone:            o.phone,
     address:          o.address || null,
@@ -1260,11 +1294,11 @@ function orderToRow(o) {
     molding:          Number(o.molding)   || 0,
     extra_work:       Number(o.extraWork) || 0,
     tatu:             Number(o.tatu)      || 0,
-    tatu_done:        o.tatuDone || false,
-    tatu_done_by:     o.tatuDoneBy || null,
+    tatu_done:        o.tatuDone ?? o.tatuStatus ?? false,
+    tatu_done_by:     (o.tatuDone ?? o.tatuStatus) ? (o.tatuDoneBy || o.tatuResponsible || null) : null,
     toning:           Number(o.toning)    || 0,
-    toning_done:      o.toningDone || false,
-    toning_done_by:   o.toningDoneBy || null,
+    toning_done:      o.toningDone ?? o.toningStatus ?? false,
+    toning_done_by:   (o.toningDone ?? o.toningStatus) ? (o.toningDoneBy || o.toningResponsible || null) : null,
     delivery:         o.delivery          || 0,
     author:           o.author,
     payment_status:   o.paymentStatus,
@@ -1290,6 +1324,8 @@ function orderToRow(o) {
     }),
     tatu_status:       o.tatuStatus || false,
     toning_status:     o.toningStatus || false,
+    tatu_responsible_worker_id: o.tatuResponsibleWorkerId || getWorkerIdByName(o.tatuResponsible),
+    toning_responsible_worker_id: o.toningResponsibleWorkerId || getWorkerIdByName(o.toningResponsible),
     drop_shipper:      o.dropshipper || null,
     drop_shipper_payout: o.dropshipperPayout || 0,
     drop_shipper_payments: o.dropshipperPayments || [],
@@ -1297,8 +1333,6 @@ function orderToRow(o) {
     margin_total:       o.marginTotal || 0,
     payout_manager_glass:   o.payoutManagerGlass || 0,
     payout_resp_glass:      o.payoutRespGlass || 0,
-    payout_lesha:          o.payoutLesha || 0,
-    payout_roma:           o.payoutRoma || 0,
     payout_extra_resp:     o.payoutExtraResp || 0,
     payout_extra_assist:   o.payoutExtraAssist || 0,
     payout_molding_resp:   o.payoutMoldingResp || 0,
@@ -1311,8 +1345,10 @@ function orderToRow(o) {
     own_warehouse:    o.ownWarehouse || false,
     worker_done:      o.workerDone || false,
     assistant:        o.assistant  || null,
+    assistant_worker_id: o.assistantWorkerId || getWorkerIdByName(o.assistant),
     is_cancelled:     o.isCancelled || false,
     manager:          o.manager    || null,
+    manager_worker_id: o.managerWorkerId || getWorkerIdByName(o.manager),
     only_sale:        o.onlySale || false,
     rework_data:      reworkData,
     client_payments:  o.clientPayments || [],
@@ -1374,8 +1410,6 @@ function orderToRowSparse(o) {
     ['marginTotal', 'margin_total'],
     ['payoutManagerGlass', 'payout_manager_glass'],
     ['payoutRespGlass', 'payout_resp_glass'],
-    ['payoutLesha', 'payout_lesha'],
-    ['payoutRoma', 'payout_roma'],
     ['payoutExtraResp', 'payout_extra_resp'],
     ['payoutExtraAssist', 'payout_extra_assist'],
     ['payoutMoldingResp', 'payout_molding_resp'],
@@ -1402,6 +1436,11 @@ function orderToRowSparse(o) {
       sparse[rowKey] = full[rowKey];
     }
   });
+  if (Object.prototype.hasOwnProperty.call(o, 'responsible')) sparse.responsible_worker_id = full.responsible_worker_id;
+  if (Object.prototype.hasOwnProperty.call(o, 'assistant')) sparse.assistant_worker_id = full.assistant_worker_id;
+  if (Object.prototype.hasOwnProperty.call(o, 'manager')) sparse.manager_worker_id = full.manager_worker_id;
+  if (Object.prototype.hasOwnProperty.call(o, 'tatuResponsible')) sparse.tatu_responsible_worker_id = full.tatu_responsible_worker_id;
+  if (Object.prototype.hasOwnProperty.call(o, 'toningResponsible')) sparse.toning_responsible_worker_id = full.toning_responsible_worker_id;
 
   return sparse;
 }
@@ -1487,6 +1526,9 @@ function sanitizeWorkerSalaryRuleConfig(rawRule) {
   const adjustments = rule.serviceAdjustments && typeof rule.serviceAdjustments === 'object'
     ? rule.serviceAdjustments
     : {};
+  const serviceRates = rule.serviceRates && typeof rule.serviceRates === 'object'
+    ? rule.serviceRates
+    : {};
   return {
     selectedServices: !!rule.selectedServices,
     attendanceBase: Number(rule.attendanceBase) || 0,
@@ -1500,6 +1542,13 @@ function sanitizeWorkerSalaryRuleConfig(rawRule) {
       cut: Number(adjustments.cut) || 0,
       glue: Number(adjustments.glue) || 0,
     },
+    serviceRates: Object.entries(serviceRates).reduce((acc, [name, value]) => {
+      const cleanName = String(name || '').trim();
+      if (!cleanName) return acc;
+      const num = Number(value);
+      if (Number.isFinite(num) && num >= 0) acc[cleanName] = num;
+      return acc;
+    }, {}),
   };
 }
 
@@ -1519,24 +1568,12 @@ function buildWorkerSalaryFormula(rule) {
       cut: Number(safeRule.serviceAdjustments?.cut) || 0,
       glue: Number(safeRule.serviceAdjustments?.glue) || 0,
     },
+    serviceRates: { ...(safeRule.serviceRates || {}) },
   };
   return JSON.stringify(payload);
 }
 
 const SALARY_CONFIG = {
-  'Artyom':     { selectedServices: true, dailyBaseIfCompleted: 500 },
-  'Roma':       { selectedServices: true, dailyBaseIfCompleted: 500 },
-  'Vitya':      { selectedServices: true },
-  'Zhenya':     { selectedServices: true },
-  'Sasha Doga': { selectedServices: true },
-  'Sasha Smokov': { selectedServices: true, serviceAdjustments: { mount: 100, cut: 50, glue: 50 }, glassMarginPct: 0.10, moldingPct: 0.10, dailyBaseIfCompleted: 800 },
-  'Seryozha':   { selectedServices: true, serviceAdjustments: { mount: -100, cut: -50, glue: -50 } },
-  'Kostya':     { selectedServices: true, glassMarginPct: 0.10, moldingPct: 0.10, dailyBaseIfCompleted: 800 },
-  'Sasha Manager': { glassMarginPct: 0.10, attendanceBase: 800, managerOnly: true },
-  'Nastya':      { attendanceBase: 2000 },
-  'Lyosha':     { selectedServices: true },
-
-  // ── Дефолты по роли ──────────────────────────────────────
   _senior:  { selectedServices: true },
   _junior:  { selectedServices: true },
   _manager: { managerOnly: true },
@@ -1557,20 +1594,21 @@ function getSalaryRule(workerName) {
     : (w.systemRole === 'senior' || w.systemRole === 'extra')
       ? SALARY_CONFIG._senior
       : (w.systemRole === 'manager' ? SALARY_CONFIG._manager : SALARY_CONFIG._junior);
-  const namedBase = SALARY_CONFIG[workerName] || {};
   const personalRule = parseWorkerSalaryFormula(w?.salaryFormula);
   if (!personalRule) {
-    return SALARY_CONFIG[workerName] || roleBase;
+    return roleBase;
   }
   const normalizedPersonal = sanitizeWorkerSalaryRuleConfig(personalRule);
   return {
     ...roleBase,
-    ...namedBase,
     ...normalizedPersonal,
     serviceAdjustments: {
       ...((roleBase && roleBase.serviceAdjustments) || {}),
-      ...((namedBase && namedBase.serviceAdjustments) || {}),
       ...((normalizedPersonal && normalizedPersonal.serviceAdjustments) || {}),
+    },
+    serviceRates: {
+      ...((roleBase && roleBase.serviceRates) || {}),
+      ...((normalizedPersonal && normalizedPersonal.serviceRates) || {}),
     },
   };
 }
@@ -1671,10 +1709,13 @@ function _selectedServicesSalary(workerName, order) {
     return _customServiceSalary(order);
   }
   const adjustments = rule.serviceAdjustments || {};
+  const serviceRates = rule.serviceRates || {};
   return _salarySelectedServiceItems(order).reduce((sum, item) => {
-    if (item.salaryCategory === 'custom') return sum;
-    const adjustment = Number(adjustments[item.salaryCategory]) || 0;
-    return sum + Math.max(0, (Number(item.rate) || 0) + adjustment);
+    if (item.salaryCategory === 'custom' || item.salaryCategory === 'special') return sum;
+    const hasPersonalRate = Object.prototype.hasOwnProperty.call(serviceRates, item.name);
+    const baseRate = hasPersonalRate ? Number(serviceRates[item.name]) : (Number(item.rate) || 0);
+    const adjustment = hasPersonalRate ? 0 : (Number(adjustments[item.salaryCategory]) || 0);
+    return sum + Math.max(0, baseRate + adjustment);
   }, 0);
 }
 
@@ -1750,11 +1791,14 @@ function getWorkerOrderSalaryBreakdown(workerName, order) {
         parts.push({ label: 'Доп. работы 20%', amount: extraWorkSalary });
       }
       const adjustments = rule.serviceAdjustments || {};
+      const serviceRates = rule.serviceRates || {};
       const groupedServices = {};
       _salarySelectedServiceItems(order).forEach(item => {
-        if (item.salaryCategory === 'custom') return;
-        const adjustment = Number(adjustments[item.salaryCategory]) || 0;
-        const amount = Math.max(0, (Number(item.rate) || 0) + adjustment);
+        if (item.salaryCategory === 'custom' || item.salaryCategory === 'special') return;
+        const hasPersonalRate = Object.prototype.hasOwnProperty.call(serviceRates, item.name);
+        const baseRate = hasPersonalRate ? Number(serviceRates[item.name]) : (Number(item.rate) || 0);
+        const adjustment = hasPersonalRate ? 0 : (Number(adjustments[item.salaryCategory]) || 0);
+        const amount = Math.max(0, baseRate + adjustment);
         if (amount <= 0) return;
         if (!groupedServices[item.name]) {
           groupedServices[item.name] = { qty: 0, amount: 0 };
@@ -1822,8 +1866,8 @@ function _calcToningBonus(workerName, order) {
 // ЗП менеджера: ставка + % от маржи стекла
 // Начисляется только если он указан в поле order.manager
 function _calcManagerSalary(order) {
-  if (order.dropshipper) return 0;
-  const rule = getSalaryRule(order.manager || 'Sasha Manager');
+  if (order.dropshipper || !order.manager) return 0;
+  const rule = getSalaryRule(order.manager);
   const glassMargin = _orderGlassMargin(order);
   return Math.round(glassMargin * (rule.glassMarginPct || 0));
 }
@@ -2255,14 +2299,17 @@ function getPaymentCashRoute(method, fallbackWorkerName = '') {
   if (!cfg || String(cfg?.method_type || '').trim().toLowerCase() === 'cash' || isCashPaymentMethod(normalized)) {
     return {
       workerName: targetWorkerName,
+      workerId: getWorkerIdByName(targetWorkerName),
       cashAccount: CASH_ACCOUNT_CASH,
       requiresConfirmation: false,
     };
   }
   const type = String(cfg?.method_type || '').trim().toLowerCase();
   const ownerWorker = String(cfg?.worker_name || '').trim();
+  const ownerWorkerId = cfg?.worker_id || getWorkerIdByName(ownerWorker || targetWorkerName);
   return {
     workerName: ownerWorker || targetWorkerName,
+    workerId: ownerWorkerId,
     cashAccount: type === 'fop' ? CASH_ACCOUNT_FOP : CASH_ACCOUNT_CASH,
     requiresConfirmation: true,
   };
@@ -2283,9 +2330,20 @@ function buildOrderPaymentCashEntryPayload({ order, payment, paymentType = 'clie
   const actionLabel = paymentType === 'supplier' ? 'Оплата поставщику' : 'Оплата клиента';
   const payload = {
     worker_name: route.workerName,
+    cash_owner: route.workerName,
+    worker_id: route.workerId || null,
+    cash_owner_id: route.workerId || null,
     amount: signedAmount,
     comment: `${actionLabel} ${method} ${orderId}, ${dateLabel}, клиент: ${clientLabel}, авто: ${carLabel}`,
     cash_account: route.cashAccount,
+    account_type: route.cashAccount,
+    payment_method: method,
+    payment_type: isCashPaymentMethod(method) ? 'cash' : (route.cashAccount === CASH_ACCOUNT_FOP ? 'transfer' : 'card'),
+    approval_status: route.requiresConfirmation ? 'pending' : 'not_required',
+    approval_by: route.requiresConfirmation ? route.workerName : null,
+    approval_by_id: route.requiresConfirmation ? (route.workerId || null) : null,
+    source_type: 'order',
+    order_id: orderId,
   };
 
   if (!isCashPaymentMethod(method)) {
@@ -2314,6 +2372,7 @@ let refEquipment        = [];
 let refPaymentStatuses  = [];
 let refPartners         = [];
 let refSupplierStatuses = [];
+let refServiceRates     = [];
 
 // ── HELPERS ──────────────────────────────────────────────────
 
@@ -2350,14 +2409,14 @@ function canViewClients()  { return currentRole === 'owner' || currentUserHasPer
 function canViewWorkers()  { return currentRole === 'owner' || currentUserHasPermission('workers_view'); }
 function canDeleteOrder()  { return currentRole === 'owner' || currentUserHasPermission('orders_delete', false); }
 function canViewFinance()  { return currentRole === 'owner' || currentUserHasPermission('finance_view'); }
-function canManageDropshippers() { return currentRole === 'owner' || currentUserHasPermission('dropshippers_manage', currentWorkerName === 'Sasha Manager'); }
+function canManageDropshippers() { return currentRole === 'owner' || currentUserHasPermission('dropshippers_manage'); }
 function canViewWarehouses() { return currentRole === 'owner' || currentUserHasPermission('warehouses_view', currentRole === 'manager'); }
 function canViewDashboard() { return currentRole === 'owner' || currentRole === 'manager' || currentUserHasAnyDashboardPermission(); }
 function canViewOwnerCash() { return currentRole === 'owner' || currentUserHasPermission('owner_cash_view'); }
 function canViewOwnerExpenses() { return currentRole === 'owner' || currentUserHasPermission('owner_expenses_view'); }
 function canViewOwnerPayments() { return currentRole === 'owner' || currentUserHasPermission('owner_payments_view'); }
-function canViewOwnerToday() { return currentRole === 'owner' || currentUserHasPermission('groups_view', currentWorkerName === 'Sasha Manager'); }
-function canViewCalendar() { return currentRole === 'owner' || currentUserHasPermission('calendar_view', currentWorkerName === 'Sasha Manager'); }
+function canViewOwnerToday() { return currentRole === 'owner' || currentUserHasPermission('groups_view'); }
+function canViewCalendar() { return currentRole === 'owner' || currentUserHasPermission('calendar_view'); }
 function canMarkWorkerDone() { return currentRole === 'owner' || currentUserHasPermission('order_complete', currentRole === 'senior' || currentRole === 'extra'); }
 
 function getClients() {

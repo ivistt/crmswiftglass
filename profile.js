@@ -9,19 +9,26 @@ let assistantWorkerSalaries = [];
 let cashSearchQuery = '';
 let selectedAssistantSalaryName = '';
 let profileSalaryMonthCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-const FOP_CASH_WORKER_NAME = 'Oleg Starshiy';
-const MANAGER_CARD_CASH_WORKER_NAME = 'Sasha Manager';
 
 function canManageAssistantSalary() {
   return currentRole === 'senior' || currentRole === 'extra';
 }
 
 function canAccessPersonalCash() {
-  return currentUserHasPermission('personal_cash_view', currentRole === 'senior' || currentRole === 'extra' || currentWorkerName === MANAGER_CARD_CASH_WORKER_NAME);
+  return currentUserHasPermission('personal_cash_view', currentRole === 'senior' || currentRole === 'extra');
 }
 
 function canAddPersonalCashEntries() {
-  return currentUserHasPermission('cash_add_entries', currentRole === 'senior' || currentRole === 'extra' || currentWorkerName === MANAGER_CARD_CASH_WORKER_NAME);
+  return currentUserHasPermission('cash_add_entries', currentRole === 'senior' || currentRole === 'extra');
+}
+
+function currentWorkerHasFopCashRoute() {
+  return (typeof getPaymentMethods === 'function' ? getPaymentMethods() : [])
+    .some(row =>
+      row?.active !== false
+      && String(row?.method_type || '').trim().toLowerCase() === 'fop'
+      && String(row?.worker_name || '').trim() === currentWorkerName
+    );
 }
 
 function normalizeSalaryMonthCursor(value) {
@@ -161,7 +168,7 @@ function calcCashBalance(log) {
 async function openProfileScreen() {
   await loadWorkerSalaries();
   await loadWorkerProblems();
-  if (currentWorkerName === MANAGER_CARD_CASH_WORKER_NAME) await loadWorkerCashLog();
+  if (canAccessPersonalCash()) await loadWorkerCashLog();
   renderProfile();
   showScreen('profile');
   setActiveNav('profile');
@@ -194,7 +201,7 @@ function renderProfile() {
       + renderWorkAttendanceCard()
       + '<div class="profile-summary" style="margin-top:12px;">'
       + '<div class="profile-summary-card"><div class="profile-summary-label">Накоплено</div><div class="profile-summary-value">' + accTotal.toLocaleString('ru') + ' ₴</div>'
-      + (currentWorkerName === MANAGER_CARD_CASH_WORKER_NAME ? '<button class="btn-primary" style="margin-top:10px;min-height:36px;padding:0 14px;border-radius:8px;font-weight:800;" onclick="withdrawSalary()" ' + (accTotal <= 0 ? 'disabled' : '') + '>Снять ЗП</button>' : '')
+      + (canAccessPersonalCash() ? '<button class="btn-primary" style="margin-top:10px;min-height:36px;padding:0 14px;border-radius:8px;font-weight:800;" onclick="withdrawSalary()" ' + (accTotal <= 0 ? 'disabled' : '') + '>Снять ЗП</button>' : '')
       + '</div>'
       + '<div class="profile-summary-card"><div class="profile-summary-label">Сегодня</div><div class="profile-summary-value">' + todayAmount.toLocaleString('ru') + ' ₴</div></div>'
       + '</div>'
@@ -305,18 +312,6 @@ function renderCashScreen() {
     return;
   }
 
-  if (currentWorkerName === MANAGER_CARD_CASH_WORKER_NAME) {
-    el.innerHTML = ''
-      + '<div class="profile-header">'
-      + '<div class="worker-avatar" style="width:56px;height:56px;font-size:20px;border-radius:16px;flex-shrink:0;">' + getInitials(currentWorkerName) + '</div>'
-      + '<div><div style="font-size:20px;font-weight:800;">' + getWorkerDisplayName(currentWorkerName) + '</div>'
-      + '<div style="font-size:13px;color:var(--text3);margin-top:2px;">Касса</div></div>'
-      + '</div>'
-      + renderManagerCashSections();
-    initIcons();
-    return;
-  }
-
   const today = getLocalDateString();
   const nonFopCashLog = (workerCashLog || []).filter(entry => !isFopCashEntry(entry));
   const currencyCashLog = nonFopCashLog.filter(isCurrencyCashEntry);
@@ -332,8 +327,7 @@ function renderCashScreen() {
   const confirmedCashOnlyLog = confirmedUnifiedCashLog.filter(entry => !isCardCashEntry(entry));
   const confirmedFopCashLog = fopCashLog.filter(entry => getCashEntryApprovalStatus(entry) === 'confirmed');
   const pendingFopCashLog = fopCashLog.filter(entry => getCashEntryApprovalStatus(entry) !== 'confirmed');
-  const cashBalance = calcCashBalance(confirmedCashOnlyLog);
-  const cardBalance = calcCashBalance(confirmedCardCashLog);
+  const cashBalance = calcCashBalance(confirmedUnifiedCashLog);
   const currencyBalance = calcCurrencyCashBalance(currencyCashLog);
   const fopBalance = calcCashBalance(confirmedFopCashLog);
 
@@ -343,23 +337,18 @@ function renderCashScreen() {
     + '<div><div style="font-size:20px;font-weight:800;">' + getWorkerDisplayName(currentWorkerName) + '</div>'
     + '<div style="font-size:13px;color:var(--text3);margin-top:2px;">Касса</div></div>'
     + '</div>'
-    + renderCashSection(confirmedCashOnlyLog, cashBalance, today, {
-      title: 'Касса (наличка)',
-      account: 'cash',
-      buttonText: '+ Запись',
-      extraButtonsHtml: '<button class="btn-secondary" style="font-size:12px;padding:6px 10px;" onclick="openCashEntryModal(\'currency-back\')">Из $</button>'
-    })
-    + renderCashSection(confirmedCardCashLog, cardBalance, today, {
-      title: 'Касса (карта)',
+    + renderCashSection(confirmedUnifiedCashLog, cashBalance, today, {
+      title: 'Касса',
       account: 'cash',
       buttonText: '+ Запись',
       pendingEntries: pendingCardCashLog,
       pendingLabel: 'ОЖИДАЮТ ПОДТВЕРЖДЕНИЯ (КАРТА)',
       defaultPendingComment: 'Карта',
-      archiveKeyPrefix: 'cash-card',
+      archiveKeyPrefix: 'cash',
+      extraButtonsHtml: '<button class="btn-secondary" style="font-size:12px;padding:6px 10px;" onclick="openCashEntryModal(\'currency-back\')">Из $</button>'
     })
     + renderCurrencyCashSection(currencyCashLog, currencyBalance, today)
-    + (currentWorkerName === FOP_CASH_WORKER_NAME
+    + ((currentWorkerHasFopCashRoute() || fopCashLog.length)
       ? renderCashSection(confirmedFopCashLog, fopBalance, today, { title: 'Касса БАБЕНКО', account: 'fop', buttonText: '+ БАБЕНКО', pendingEntries: pendingFopCashLog })
       : '')
     + renderWorkerDropshipperCashSection();
@@ -771,33 +760,6 @@ function isCardCashEntry(entry) {
   const paymentMethod = getCashEntryPaymentMethod(entry);
   if (!paymentMethod) return false;
   return !isCashPaymentMethod(paymentMethod) && !isFopPaymentMethod(paymentMethod);
-}
-
-function renderManagerCashSections() {
-  const today = getLocalDateString();
-  const nonFopCashLog = (workerCashLog || []).filter(entry => !isFopCashEntry(entry));
-  const currencyCashLog = nonFopCashLog.filter(isCurrencyCashEntry);
-  const pendingCardCashLog = (workerCashLog || []).filter(isPendingPersonalConfirmableCashEntry).filter(isCardCashEntry);
-  const confirmedUnifiedCashLog = nonFopCashLog.filter(entry => {
-    if (isCurrencyCashEntry(entry) && !isCurrencyCashTransferEntry(entry)) return false;
-    if (isPendingPersonalConfirmableCashEntry(entry)) return false;
-    return true;
-  });
-  const confirmedCardCashLog = confirmedUnifiedCashLog.filter(isCardCashEntry);
-  const confirmedCashOnlyLog = confirmedUnifiedCashLog.filter(entry => !isCardCashEntry(entry));
-  return renderCashSection(confirmedCashOnlyLog, calcCashBalance(confirmedCashOnlyLog), today, {
-      title: 'Касса',
-      account: 'cash',
-      buttonText: '+ Запись',
-  }) + renderCashSection(confirmedCardCashLog, calcCashBalance(confirmedCardCashLog), today, {
-      title: 'Касса (карта)',
-      account: 'cash',
-      buttonText: '+ Запись',
-      pendingEntries: pendingCardCashLog,
-      pendingLabel: 'ОЖИДАЮТ ПОДТВЕРЖДЕНИЯ (КАРТА)',
-      defaultPendingComment: 'Карта',
-      archiveKeyPrefix: 'manager-cash-card',
-    }) + renderCurrencyCashSection(currencyCashLog, calcCurrencyCashBalance(currencyCashLog), today);
 }
 
 function getCurrentWorkerDropshipperNames() {
@@ -1713,7 +1675,7 @@ async function withdrawSalary() {
     return;
   }
 
-  if (currentRole === 'senior' || currentWorkerName === MANAGER_CARD_CASH_WORKER_NAME) {
+  if (currentRole === 'senior' || currentRole === 'extra' || canAccessPersonalCash()) {
     if (!confirm(`Снять ЗП на сумму ${accTotal.toLocaleString('ru')} ₴ из вашей кассы?`)) return;
     await performSalaryWithdrawal(currentWorkerName, currentWorkerName, accTotal);
   } else {
@@ -1908,11 +1870,18 @@ function renderSalaryRuleCard(workerName) {
   }
   if (rule.selectedServices) {
     const adj = rule.serviceAdjustments || {};
-    const details = [
-      adj.mount ? `монтаж ${adj.mount > 0 ? '+' : ''}${adj.mount}` : '',
-      adj.cut ? `срезка ${adj.cut > 0 ? '+' : ''}${adj.cut}` : '',
-      adj.glue ? `вклейка ${adj.glue > 0 ? '+' : ''}${adj.glue}` : '',
-    ].filter(Boolean).join(', ');
+    const personalRates = rule.serviceRates || {};
+    const details = typeof getServiceTypeOptions === 'function'
+      ? getServiceTypeOptions()
+        .filter(item => item.salaryCategory !== 'special' && item.salaryCategory !== 'custom')
+        .map(item => {
+          const hasPersonalRate = Object.prototype.hasOwnProperty.call(personalRates, item.name);
+          const adjustment = hasPersonalRate ? 0 : (Number(adj[item.salaryCategory]) || 0);
+          const amount = (hasPersonalRate ? Number(personalRates[item.name]) : (Number(item.rate) || 0)) + adjustment;
+          return `${item.name}: ${amount.toLocaleString('ru')} ₴`;
+        })
+        .join(', ')
+      : '';
     parts.push({ label: 'Выбранные услуги', value: details || 'по прайсу' });
   }
   if (rule.moldingPct) {

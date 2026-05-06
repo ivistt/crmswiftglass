@@ -12,7 +12,7 @@ let orderDateFilterExact = '';
 let orderDateFilterFrom = '';
 let orderDateFilterTo = '';
 const deletingOrderIds = new Set();
-const SERVICE_TYPE_OPTIONS = [
+const DEFAULT_SERVICE_TYPE_OPTIONS = [
   { group: 'Монтаж', name: 'Монтаж лобового', rate: 400, salaryCategory: 'mount' },
   { group: 'Монтаж', name: 'Монтаж бокового', rate: 300, salaryCategory: 'mount' },
   { group: 'Монтаж', name: 'Монтаж заднего', rate: 400, salaryCategory: 'mount' },
@@ -32,6 +32,30 @@ const SERVICE_TYPE_OPTIONS = [
   { group: 'Дополнительно', name: 'Тонировка', rate: 0, salaryCategory: 'special' },
   { group: 'Нестандартные работы', name: 'Нестандартные работы', rate: 0, salaryCategory: 'custom' },
 ];
+function getServiceTypeOptions() {
+  const rows = Array.isArray(refServiceRates) ? refServiceRates : [];
+  const activeRows = rows
+    .filter(row => row?.active !== false && String(row?.name || '').trim())
+    .sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0));
+  if (!activeRows.length) return DEFAULT_SERVICE_TYPE_OPTIONS;
+  return activeRows.map(row => ({
+    group: String(row.service_group || row.group || '').trim() || 'Услуги',
+    name: String(row.name || '').trim(),
+    rate: Number(row.rate) || 0,
+    salaryCategory: String(row.salary_category || row.salaryCategory || 'custom').trim() || 'custom',
+  }));
+}
+const SERVICE_TYPE_OPTIONS = new Proxy([], {
+  get(_target, prop) {
+    const options = getServiceTypeOptions();
+    const value = options[prop];
+    return typeof value === 'function' ? value.bind(options) : value;
+  },
+  ownKeys() { return Reflect.ownKeys(getServiceTypeOptions()); },
+  getOwnPropertyDescriptor(_target, prop) {
+    return Object.getOwnPropertyDescriptor(getServiceTypeOptions(), prop);
+  }
+});
 const CUSTOM_SERVICE_TYPE_NAME = 'Нестандартные работы';
 const GLASS_MANUFACTURERS = [
   {
@@ -68,7 +92,21 @@ const GLASS_MANUFACTURER_BY_NAME = Object.fromEntries(GLASS_MANUFACTURERS.map(it
 const STATIC_MANAGER_OPTIONS = [
   { name: 'Maksim', label: '🦊 Макс' },
 ];
-const SERVICE_TYPE_BY_NAME = Object.fromEntries(SERVICE_TYPE_OPTIONS.map(item => [item.name, item]));
+const SERVICE_TYPE_BY_NAME = new Proxy({}, {
+  get(_target, prop) {
+    return getServiceTypeOptions().find(item => item.name === prop);
+  },
+  has(_target, prop) {
+    return getServiceTypeOptions().some(item => item.name === prop);
+  },
+  ownKeys() {
+    return getServiceTypeOptions().map(item => item.name);
+  },
+  getOwnPropertyDescriptor(_target, prop) {
+    const value = getServiceTypeOptions().find(item => item.name === prop);
+    return value ? { enumerable: true, configurable: true, value } : undefined;
+  },
+});
 
 function getCurrentWorkerSystemRole() {
   const worker = (workers || []).find(item => item.name === currentWorkerName);
@@ -86,11 +124,13 @@ function canMarkWorkerDone() {
 }
 
 function canQuickConfirmOrderAmounts(order) {
-  const isAssignedSpecialist = getOrderSpecialServiceAssignedWorker(order, 'tatu') === currentWorkerName
-    || getOrderSpecialServiceAssignedWorker(order, 'toning') === currentWorkerName;
+  const currentWorker = typeof getCurrentWorkerRecord === 'function' ? getCurrentWorkerRecord() : null;
+  const currentName = currentWorker?.name || currentWorkerName;
+  const isAssignedSpecialist = getOrderSpecialServiceAssignedWorker(order, 'tatu') === currentName
+    || getOrderSpecialServiceAssignedWorker(order, 'toning') === currentName;
   return currentUserHasPermission('order_payments_manage', currentUserCanActAsSenior())
     && currentUserCanActAsSenior()
-    && (order?.responsible === currentWorkerName || isAssignedSpecialist)
+    && (order?.responsible === currentName || isAssignedSpecialist)
     && isOrderFinanciallyActive(order)
     && !order?.workerDone;
 }
@@ -137,10 +177,12 @@ function canCurrentUserManageOrderPayments(order) {
   }
   if (!order) return currentRole === 'owner' || currentRole === 'manager' || currentUserHasPermission('order_payments_manage', currentUserCanActAsSenior());
   if (currentRole === 'owner' || currentRole === 'manager') return true;
-  const isAssignedSpecialist = getOrderSpecialServiceAssignedWorker(order, 'tatu') === currentWorkerName
-    || getOrderSpecialServiceAssignedWorker(order, 'toning') === currentWorkerName;
   return currentUserHasPermission('order_payments_manage', currentUserCanActAsSenior())
-    && (order.responsible === currentWorkerName || isAssignedSpecialist);
+    && order.responsible === currentWorkerName;
+}
+
+function canCurrentUserRemoveOrderPayments() {
+  return currentRole === 'owner' || currentRole === 'manager';
 }
 
 function canCurrentUserEditOrderServices(order) {
@@ -154,8 +196,11 @@ function canCurrentUserEditOrderServices(order) {
 function canCurrentUserToggleSpecialServiceStatus(order, type) {
   if (currentRole === 'owner' || currentRole === 'manager') return true;
   if (!order) return false;
-  const canHandle = workerCanHandleSpecialService(currentWorkerName, type);
+  const currentWorker = typeof getCurrentWorkerRecord === 'function' ? getCurrentWorkerRecord() : null;
+  const currentName = currentWorker?.name || currentWorkerName;
+  const canHandle = workerCanHandleSpecialService(currentWorker || currentName, type);
   if (!canHandle) return false;
+  if (getOrderSpecialServiceAssignedWorker(order, type) !== currentName) return false;
   if (type === 'tatu') {
     return Number(order.tatu) > 0;
   }
@@ -413,10 +458,6 @@ async function confirmSeniorOrderAmounts(orderId) {
 
   const totalSupplierPaid = sumConfirmedOrderPayments(order, nextSupplierPayments, 'supplier');
   const totalClientPaid = sumConfirmedOrderPayments(order, nextClientPayments, 'client');
-  const checkDiff = totalSupplierPaid - oldCheck;
-  const oldClientPaid = getOrderClientPaidAmount(order);
-  const clientDiff = totalClientPaid - oldClientPaid;
-  const cashEntries = [];
   const totalClientAmount = getOrderClientTotalAmount(order);
   const updatedOrder = {
     ...order,
@@ -428,45 +469,13 @@ async function confirmSeniorOrderAmounts(orderId) {
     supplierPayments: nextSupplierPayments,
   };
 
-  if (isOrderFinanciallyActive(updatedOrder) && checkDiff !== 0) {
-    const amount = -checkDiff;
-    const typeStr = checkDiff > 0 ? 'Списание' : 'Возврат';
-    const fDate = updatedOrder.date ? formatDate(updatedOrder.date) : '—';
-    const fTime = updatedOrder.time || '—';
-    const fClient = updatedOrder.client || '—';
-    const fCar = updatedOrder.car || '—';
-    const targetWorker = updatedOrder.responsible || currentWorkerName;
-    cashEntries.push({
-      worker_name: targetWorker,
-      amount,
-      comment: `${typeStr} за стекло ${updatedOrder.id}, ${fDate} ${fTime}, клиент: ${fClient}, авто: ${fCar}, склад: ${updatedOrder.warehouse || '—'}`,
-      cashType: 'supplier',
-    });
-  }
-
-  if (isOrderFinanciallyActive(updatedOrder) && clientDiff !== 0) {
-    const typeStr = clientDiff > 0 ? 'Оплата клиента' : 'Возврат клиенту';
-    const fDate = updatedOrder.date ? formatDate(updatedOrder.date) : '—';
-    const fClient = updatedOrder.client || '—';
-    const fCar = updatedOrder.car || '—';
-    const targetWorker = updatedOrder.responsible || currentWorkerName;
-    cashEntries.push({
-      worker_name: targetWorker,
-      amount: clientDiff,
-      comment: `${typeStr} наличкой ${updatedOrder.id}, ${fDate}, клиент: ${fClient}, авто: ${fCar}`,
-      cashType: 'client',
-    });
-  }
-
   if (btnEl) {
     btnEl.disabled = true;
     btnEl.textContent = 'Сохранение...';
   }
 
   try {
-    const shouldUseSaveWithCash = cashEntries.length > 0;
-    const saved = shouldUseSaveWithCash
-      ? (await sbSaveOrderWithCash({
+    const saved = (await sbSaveOrderWithCash({
           ...updatedOrder,
           clientPayments: nextClientPayments,
           supplierPayments: nextSupplierPayments,
@@ -474,20 +483,12 @@ async function confirmSeniorOrderAmounts(orderId) {
           check: totalSupplierPaid,
         }, {
           isNew: false,
-          cashEntries,
+          cashEntries: [],
           rollbackOrder: order,
-        })).order
-      : await sbPatchOrderFields(orderId, {
-          debt: totalClientPaid,
-          check_sum: totalSupplierPaid,
-          client_payments: nextClientPayments,
-          supplier_payments: nextSupplierPayments,
-        });
+        })).order;
     if (checkEl) checkEl.value = '';
     if (debtEl) debtEl.value = '';
-    if (shouldUseSaveWithCash) {
-      await refreshCashStateAfterServerSave();
-    }
+    await refreshCashStateAfterServerSave();
     try {
       orders = await sbFetchOrders();
     } catch (refreshError) {
@@ -590,10 +591,10 @@ function renderOrderCard(o) {
     (o.priorityTask && !o.workerDone)
       ? `<span class="status-badge status-priority" title="Приоритетная задача">Приоритет</span>`
       : '',
-    workerCanHandleSpecialService(currentWorkerName, 'tatu') && Number(o.tatu) > 0
+    workerCanHandleSpecialService(typeof getCurrentWorkerRecord === 'function' ? getCurrentWorkerRecord() : currentWorkerName, 'tatu') && Number(o.tatu) > 0
       ? `<span class="status-badge status-call" title="В заказе есть тату">Тату ${(Number(o.tatu) || 0).toLocaleString('ru')} ₴</span>`
       : '',
-    workerCanHandleSpecialService(currentWorkerName, 'toning') && Number(o.toning) > 0
+    workerCanHandleSpecialService(typeof getCurrentWorkerRecord === 'function' ? getCurrentWorkerRecord() : currentWorkerName, 'toning') && Number(o.toning) > 0
       ? `<span class="status-badge status-own-warehouse" title="В заказе есть тонировка">Тонировка ${(Number(o.toning) || 0).toLocaleString('ru')} ₴</span>`
       : '',
   ].filter(Boolean).join('');
@@ -755,10 +756,23 @@ function renderOrderCardCallNotes(order) {
 
 function getSpecialServiceAction(order) {
   if (!order || !isOrderFinanciallyActive(order)) return null;
-  if (workerCanHandleSpecialService(currentWorkerName, 'tatu') && Number(order.tatu) > 0 && !order.tatuStatus) {
+  const currentWorker = typeof getCurrentWorkerRecord === 'function' ? getCurrentWorkerRecord() : null;
+  const currentName = currentWorker?.name || currentWorkerName;
+  if (
+    workerCanHandleSpecialService(currentWorker || currentName, 'tatu')
+    && getOrderSpecialServiceAssignedWorker(order, 'tatu') === currentName
+    && Number(order.tatu) > 0
+    && !order.tatuStatus
+  ) {
     return { type: 'tatu', label: 'Выполнить тату', title: 'Подтвердить выполнение тату' };
   }
-  if (workerCanHandleSpecialService(currentWorkerName, 'toning') && Number(order.toning) > 0 && !order.toningStatus && !order.toningExternal) {
+  if (
+    workerCanHandleSpecialService(currentWorker || currentName, 'toning')
+    && getOrderSpecialServiceAssignedWorker(order, 'toning') === currentName
+    && Number(order.toning) > 0
+    && !order.toningStatus
+    && !order.toningExternal
+  ) {
     return { type: 'toning', label: 'Выполнить тонировку', title: 'Подтвердить выполнение тонировки' };
   }
   return null;
@@ -994,25 +1008,25 @@ function _isCurrentWorkerOrder(order) {
 
 function _filterSpecialistOrdersByTab(list) {
   const today = todayStr();
+  const currentWorker = typeof getCurrentWorkerRecord === 'function' ? getCurrentWorkerRecord() : null;
+  const currentName = currentWorker?.name || currentWorkerName;
   list = list.filter(o => !isOrderDeleted(o));
-  if (workerCanHandleSpecialService(currentWorkerName, 'tatu') && currentWorkerTab === 'tatuActual') {
-    return list.filter(o => o.inWork && !o.isCancelled && Number(o.tatu) > 0 && !o.tatuStatus && getOrderSpecialServiceAssignedWorker(o, 'tatu') === currentWorkerName);
+  if (workerCanHandleSpecialService(currentWorker || currentName, 'tatu') && currentWorkerTab === 'tatuActual') {
+    return list.filter(o => o.inWork && !o.isCancelled && Number(o.tatu) > 0 && !o.tatuStatus && getOrderSpecialServiceAssignedWorker(o, 'tatu') === currentName);
   }
-  if (workerCanHandleSpecialService(currentWorkerName, 'tatu') && currentWorkerTab === 'tatuDone') {
-    return list.filter(o => o.inWork && !o.isCancelled && Number(o.tatu) > 0 && !!o.tatuStatus && getOrderSpecialServiceAssignedWorker(o, 'tatu') === currentWorkerName);
+  if (workerCanHandleSpecialService(currentWorker || currentName, 'tatu') && currentWorkerTab === 'tatuDone') {
+    return list.filter(o => o.inWork && !o.isCancelled && Number(o.tatu) > 0 && !!o.tatuStatus && getOrderSpecialServiceAssignedWorker(o, 'tatu') === currentName);
   }
-  if (workerCanHandleSpecialService(currentWorkerName, 'toning') && currentWorkerTab === 'toningActual') {
-    return list.filter(o => o.inWork && !o.isCancelled && Number(o.toning) > 0 && !o.toningStatus && !o.toningExternal && getOrderSpecialServiceAssignedWorker(o, 'toning') === currentWorkerName);
+  if (workerCanHandleSpecialService(currentWorker || currentName, 'toning') && currentWorkerTab === 'toningActual') {
+    return list.filter(o => o.inWork && !o.isCancelled && Number(o.toning) > 0 && !o.toningStatus && !o.toningExternal && getOrderSpecialServiceAssignedWorker(o, 'toning') === currentName);
   }
-  if (workerCanHandleSpecialService(currentWorkerName, 'toning') && currentWorkerTab === 'toningDone') {
-    return list.filter(o => o.inWork && !o.isCancelled && Number(o.toning) > 0 && !!o.toningStatus && !o.toningExternal && getOrderSpecialServiceAssignedWorker(o, 'toning') === currentWorkerName);
+  if (workerCanHandleSpecialService(currentWorker || currentName, 'toning') && currentWorkerTab === 'toningDone') {
+    return list.filter(o => o.inWork && !o.isCancelled && Number(o.toning) > 0 && !!o.toningStatus && !o.toningExternal && getOrderSpecialServiceAssignedWorker(o, 'toning') === currentName);
   }
-  if (currentWorkerName === 'Nastya' && currentWorkerTab === 'ownWarehouse') {
+  if (currentUserHasPermission('own_warehouse_view') && currentWorkerTab === 'ownWarehouse') {
     return list.filter(o => o.ownWarehouse && !o.workerDone && !o.isCancelled);
   }
-  const ownOrders = currentWorkerName === 'Nastya'
-    ? list.filter(o => o.inWork && !o.isCancelled)
-    : list.filter(o => _isCurrentWorkerOrder(o) && o.inWork && !o.isCancelled);
+  const ownOrders = list.filter(o => _isCurrentWorkerOrder(o) && o.inWork && !o.isCancelled);
 
   if (currentWorkerTab === 'actual') {
     return ownOrders.filter(o => !o.workerDone);
@@ -1224,7 +1238,13 @@ function renderOrders() {
   if (search) list = list.filter(o => orderMatchesSearch(o, search));
   if (orderDateFilterExact || orderDateFilterFrom || orderDateFilterTo) list = list.filter(orderMatchesDateFilter);
   if (statF) list = list.filter(o => getEffectivePaymentStatus(o) === statF);
-  if (workerF) list = list.filter(o => o.responsible === workerF || o.assistant === workerF || o.manager === workerF);
+  if (workerF) list = list.filter(o =>
+    o.responsible === workerF
+    || o.assistant === workerF
+    || o.manager === workerF
+    || getOrderSpecialServiceAssignedWorker(o, 'tatu') === workerF
+    || getOrderSpecialServiceAssignedWorker(o, 'toning') === workerF
+  );
 
   list.sort((a, b) => compareOrdersForList(a, b, sort, currentRole !== 'owner' && currentRole !== 'manager'));
 
@@ -1872,43 +1892,6 @@ function getRemovedPaymentSourceKeys(order, oldOrder = null) {
   return Array.from(new Set(sourceKeys.filter(Boolean)));
 }
 
-async function addCashEntriesForDuplicatedOrder(order) {
-  if (!isOrderFinanciallyActive(order)) return;
-
-  const supplierPayments = order.supplierPayments || [];
-  const supplierCashPaid = supplierPayments.length
-    ? sumCashSupplierPayments(supplierPayments)
-    : (Number(order.check) || 0);
-  const clientCashPaid = getCashClientPaidForOrderSnapshot(order);
-  const targetWorker = order.responsible || currentWorkerName;
-  const fDate = order.date ? formatDate(order.date) : '—';
-  const fTime = order.time || '—';
-  const fClient = order.client || '—';
-  const fCar = order.car || '—';
-
-  if (supplierCashPaid !== 0) {
-    const cashComment = `Списание за стекло ${order.id}, ${fDate} ${fTime}, клиент: ${fClient}, авто: ${fCar}, склад: ${order.warehouse || '—'}`;
-    await sbInsertCashEntry({
-      worker_name: targetWorker,
-      amount: -supplierCashPaid,
-      comment: cashComment,
-    });
-  }
-
-  if (clientCashPaid !== 0) {
-    const cashComment = `Оплата клиента наличкой ${order.id}, ${fDate}, клиент: ${fClient}, авто: ${fCar}`;
-    await sbInsertCashEntry({
-      worker_name: targetWorker,
-      amount: clientCashPaid,
-      comment: cashComment,
-    });
-  }
-
-  if (supplierCashPaid !== 0 || clientCashPaid !== 0) {
-    await refreshCashStateAfterServerSave();
-  }
-}
-
 function isDuplicateOrderIdError(error) {
   const msg = String(error?.message || error || '').toLowerCase();
   return msg.includes('duplicate key') ||
@@ -1962,9 +1945,12 @@ async function duplicateOrder(id) {
   duplicate.isCancelled = false;
 
   try {
-    const saved = await sbInsertOrder(duplicate);
+    const saved = (await sbSaveOrderWithCash(duplicate, {
+      isNew: true,
+      cashEntries: [],
+      rollbackOrder: null,
+    })).order;
     const nextOrder = saved || duplicate;
-    await addCashEntriesForDuplicatedOrder(nextOrder);
     try {
       orders = await sbFetchOrders();
     } catch (refreshError) {
@@ -2298,6 +2284,7 @@ function renderClientPayments() {
   const listEl = document.getElementById('client-payments-list');
   if (!listEl) return;
   const canManagePayments = canCurrentUserManageOrderPayments(getOrderDraftFromForm(editingOrderId ? orders.find(item => item.id === editingOrderId) : null));
+  const canRemovePayments = canCurrentUserRemoveOrderPayments();
   if (!currentClientPayments.length) {
     listEl.innerHTML = '<div style="font-size:11px;color:var(--text3);">Нет оплат</div>';
     return;
@@ -2309,7 +2296,7 @@ function renderClientPayments() {
         <div style="font-size:11px;color:var(--text3);">${formatDate(p.date)}</div>
         ${p.method ? `<div style="font-size:11px;color:var(--text3);margin-top:2px;">${escapeHtml(normalizePaymentMethod(p.method))}</div>` : ''}
       </div>
-      ${canManagePayments ? `
+      ${canManagePayments && canRemovePayments ? `
         <button type="button" class="icon-btn" style="width:20px;height:20px;" onclick="removeClientPayment(${idx})">
           <i data-lucide="trash-2" style="width:10px;height:10px;color:var(--red);"></i>
         </button>
@@ -2323,6 +2310,7 @@ function renderSupplierPayments() {
   const listEl = document.getElementById('supplier-payments-list');
   if (!listEl) return;
   const canManagePayments = canCurrentUserManageOrderPayments(getOrderDraftFromForm(editingOrderId ? orders.find(item => item.id === editingOrderId) : null));
+  const canRemovePayments = canCurrentUserRemoveOrderPayments();
   if (!currentSupplierPayments.length) {
     listEl.innerHTML = '<div style="font-size:11px;color:var(--text3);">Нет оплат поставщику</div>';
     return;
@@ -2334,7 +2322,7 @@ function renderSupplierPayments() {
         <div style="font-size:11px;color:var(--text3);">${formatDate(p.date)}</div>
         ${p.method ? `<div style="font-size:11px;color:var(--text3);margin-top:2px;">${escapeHtml(normalizePaymentMethod(p.method))}</div>` : ''}
       </div>
-      ${canManagePayments ? `
+      ${canManagePayments && canRemovePayments ? `
         <button type="button" class="icon-btn" style="width:20px;height:20px;" onclick="removeSupplierPayment(${idx})">
           <i data-lucide="trash-2" style="width:10px;height:10px;color:var(--red);"></i>
         </button>
@@ -2513,59 +2501,8 @@ async function persistImmediateOrderPaymentsUpdate({
   const data = getOrderDraftFromForm(existingOrder);
   data.clientPayments = JSON.parse(JSON.stringify(clientPayments || []));
   data.supplierPayments = JSON.parse(JSON.stringify(supplierPayments || []));
-
-  const oldSupplierPayments = existingOrder?.supplierPayments || [];
-  const newSupplierPayments = data.supplierPayments || [];
-  const hasSupplierPaymentHistory = oldSupplierPayments.length > 0 || newSupplierPayments.length > 0;
-  const oldFinanciallyActive = isOrderFinanciallyActive(existingOrder);
-  const newFinanciallyActive = isOrderFinanciallyActive(data);
-  const oldCashSupplierPaid = oldFinanciallyActive ? (hasSupplierPaymentHistory ? sumCashSupplierPayments(oldSupplierPayments) : (Number(existingOrder.check) || 0)) : 0;
-  const newCashSupplierPaid = newFinanciallyActive ? (hasSupplierPaymentHistory ? sumCashSupplierPayments(newSupplierPayments) : (Number(data.check) || 0)) : 0;
-  const cashSupplierDiff = newFinanciallyActive ? (newCashSupplierPaid - oldCashSupplierPaid) : 0;
-
-  const oldClientPayments = existingOrder?.clientPayments || [];
-  const newClientPayments = data.clientPayments || [];
-  const oldCashClientPaid = oldFinanciallyActive ? getCashClientPaidForOrderSnapshot({ ...existingOrder, clientPayments: oldClientPayments }) : 0;
-  const newCashClientPaid = newFinanciallyActive ? getCashClientPaidForOrderSnapshot({ ...data, clientPayments: newClientPayments }) : 0;
-  const cashClientDiff = newFinanciallyActive ? (newCashClientPaid - oldCashClientPaid) : 0;
-  const cashEntries = [];
   const confirmedClientPaid = sumConfirmedOrderPayments({ ...existingOrder, ...data }, data.clientPayments, 'client');
   const confirmedSupplierPaid = sumConfirmedOrderPayments({ ...existingOrder, ...data }, data.supplierPayments, 'supplier');
-  const addedCashEntries = buildNewCashPaymentEntries(data, existingOrder);
-
-  if ((currentRole === 'owner' || canCurrentUserManageOrderPayments(data)) && cashSupplierDiff < 0) {
-    const amount = -cashSupplierDiff;
-    const typeStr = cashSupplierDiff > 0 ? 'Списание' : 'Возврат';
-    const fDate = data.date ? formatDate(data.date) : '—';
-    const fTime = data.time || '—';
-    const fClient = data.client || '—';
-    const fCar = data.car || '—';
-    const targetWorker = getCurrentCashWorkerNameForOrder(data);
-    cashEntries.push({
-      worker_name: targetWorker,
-      amount,
-      comment: `${typeStr} за стекло ${data.id}, ${fDate} ${fTime}, клиент: ${fClient}, авто: ${fCar}, склад: ${data.warehouse || '—'}`,
-      cashType: 'supplier',
-    });
-  }
-
-  if ((currentRole === 'owner' || canCurrentUserManageOrderPayments(data)) && cashClientDiff < 0) {
-    const typeStr = cashClientDiff > 0 ? 'Оплата клиента' : 'Возврат клиенту';
-    const fDate = data.date ? formatDate(data.date) : '—';
-    const fClient = data.client || '—';
-    const fCar = data.car || '—';
-    const targetWorker = getCurrentCashWorkerNameForOrder(data);
-    cashEntries.push({
-      worker_name: targetWorker,
-      amount: cashClientDiff,
-      comment: `${typeStr} наличкой ${data.id}, ${fDate}, клиент: ${fClient}, авто: ${fCar}`,
-      cashType: 'client',
-    });
-  }
-
-  const nonCashEntries = buildNewNonCashPaymentEntries(data, existingOrder);
-  const removedSourceKeys = getRemovedPaymentSourceKeys(data, existingOrder);
-  const directCashEntries = [...addedCashEntries, ...cashEntries];
 
   data.debt = confirmedClientPaid;
   data.check = confirmedSupplierPaid;
@@ -2577,33 +2514,13 @@ async function persistImmediateOrderPaymentsUpdate({
     check: confirmedSupplierPaid,
   };
 
-  const shouldUseSaveWithCash = directCashEntries.length > 0 && (currentRole === 'owner' || currentRole === 'manager');
-  let saved;
-  if (shouldUseSaveWithCash) {
-    saved = (await sbSaveOrderWithCash(paymentPatchOrder, {
-      isNew: false,
-      cashEntries: directCashEntries,
-      rollbackOrder: existingOrder,
-    })).order;
-  } else {
-    const insertedCashEntries = [];
-    saved = await sbPatchOrderFields(editingOrderId, {
-      client_payments: data.clientPayments,
-      supplier_payments: data.supplierPayments,
-      debt: confirmedClientPaid,
-      check_sum: confirmedSupplierPaid,
-    });
-    for (const cashEntry of directCashEntries) {
-      const inserted = await sbInsertCashEntry(cashEntry);
-      if (inserted) insertedCashEntries.push(inserted);
-    }
-    mergeCreatedCashEntriesIntoCurrentWorkerCash(insertedCashEntries);
-  }
-  if (removedSourceKeys.length) {
-    await sbDeleteCashEntriesBySourceKeys(removedSourceKeys);
-  }
+  const saved = (await sbSaveOrderWithCash(paymentPatchOrder, {
+    isNew: false,
+    cashEntries: [],
+    rollbackOrder: existingOrder,
+  })).order;
   const refreshedOrder = await refreshImmediatePaymentState(editingOrderId, {
-    refreshCash: directCashEntries.length > 0 || nonCashEntries.length > 0 || removedSourceKeys.length > 0,
+    refreshCash: true,
   });
   const canonicalOrder = refreshedOrder || saved || orders.find(item => item.id === editingOrderId) || null;
   currentClientPayments = JSON.parse(JSON.stringify(canonicalOrder?.clientPayments || data.clientPayments || []));
@@ -2625,6 +2542,7 @@ function sumCashSupplierPayments(payments) {
 }
 
 async function removeClientPayment(idx) {
+  if (!canCurrentUserRemoveOrderPayments()) return showToast('Удалять оплаты может только владелец или менеджер', 'error');
   if (!confirm('Удалить этот платеж из истории?')) return;
   const nextClientPayments = JSON.parse(JSON.stringify(currentClientPayments || []));
   nextClientPayments.splice(idx, 1);
@@ -2643,6 +2561,7 @@ async function removeClientPayment(idx) {
 }
 
 async function removeSupplierPayment(idx) {
+  if (!canCurrentUserRemoveOrderPayments()) return showToast('Удалять оплаты может только владелец или менеджер', 'error');
   if (!confirm('Удалить этот платеж поставщику из истории?')) return;
   const nextSupplierPayments = JSON.parse(JSON.stringify(currentSupplierPayments || []));
   nextSupplierPayments.splice(idx, 1);
@@ -2962,6 +2881,10 @@ function getOrderDraftFromForm(baseOrder = null) {
   order.toningStatus = document.getElementById('f-toning-status')?.checked || false;
   order.tatuResponsible = document.getElementById('f-tatu-responsible')?.value || baseOrder?.tatuResponsible || '';
   order.toningResponsible = document.getElementById('f-toning-responsible')?.value || baseOrder?.toningResponsible || '';
+  order.tatuDone = order.tatuStatus;
+  order.tatuDoneBy = order.tatuStatus ? (baseOrder?.tatuDoneBy || order.tatuResponsible || currentWorkerName || '') : '';
+  order.toningDone = order.toningStatus;
+  order.toningDoneBy = order.toningStatus ? (baseOrder?.toningDoneBy || order.toningResponsible || currentWorkerName || '') : '';
   order.priorityTask = document.getElementById('f-priority-task')?.checked || false;
   order.total = getN('f-total');
   order.income = getN('f-income');
@@ -3028,12 +2951,16 @@ function getWorkerOrderSalaryPreviewBreakdown(workerName, order) {
         parts.push({ label: 'Нестандартные работы 20% от монтажа', amount: customAmount });
       }
       const adjustments = rule.serviceAdjustments || {};
+      const serviceRates = rule.serviceRates || {};
       const groupedServices = {};
       const serviceItems = typeof _salarySelectedServiceItems === 'function' ? _salarySelectedServiceItems(order) : [];
       serviceItems.forEach(item => {
-        if (item.salaryCategory === 'custom') return;
-        const adjustment = Number(adjustments[item.salaryCategory]) || 0;
-        const amount = Math.max(0, (Number(item.rate) || 0) + adjustment);
+        if (item.salaryCategory === 'custom' || item.salaryCategory === 'special') return;
+        const hasPersonalRate = Object.prototype.hasOwnProperty.call(serviceRates, item.name);
+        const baseRate = hasPersonalRate ? Number(serviceRates[item.name]) : (Number(item.rate) || 0);
+        const adjustment = hasPersonalRate ? 0 : (Number(adjustments[item.salaryCategory]) || 0);
+        const amount = Math.max(0, baseRate + adjustment);
+        if (amount <= 0) return;
         if (!groupedServices[item.name]) groupedServices[item.name] = { qty: 0, amount: 0 };
         groupedServices[item.name].qty += 1;
         groupedServices[item.name].amount += amount;
@@ -3365,11 +3292,13 @@ function syncSpecialServiceStatusPreview() {
 function shouldAutoPersistSpecialServiceStatus(type, order) {
   if (currentRole === 'owner' || currentRole === 'manager') return false;
   if (!order) return false;
+  const currentWorker = typeof getCurrentWorkerRecord === 'function' ? getCurrentWorkerRecord() : null;
+  const currentName = currentWorker?.name || currentWorkerName;
   if (type === 'tatu') {
-    return workerCanHandleSpecialService(currentWorkerName, 'tatu') && canCurrentUserToggleSpecialServiceStatus(order, 'tatu');
+    return workerCanHandleSpecialService(currentWorker || currentName, 'tatu') && canCurrentUserToggleSpecialServiceStatus(order, 'tatu');
   }
   if (type === 'toning') {
-    return workerCanHandleSpecialService(currentWorkerName, 'toning') && canCurrentUserToggleSpecialServiceStatus(order, 'toning');
+    return workerCanHandleSpecialService(currentWorker || currentName, 'toning') && canCurrentUserToggleSpecialServiceStatus(order, 'toning');
   }
   return false;
 }
@@ -3742,6 +3671,10 @@ async function saveOrder() {
     toningStatus:    document.getElementById('f-toning-status')?.checked || false,
     tatuResponsible: document.getElementById('f-tatu-responsible')?.value || '',
     toningResponsible: document.getElementById('f-toning-responsible')?.value || '',
+    tatuDone:        document.getElementById('f-tatu-status')?.checked || false,
+    tatuDoneBy:      document.getElementById('f-tatu-status')?.checked ? (existingOrder?.tatuDoneBy || document.getElementById('f-tatu-responsible')?.value || currentWorkerName || '') : '',
+    toningDone:      document.getElementById('f-toning-status')?.checked || false,
+    toningDoneBy:    document.getElementById('f-toning-status')?.checked ? (existingOrder?.toningDoneBy || document.getElementById('f-toning-responsible')?.value || currentWorkerName || '') : '',
     priorityTask:    (currentRole === 'owner' || currentRole === 'manager')
       ? (document.getElementById('f-priority-task')?.checked || false)
       : !!existingOrder?.priorityTask,
@@ -3824,59 +3757,24 @@ async function saveOrder() {
   const cashClientDiff = newFinanciallyActive ? (newCashClientPaid - oldCashClientPaid) : 0;
   const cashEntries = [];
 
-  if ((currentRole === 'senior' || currentRole === 'owner') && cashSupplierDiff !== 0) {
-    const amount = -cashSupplierDiff; // наличная оплата поставщику уменьшает кассу
-    const typeStr = cashSupplierDiff > 0 ? 'Списание' : 'Возврат';
-    const fDate = data.date ? formatDate(data.date) : '—';
-    const fTime = data.time || '—';
-    const fCar = data.car || '—';
-    const targetWorker = data.responsible || currentWorkerName;
-    cashEntries.push({
-      worker_name: targetWorker,
-      amount,
-      comment: `${typeStr} за стекло ${data.id}, ${fDate} ${fTime}, авто: ${fCar}, склад: ${data.warehouse || '—'}`,
-      cashType: 'supplier',
-    });
-  }
-
-  if ((currentRole === 'senior' || currentRole === 'owner') && cashClientDiff !== 0) {
-    const typeStr = cashClientDiff > 0 ? 'Оплата клиента' : 'Возврат клиенту';
-    const fDate = data.date ? formatDate(data.date) : '—';
-    const fCar = data.car || '—';
-    const targetWorker = data.responsible || currentWorkerName;
-    cashEntries.push({
-      worker_name: targetWorker,
-      amount: cashClientDiff,
-      comment: `${typeStr} наличкой ${data.id}, ${fDate}, авто: ${fCar}`,
-      cashType: 'client',
-    });
-  }
-
   try {
-    const shouldUseSaveWithCash = cashEntries.length > 0;
     const result = isNew
       ? await saveNewOrderWithNextIdOnConflict(
           data,
           async currentCashEntries => {
-            if (shouldUseSaveWithCash) {
-              return await sbSaveOrderWithCash(data, {
-                isNew: true,
-                cashEntries: currentCashEntries,
-                rollbackOrder: existingOrder,
-              });
-            }
-            const savedOrder = await sbInsertOrder(data);
-            return { order: savedOrder, cashEntries: [] };
+            return await sbSaveOrderWithCash(data, {
+              isNew: true,
+              cashEntries: currentCashEntries,
+              rollbackOrder: existingOrder,
+            });
           },
           { cashEntries }
         )
-      : (shouldUseSaveWithCash
-        ? await sbSaveOrderWithCash(data, {
+      : await sbSaveOrderWithCash(data, {
             isNew: false,
             cashEntries,
             rollbackOrder: existingOrder,
-          })
-        : { order: await sbUpdateOrder(data), cashEntries: [] });
+          });
     const saved = result.order;
 
     await rememberCarDirectoryFromOrder(saved);
@@ -3893,13 +3791,8 @@ async function saveOrder() {
     showToast(isNew ? 'Запись создана ✓' : 'Запись обновлена ✓');
 
     const savedCashEntries = result.cashEntries || [];
-    if (savedCashEntries.length > 0) {
+    if (savedCashEntries.length > 0 || cashSupplierDiff !== 0 || cashClientDiff !== 0) {
       await refreshCashStateAfterServerSave();
-    }
-
-    if (cashSupplierDiff !== 0) {
-      const targetWorker = data.responsible || currentWorkerName;
-      showToast(`${cashSupplierDiff > 0 ? 'Списано' : 'Возвращено'} ${Math.abs(cashSupplierDiff)} ₴ в кассу мастера ${targetWorker}`);
     }
 
     try {
@@ -4205,7 +4098,13 @@ function renderOrdersForMonth(ym) {
   if (search) list = list.filter(o => orderMatchesSearch(o, search));
   if (orderDateFilterExact || orderDateFilterFrom || orderDateFilterTo) list = list.filter(orderMatchesDateFilter);
   if (statF) list = list.filter(o => getEffectivePaymentStatus(o) === statF);
-  if (workerF) list = list.filter(o => o.responsible === workerF || o.assistant === workerF || o.manager === workerF);
+  if (workerF) list = list.filter(o =>
+    o.responsible === workerF
+    || o.assistant === workerF
+    || o.manager === workerF
+    || getOrderSpecialServiceAssignedWorker(o, 'tatu') === workerF
+    || getOrderSpecialServiceAssignedWorker(o, 'toning') === workerF
+  );
   list.sort((a, b) => compareOrdersForList(a, b, sort, currentRole !== 'owner' && currentRole !== 'manager'));
 
   const container = document.getElementById('orders-list');
@@ -4246,7 +4145,20 @@ async function toggleWorkerDone(orderId) {
     if (String(draftOrder.serviceType || '').trim() !== String(o.serviceType || '').trim()) {
       await sbPatchOrderFields(o.id, { service_type: String(draftOrder.serviceType || '').trim() || null });
     }
-    await sbPatchOrderFields(o.id, { worker_done: true });
+    const donePatch = {
+      worker_done: true,
+    };
+    if (draftOrder.tatuStatus && canCurrentUserToggleSpecialServiceStatus(draftOrder, 'tatu')) {
+      donePatch.tatu_status = true;
+      donePatch.tatu_done = true;
+      donePatch.tatu_done_by = draftOrder.tatuDoneBy || draftOrder.tatuResponsible || currentWorkerName || null;
+    }
+    if (draftOrder.toningStatus && canCurrentUserToggleSpecialServiceStatus(draftOrder, 'toning')) {
+      donePatch.toning_status = true;
+      donePatch.toning_done = true;
+      donePatch.toning_done_by = draftOrder.toningDoneBy || draftOrder.toningResponsible || currentWorkerName || null;
+    }
+    await sbPatchOrderFields(o.id, donePatch);
     try {
       orders = await sbFetchOrders();
     } catch (refreshError) {
@@ -4396,11 +4308,13 @@ async function _upsertOrderSalaries(order) {
 
 function initOrderTabs() {
   const tabsEl = document.getElementById('orders-tabs');
+  const currentWorker = typeof getCurrentWorkerRecord === 'function' ? getCurrentWorkerRecord() : null;
+  const currentName = currentWorker?.name || currentWorkerName;
 
   if (currentRole === 'owner' || currentRole === 'manager') {
-    if (tabsEl) {
-      tabsEl.style.display = 'flex';
-      tabsEl.innerHTML = `
+  if (tabsEl) {
+    tabsEl.style.display = 'flex';
+    tabsEl.innerHTML = `
         <button class="orders-tab" id="tab-all" onclick="setOrderTab('all')">Все</button>
         <button class="orders-tab" id="tab-selection" onclick="setOrderTab('selection')">Подборка</button>
         <button class="orders-tab" id="tab-call"      onclick="setOrderTab('call')">Прозвон</button>
@@ -4419,13 +4333,13 @@ function initOrderTabs() {
       tabsEl.style.display = 'flex';
       tabsEl.innerHTML = `
         <button class="orders-tab orders-tab-relevant active" id="tab-actual" onclick="setWorkerTab('actual')"><span class="tab-dot"></span> Актуальные</button>
-        ${workerCanHandleSpecialService(currentWorkerName, 'tatu') ? '<button class="orders-tab" id="tab-tatu-actual" onclick="setWorkerTab(\'tatuActual\')">Тату актуальные</button><button class="orders-tab" id="tab-tatu-done" onclick="setWorkerTab(\'tatuDone\')">Тату выполненные</button>' : ''}
-        ${workerCanHandleSpecialService(currentWorkerName, 'toning') ? '<button class="orders-tab" id="tab-toning-actual" onclick="setWorkerTab(\'toningActual\')">Тонировка актуальные</button><button class="orders-tab" id="tab-toning-done" onclick="setWorkerTab(\'toningDone\')">Тонировка выполненные</button>' : ''}
+        ${workerCanHandleSpecialService(currentWorker || currentName, 'tatu') ? '<button class="orders-tab" id="tab-tatu-actual" onclick="setWorkerTab(\'tatuActual\')">Тату актуальные</button><button class="orders-tab" id="tab-tatu-done" onclick="setWorkerTab(\'tatuDone\')">Тату выполненные</button>' : ''}
+        ${workerCanHandleSpecialService(currentWorker || currentName, 'toning') ? '<button class="orders-tab" id="tab-toning-actual" onclick="setWorkerTab(\'toningActual\')">Тонировка актуальные</button><button class="orders-tab" id="tab-toning-done" onclick="setWorkerTab(\'toningDone\')">Тонировка выполненные</button>' : ''}
         <button class="orders-tab" id="tab-today" onclick="setWorkerTab('today')">Сегодняшние</button>
         <button class="orders-tab" id="tab-done-worker" onclick="setWorkerTab('done')">Выполненные</button>
         <button class="orders-tab" id="tab-future" onclick="setWorkerTab('future')">Будущие</button>
         <button class="orders-tab" id="tab-past" onclick="setWorkerTab('past')">Прошедшие</button>
-        ${currentWorkerName === 'Nastya' ? '<button class="orders-tab" id="tab-own-warehouse-worker" onclick="setWorkerTab(\'ownWarehouse\')">Наш склад</button>' : ''}
+        ${currentUserHasPermission('own_warehouse_view') ? '<button class="orders-tab" id="tab-own-warehouse-worker" onclick="setWorkerTab(\'ownWarehouse\')">Наш склад</button>' : ''}
         <button class="orders-tab" id="tab-my-all" onclick="setWorkerTab('all')">Все мои</button>
       `;
     }
@@ -4501,17 +4415,20 @@ function recalcFullMargins() {
   const responsibleRule = responsibleName && typeof getSalaryRule === 'function' ? getSalaryRule(responsibleName) : {};
   const payoutRespGlass = !hasDropshipper && marginGlass > 0 ? Math.round(marginGlass * (responsibleRule.glassMarginPct || 0)) : 0;
 
-  // Рома: 20% от tatu (всегда, если tatu > 0)
-  const payoutRoma = tatuSum > 0 ? Math.round(tatuSum * 0.20) : 0;
+  const tatuResponsibleName = document.getElementById('f-tatu-responsible')?.value || '';
+  const tatuRule = tatuResponsibleName && typeof getSalaryRule === 'function' ? getSalaryRule(tatuResponsibleName) : {};
+  const payoutTatuSpecial = tatuSum > 0 ? Math.round(tatuSum * (tatuRule.tatuBonusPct || 0)) : 0;
 
-  const payoutLesha       = toningExternal ? 0 : Math.round(toningSum * 0.20);
+  const toningResponsibleName = document.getElementById('f-toning-responsible')?.value || '';
+  const toningRule = toningResponsibleName && typeof getSalaryRule === 'function' ? getSalaryRule(toningResponsibleName) : {};
+  const payoutToningSpecial = (!toningExternal && toningSum > 0) ? Math.round(toningSum * (toningRule.toningBonusPct || 0)) : 0;
   const payoutExtraResp   = Math.round(extraSum * 0.20);
   const payoutExtraAssist = Math.round(extraSum * 0.20);
   const payoutMoldingResp   = Math.round(moldingSum * 0.20);
   const payoutMoldingAssist = Math.round(moldingSum * 0.20);
 
   const costs = purchaseGlass + costMolding + costToning;
-  const payouts = payoutDropshipper + payoutManagerGlass + payoutRespGlass + payoutLesha + payoutRoma +
+  const payouts = payoutDropshipper + payoutManagerGlass + payoutRespGlass + payoutToningSpecial + payoutTatuSpecial +
                   payoutExtraResp + payoutExtraAssist + payoutMoldingResp + payoutMoldingAssist;
 
   const marginTotal = total - costs - payouts;
@@ -4522,8 +4439,8 @@ function recalcFullMargins() {
   setVal('f-payout-dropshipper',  payoutDropshipper);
   setVal('f-payout-manager-glass',payoutManagerGlass);
   setVal('f-payout-resp-glass',   payoutRespGlass);
-  setVal('f-payout-lesha',        payoutLesha);
-  setVal('f-payout-roma',         payoutRoma);
+  setVal('f-payout-lesha',        0);
+  setVal('f-payout-roma',         0);
   setVal('f-payout-extra-resp',   payoutExtraResp);
   setVal('f-payout-extra-assist', payoutExtraAssist);
   setVal('f-payout-molding-resp', payoutMoldingResp);

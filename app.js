@@ -9,11 +9,6 @@ let ownerCashSelectedWorker = '';
 let ownerExpenseSelectedWorker = '';
 let ownerCashCurrencyView = 'uah';
 let ownerCashConfirmFilter = 'all';
-const OWNER_FOP_SELECTION_KEY = 'Oleg Starshiy__fop';
-const OWNER_CARD_MAXIM_SELECTION_KEY = 'owner-card-maxim';
-const OWNER_CARD_ANASTASIA_SELECTION_KEY = 'owner-card-anastasia';
-const OLEG_CARD_SELECTION_KEY = 'oleg-card';
-const SASHA_CARD_SELECTION_KEY = 'sasha-card';
 // Legacy bucket name used in historical cash rows.
 const OWNER_PENDING_CASH_WORKER_NAME = 'Карты владельца';
 let calendarCursorDate = new Date();
@@ -932,7 +927,7 @@ function getHomeDashboardOrdersCount() {
   return list.filter(order => {
     if (!order || order.isCancelled || isOrderDeleted(order)) return false;
     if (!order.inWork || order.workerDone) return false;
-    if (currentWorkerName === 'Nastya') {
+    if (currentUserHasPermission('own_warehouse_view') && order.ownWarehouse) {
       return true;
     }
     const isMainWorker = order.responsible === currentWorkerName || order.assistant === currentWorkerName;

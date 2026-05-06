@@ -10,6 +10,7 @@ const WORKER_PERMISSION_DEFINITIONS = [
   { key: 'clients_view', label: 'Видеть клиентов' },
   { key: 'workers_view', label: 'Видеть сотрудников' },
   { key: 'warehouses_view', label: 'Видеть склады' },
+  { key: 'own_warehouse_view', label: 'Видеть вкладку Наш склад' },
   { key: 'dropshippers_manage', label: 'Видеть и вести дропшипперов' },
   { key: 'calendar_view', label: 'Видеть календарь' },
   { key: 'groups_view', label: 'Видеть группы' },
@@ -50,6 +51,7 @@ const WORKER_ROLE_PERMISSION_PRESETS = {
     special_service_status: false,
     special_service_tatu: false,
     special_service_toning: false,
+    own_warehouse_view: false,
   },
   senior: {
     orders_view_all: false,
@@ -73,6 +75,7 @@ const WORKER_ROLE_PERMISSION_PRESETS = {
     special_service_status: false,
     special_service_tatu: false,
     special_service_toning: false,
+    own_warehouse_view: false,
   },
   junior: {
     orders_view_all: false,
@@ -96,6 +99,7 @@ const WORKER_ROLE_PERMISSION_PRESETS = {
     special_service_status: false,
     special_service_tatu: false,
     special_service_toning: false,
+    own_warehouse_view: false,
   },
   extra: {
     orders_view_all: false,
@@ -119,6 +123,7 @@ const WORKER_ROLE_PERMISSION_PRESETS = {
     special_service_status: false,
     special_service_tatu: false,
     special_service_toning: false,
+    own_warehouse_view: false,
   },
 };
 
@@ -184,6 +189,7 @@ function getWorkerSalaryRuleState(workerLike) {
     ? getSalaryRule(workerName)
     : {};
   const serviceAdjustments = rule.serviceAdjustments || {};
+  const serviceRates = rule.serviceRates || {};
   return {
     selectedServices: !!rule.selectedServices,
     attendanceBase: Number(rule.attendanceBase || rule.dailyBaseIfCompleted) || 0,
@@ -194,11 +200,32 @@ function getWorkerSalaryRuleState(workerLike) {
     'serviceAdjustments.mount': Number(serviceAdjustments.mount) || 0,
     'serviceAdjustments.cut': Number(serviceAdjustments.cut) || 0,
     'serviceAdjustments.glue': Number(serviceAdjustments.glue) || 0,
+    serviceRates: { ...serviceRates },
   };
 }
 
 function renderWorkerSalaryRuleRows(workerLike) {
   const values = getWorkerSalaryRuleState(workerLike);
+  const selectedServicesEnabled = !!values.selectedServices;
+  const serviceRatesHtml = typeof getServiceTypeOptions === 'function'
+    ? '<div id="we-service-rates-block" style="display:' + (selectedServicesEnabled ? 'block' : 'none') + ';padding:10px 14px;border-bottom:1px solid var(--border);background:var(--surface2);">'
+      + '<div style="font-size:12px;font-weight:900;color:var(--text3);margin-bottom:8px;">СТАВКИ ВЫБРАННЫХ УСЛУГ</div>'
+      + getServiceTypeOptions()
+        .filter(item => item.salaryCategory !== 'special' && item.salaryCategory !== 'custom')
+        .map(item => {
+          const hasPersonalRate = Object.prototype.hasOwnProperty.call(values.serviceRates || {}, item.name);
+          const value = hasPersonalRate ? Number(values.serviceRates[item.name]) : '';
+          return '<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;font-size:13px;padding:4px 0;">'
+          + '<span style="min-width:0;color:var(--text2);">' + escapeHtml(item.name) + '<span style="color:var(--text3);"> · база ' + Number(item.rate || 0).toLocaleString('ru') + ' ₴</span></span>'
+          + '<span class="worker-setting-input-wrap active" style="min-width:92px;padding:5px 8px;">'
+          + '<input class="worker-setting-input we-service-rate-input" type="text" inputmode="decimal" data-service-name="' + escapeAttr(item.name) + '" value="' + escapeAttr(value) + '" placeholder="' + escapeAttr(Number(item.rate || 0)) + '">'
+          + '<span class="worker-setting-suffix">₴</span>'
+          + '</span>'
+          + '</div>';
+        })
+        .join('')
+      + '</div>'
+    : '';
   return WORKER_SALARY_RULE_DEFINITIONS.map(item => {
     const rawValue = values[item.key];
     const enabled = item.kind === 'toggle' ? !!rawValue : Number(rawValue) !== 0;
@@ -232,6 +259,7 @@ function renderWorkerSalaryRuleRows(workerLike) {
           `}
         </span>
       </label>
+      ${item.key === 'selectedServices' ? serviceRatesHtml : ''}
     `;
   }).join('');
 }
@@ -246,6 +274,10 @@ function syncWorkerSettingSwitch(input, key) {
     field.disabled = !enabled;
     if (!enabled) field.value = '0';
     else if (!String(field.value || '').trim()) field.value = '0';
+  }
+  if (key === 'selectedServices') {
+    const block = document.getElementById('we-service-rates-block');
+    if (block) block.style.display = enabled ? 'block' : 'none';
   }
 }
 
@@ -273,6 +305,14 @@ function collectWorkerSalaryRuleState() {
       cut: readNumber('serviceAdjustments.cut'),
       glue: readNumber('serviceAdjustments.glue'),
     },
+    serviceRates: Array.from(document.querySelectorAll('.we-service-rate-input')).reduce((acc, input) => {
+      const name = String(input?.dataset?.serviceName || '').trim();
+      const raw = String(input?.value || '').replace(/\s+/g, '').replace(',', '.').trim();
+      if (!name || raw === '') return acc;
+      const value = Number(raw);
+      if (Number.isFinite(value) && value >= 0) acc[name] = value;
+      return acc;
+    }, {}),
   };
 }
 
@@ -336,8 +376,27 @@ function renderWorkers() {
       </div>
     </div>
   ` : '';
+  const serviceRates = typeof getServiceTypeOptions === 'function' ? getServiceTypeOptions() : [];
+  const serviceRatesCard = (currentRole === 'owner') ? `
+    <div class="worker-card worker-card-simple" style="grid-column:1/-1;">
+      <div class="worker-avatar">₴</div>
+      <div class="worker-card-info">
+        <div class="worker-name">Ставки услуг</div>
+        <div class="worker-role">${serviceRates.length ? `${serviceRates.length} услуг` : 'нет настроенных'}</div>
+        <div class="worker-order-count" style="color:var(--text3);">
+          Общий прайс для начисления ЗП. Индивидуальные ставки задаются в карточке сотрудника.
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button class="btn-edit-worker" onclick="openServiceRatesModal()" title="Управлять">
+          <i data-lucide="settings" style="width:14px;height:14px;"></i>
+          <span>Manage</span>
+        </button>
+      </div>
+    </div>
+  ` : '';
 
-  container.innerHTML = paymentMethodsCard + workers.map(w => {
+  container.innerHTML = paymentMethodsCard + serviceRatesCard + workers.map(w => {
     // Считаем количество заказов где сотрудник участвует
     const orderCount = orders.filter(o =>
       o.responsible === w.name || o.assistant === w.name
@@ -405,10 +464,9 @@ function _renderPaymentMethodForm(methodRow = null) {
   const isEdit = !!methodRow?.id;
   const label = String(methodRow?.label || '').trim();
   const type = String(methodRow?.method_type || 'cash').trim().toLowerCase();
-  const owner = String(methodRow?.worker_name || '').trim();
   const sortOrder = Number(methodRow?.sort_order) || 0;
   const workerOptions = ['<option value="">— выбрать —</option>']
-    .concat((workers || []).map(w => `<option value="${escapeAttr(w.name)}">${escapeHtml(getWorkerDisplayName(w.name))}</option>`))
+    .concat((workers || []).map(w => `<option value="${escapeAttr(w.id)}">${escapeHtml(getWorkerDisplayName(w.name))}</option>`))
     .join('');
   return `
     <div style="padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface2);">
@@ -485,7 +543,12 @@ function openPaymentMethodsModal() {
   `;
   modal.classList.add('active');
   const ownerSel = document.getElementById('pm-owner');
-  if (ownerSel) ownerSel.value = editing?.worker_name || '';
+  if (ownerSel) {
+    const editingWorkerId = String(editing?.worker_id || '').trim();
+    const editingWorkerName = String(editing?.worker_name || '').trim();
+    const fallbackWorker = (workers || []).find(w => w.name === editingWorkerName);
+    ownerSel.value = editingWorkerId || (fallbackWorker?.id ? String(fallbackWorker.id) : '');
+  }
   syncPaymentMethodOwnerVisibility();
   initIcons();
 }
@@ -517,20 +580,171 @@ async function savePaymentMethodForm() {
   if (currentRole !== 'owner') return;
   const label = String(document.getElementById('pm-label')?.value || '').trim();
   const method_type = String(document.getElementById('pm-type')?.value || 'cash').trim().toLowerCase();
-  const worker_name = String(document.getElementById('pm-owner')?.value || '').trim();
+  const worker_id = String(document.getElementById('pm-owner')?.value || '').trim();
+  const ownerWorker = (workers || []).find(w => String(w.id) === worker_id) || null;
+  const worker_name = ownerWorker?.name || '';
   const sort_order = Number(document.getElementById('pm-sort')?.value) || 0;
   if (!label) return showToast('Введите название', 'error');
   if (!['cash', 'card', 'fop'].includes(method_type)) return showToast('Неверный тип', 'error');
   if (method_type !== 'cash' && !worker_name) return showToast('Выберите сотрудника', 'error');
   try {
     if (_editingPaymentMethodId) {
-      await sbUpdatePaymentMethod(_editingPaymentMethodId, { label, method_type, worker_name, sort_order, active: true });
+      await sbUpdatePaymentMethod(_editingPaymentMethodId, {
+        label,
+        method_type,
+        worker_id: method_type === 'cash' ? null : worker_id,
+        worker_name: method_type === 'cash' ? null : worker_name,
+        sort_order,
+        active: true
+      });
     } else {
-      await sbCreatePaymentMethod({ label, method_type, worker_name: method_type === 'cash' ? null : worker_name, sort_order, active: true });
+      await sbCreatePaymentMethod({
+        label,
+        method_type,
+        worker_id: method_type === 'cash' ? null : worker_id,
+        worker_name: method_type === 'cash' ? null : worker_name,
+        sort_order,
+        active: true
+      });
     }
     paymentMethods = await sbFetchPaymentMethods();
     _editingPaymentMethodId = null;
     openPaymentMethodsModal();
+    if (typeof renderWorkers === 'function') renderWorkers();
+  } catch (e) {
+    showToast('Ошибка: ' + e.message, 'error');
+  }
+}
+
+// ── SERVICE RATES MODAL (owner only) ─────────────────────────
+
+let _editingServiceRateId = null;
+
+function _getServiceRateRows() {
+  return (refServiceRates && refServiceRates.length ? refServiceRates : (typeof getServiceTypeOptions === 'function' ? getServiceTypeOptions() : []))
+    .filter(row => row?.active !== false)
+    .sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0) || String(a.name || '').localeCompare(String(b.name || ''), 'ru'));
+}
+
+function _renderServiceRateForm(row = null) {
+  const isEdit = !!row?.id;
+  const name = String(row?.name || '').trim();
+  const rate = Number(row?.rate) || 0;
+  const group = String(row?.service_group || 'custom').trim();
+  const category = String(row?.salary_category || group || 'custom').trim();
+  const sortOrder = Number(row?.sort_order) || 0;
+  return `
+    <div style="padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface2);">
+      <div style="font-size:12px;font-weight:900;color:var(--text2);margin-bottom:10px;">${isEdit ? 'Редактировать услугу' : 'Новая услуга'}</div>
+      <div class="form-grid">
+        <div class="form-group span-full">
+          <label class="form-label">Название</label>
+          <input class="form-input" id="sr-name" value="${escapeAttr(name)}" placeholder="Монтаж лобового">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Ставка</label>
+          <input class="form-input" id="sr-rate" inputmode="decimal" value="${escapeAttr(rate)}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Группа</label>
+          <select class="form-select" id="sr-group">
+            ${['mount','cut','glue','special','custom'].map(v => `<option value="${v}" ${group === v ? 'selected' : ''}>${v}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Категория ЗП</label>
+          <select class="form-select" id="sr-category">
+            ${['mount','cut','glue','special','custom'].map(v => `<option value="${v}" ${category === v ? 'selected' : ''}>${v}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Сортировка</label>
+          <input class="form-input" id="sr-sort" inputmode="numeric" value="${escapeAttr(sortOrder)}">
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px;">
+        <button class="btn-secondary" onclick="resetServiceRateForm()">Отмена</button>
+        <button class="btn-primary" onclick="saveServiceRateForm()">${isEdit ? 'Сохранить' : 'Добавить'}</button>
+      </div>
+    </div>
+  `;
+}
+
+function _renderServiceRateRows() {
+  const rows = _getServiceRateRows();
+  if (!rows.length) return '<div style="font-size:12px;color:var(--text3);padding:10px 0;">Услуг нет</div>';
+  return rows.map(row => `
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);">
+      <div style="min-width:0;">
+        <div style="font-size:13px;font-weight:800;color:var(--text2);">${escapeHtml(row.name || '—')}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px;">${escapeHtml(row.service_group || 'custom')} · ${escapeHtml(row.salary_category || 'custom')}</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-shrink:0;">
+        <div style="font-size:14px;font-weight:900;color:var(--accent);">${Number(row.rate || 0).toLocaleString('ru')} ₴</div>
+        ${row.id ? `<button class="icon-btn" onclick="editServiceRate('${escapeAttr(row.id)}')" title="Редактировать"><i data-lucide="pencil" style="width:12px;height:12px;"></i></button>` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+function openServiceRatesModal() {
+  if (currentRole !== 'owner') return;
+  let modal = document.getElementById('service-rates-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'service-rates-modal';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  const editing = _getServiceRateRows().find(r => String(r?.id) === String(_editingServiceRateId)) || null;
+  modal.innerHTML = `
+    <div class="modal" style="max-width:760px;max-height:88vh;display:flex;flex-direction:column;">
+      <div class="modal-header" style="flex-shrink:0;">
+        <div class="modal-title">${icon('wallet')} Ставки услуг</div>
+        <button class="modal-close" onclick="closeServiceRatesModal()">${icon('x')}</button>
+      </div>
+      <div class="modal-body" style="overflow-y:auto;flex:1;">
+        ${_renderServiceRateForm(editing)}
+        <div style="margin-top:14px;background:var(--surface2);border-radius:12px;border:1px solid var(--border);padding:0 14px;">
+          ${_renderServiceRateRows()}
+        </div>
+      </div>
+    </div>
+  `;
+  modal.classList.add('active');
+  initIcons();
+}
+
+function closeServiceRatesModal() {
+  document.getElementById('service-rates-modal')?.classList.remove('active');
+  _editingServiceRateId = null;
+}
+
+function editServiceRate(id) {
+  _editingServiceRateId = id || null;
+  openServiceRatesModal();
+}
+
+function resetServiceRateForm() {
+  _editingServiceRateId = null;
+  openServiceRatesModal();
+}
+
+async function saveServiceRateForm() {
+  if (currentRole !== 'owner') return;
+  const name = String(document.getElementById('sr-name')?.value || '').trim();
+  const rate = Number(String(document.getElementById('sr-rate')?.value || '').replace(/\s+/g, '').replace(',', '.')) || 0;
+  const service_group = String(document.getElementById('sr-group')?.value || 'custom').trim();
+  const salary_category = String(document.getElementById('sr-category')?.value || service_group).trim();
+  const sort_order = Number(document.getElementById('sr-sort')?.value) || 0;
+  if (!name) return showToast('Введите название', 'error');
+  try {
+    const payload = { name, rate, service_group, salary_category, sort_order, active: true };
+    if (_editingServiceRateId) await sbUpdateServiceRate(_editingServiceRateId, payload);
+    else await sbCreateServiceRate(payload);
+    refServiceRates = await sbFetchRefOptional('ref_service_rates');
+    _editingServiceRateId = null;
+    openServiceRatesModal();
     if (typeof renderWorkers === 'function') renderWorkers();
   } catch (e) {
     showToast('Ошибка: ' + e.message, 'error');
