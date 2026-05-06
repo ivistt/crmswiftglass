@@ -314,7 +314,30 @@ function renderWorkers() {
     return;
   }
 
-  container.innerHTML = workers.map(w => {
+  const paymentMethods = (typeof getPaymentMethods === 'function' ? getPaymentMethods() : [])
+    .filter(row => row?.active !== false)
+    .sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0) || String(a.label || '').localeCompare(String(b.label || ''), 'ru'));
+
+  const paymentMethodsCard = (currentRole === 'owner') ? `
+    <div class="worker-card worker-card-simple" style="grid-column:1/-1;">
+      <div class="worker-avatar">₴</div>
+      <div class="worker-card-info">
+        <div class="worker-name">Способы оплаты</div>
+        <div class="worker-role">${paymentMethods.length ? `${paymentMethods.length} активных` : 'нет настроенных'}</div>
+        <div class="worker-order-count" style="color:var(--text3);">
+          Наличка — общий метод. Карта/ФОП — привязаны к сотруднику (касса у владельца) и требуют подтверждения.
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button class="btn-edit-worker" onclick="openPaymentMethodsModal()" title="Управлять">
+          <i data-lucide="settings" style="width:14px;height:14px;"></i>
+          <span>Manage</span>
+        </button>
+      </div>
+    </div>
+  ` : '';
+
+  container.innerHTML = paymentMethodsCard + workers.map(w => {
     // Считаем количество заказов где сотрудник участвует
     const orderCount = orders.filter(o =>
       o.responsible === w.name || o.assistant === w.name
@@ -341,6 +364,177 @@ function renderWorkers() {
   }).join('');
 
   initIcons();
+}
+
+// ── PAYMENT METHODS MODAL (owner only) ───────────────────────
+
+let _editingPaymentMethodId = null;
+
+function _renderPaymentMethodsTableRows() {
+  const methods = (typeof getPaymentMethods === 'function' ? getPaymentMethods() : [])
+    .filter(row => row?.active !== false)
+    .sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0) || String(a.label || '').localeCompare(String(b.label || ''), 'ru'));
+  if (!methods.length) {
+    return '<div style="font-size:12px;color:var(--text3);padding:10px 0;">Методов нет</div>';
+  }
+  return methods.map(row => {
+    const type = String(row.method_type || '').toLowerCase();
+    const owner = String(row.worker_name || '').trim();
+    return `
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);">
+        <div style="min-width:0;">
+          <div style="font-size:13px;font-weight:800;color:var(--text2);">${escapeHtml(row.label || '—')}</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px;">
+            ${escapeHtml(type)}${owner ? ' · касса: ' + escapeHtml(getWorkerDisplayName(owner) || owner) : ''}${row.requires_confirmation ? ' · подтверждение' : ''}
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;flex-shrink:0;">
+          <button class="icon-btn" onclick="editPaymentMethod('${escapeAttr(row.id)}')" title="Редактировать">
+            <i data-lucide="pencil" style="width:12px;height:12px;"></i>
+          </button>
+          <button class="icon-btn" onclick="deletePaymentMethod('${escapeAttr(row.id)}')" title="Удалить">
+            <i data-lucide="trash-2" style="width:12px;height:12px;color:var(--red);"></i>
+          </button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function _renderPaymentMethodForm(methodRow = null) {
+  const isEdit = !!methodRow?.id;
+  const label = String(methodRow?.label || '').trim();
+  const type = String(methodRow?.method_type || 'cash').trim().toLowerCase();
+  const owner = String(methodRow?.worker_name || '').trim();
+  const sortOrder = Number(methodRow?.sort_order) || 0;
+  const workerOptions = ['<option value="">— выбрать —</option>']
+    .concat((workers || []).map(w => `<option value="${escapeAttr(w.name)}">${escapeHtml(getWorkerDisplayName(w.name))}</option>`))
+    .join('');
+  return `
+    <div style="padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface2);">
+      <div style="font-size:12px;font-weight:900;color:var(--text2);margin-bottom:10px;">
+        ${isEdit ? 'Редактировать метод' : 'Новый метод'}
+      </div>
+      <div class="form-grid">
+        <div class="form-group span-full">
+          <label class="form-label">Название</label>
+          <input class="form-input" id="pm-label" value="${escapeAttr(label)}" placeholder="Напр. 👤 Иван 💳 ....">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Тип</label>
+          <select class="form-select" id="pm-type" onchange="syncPaymentMethodOwnerVisibility()">
+            <option value="cash" ${type === 'cash' ? 'selected' : ''}>cash (наличка)</option>
+            <option value="card" ${type === 'card' ? 'selected' : ''}>card (карта)</option>
+            <option value="fop" ${type === 'fop' ? 'selected' : ''}>fop (ФОП)</option>
+          </select>
+        </div>
+        <div class="form-group" id="pm-owner-group">
+          <label class="form-label">Сотрудник (владелец кассы)</label>
+          <select class="form-select" id="pm-owner">
+            ${workerOptions}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Сортировка</label>
+          <input class="form-input" id="pm-sort" inputmode="numeric" value="${escapeAttr(sortOrder)}" placeholder="0">
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px;">
+        <button class="btn-secondary" onclick="resetPaymentMethodForm()">Отмена</button>
+        <button class="btn-primary" onclick="savePaymentMethodForm()">${isEdit ? 'Сохранить' : 'Добавить'}</button>
+      </div>
+    </div>
+  `;
+}
+
+function syncPaymentMethodOwnerVisibility() {
+  const type = String(document.getElementById('pm-type')?.value || 'cash').trim().toLowerCase();
+  const group = document.getElementById('pm-owner-group');
+  if (group) group.style.display = (type === 'cash') ? 'none' : '';
+}
+
+function resetPaymentMethodForm() {
+  _editingPaymentMethodId = null;
+  const modal = document.getElementById('payment-methods-modal');
+  if (modal) openPaymentMethodsModal();
+}
+
+function openPaymentMethodsModal() {
+  if (currentRole !== 'owner') return;
+  let modal = document.getElementById('payment-methods-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'payment-methods-modal';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  const editing = (typeof getPaymentMethods === 'function' ? getPaymentMethods() : []).find(r => String(r?.id) === String(_editingPaymentMethodId)) || null;
+  modal.innerHTML = `
+    <div class="modal" style="max-width:760px;max-height:88vh;display:flex;flex-direction:column;">
+      <div class="modal-header" style="flex-shrink:0;">
+        <div class="modal-title">${icon('wallet')} Способы оплаты</div>
+        <button class="modal-close" onclick="closePaymentMethodsModal()">${icon('x')}</button>
+      </div>
+      <div class="modal-body" style="overflow-y:auto;flex:1;">
+        ${_renderPaymentMethodForm(editing)}
+        <div style="margin-top:14px;background:var(--surface2);border-radius:12px;border:1px solid var(--border);padding:0 14px;">
+          ${_renderPaymentMethodsTableRows()}
+        </div>
+      </div>
+    </div>
+  `;
+  modal.classList.add('active');
+  const ownerSel = document.getElementById('pm-owner');
+  if (ownerSel) ownerSel.value = editing?.worker_name || '';
+  syncPaymentMethodOwnerVisibility();
+  initIcons();
+}
+
+function closePaymentMethodsModal() {
+  document.getElementById('payment-methods-modal')?.classList.remove('active');
+  _editingPaymentMethodId = null;
+}
+
+function editPaymentMethod(id) {
+  _editingPaymentMethodId = id || null;
+  openPaymentMethodsModal();
+}
+
+async function deletePaymentMethod(id) {
+  if (currentRole !== 'owner') return;
+  if (!confirm('Отключить этот способ оплаты?')) return;
+  try {
+    await sbDeletePaymentMethod(id);
+    paymentMethods = await sbFetchPaymentMethods();
+    openPaymentMethodsModal();
+    if (typeof renderWorkers === 'function') renderWorkers();
+  } catch (e) {
+    showToast('Ошибка: ' + e.message, 'error');
+  }
+}
+
+async function savePaymentMethodForm() {
+  if (currentRole !== 'owner') return;
+  const label = String(document.getElementById('pm-label')?.value || '').trim();
+  const method_type = String(document.getElementById('pm-type')?.value || 'cash').trim().toLowerCase();
+  const worker_name = String(document.getElementById('pm-owner')?.value || '').trim();
+  const sort_order = Number(document.getElementById('pm-sort')?.value) || 0;
+  if (!label) return showToast('Введите название', 'error');
+  if (!['cash', 'card', 'fop'].includes(method_type)) return showToast('Неверный тип', 'error');
+  if (method_type !== 'cash' && !worker_name) return showToast('Выберите сотрудника', 'error');
+  try {
+    if (_editingPaymentMethodId) {
+      await sbUpdatePaymentMethod(_editingPaymentMethodId, { label, method_type, worker_name, sort_order, active: true });
+    } else {
+      await sbCreatePaymentMethod({ label, method_type, worker_name: method_type === 'cash' ? null : worker_name, sort_order, active: true });
+    }
+    paymentMethods = await sbFetchPaymentMethods();
+    _editingPaymentMethodId = null;
+    openPaymentMethodsModal();
+    if (typeof renderWorkers === 'function') renderWorkers();
+  } catch (e) {
+    showToast('Ошибка: ' + e.message, 'error');
+  }
 }
 
 // ── УТИЛИТЫ ──────────────────────────────────────────────────

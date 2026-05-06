@@ -14,6 +14,8 @@ const OWNER_CARD_MAXIM_SELECTION_KEY = 'owner-card-maxim';
 const OWNER_CARD_ANASTASIA_SELECTION_KEY = 'owner-card-anastasia';
 const OLEG_CARD_SELECTION_KEY = 'oleg-card';
 const SASHA_CARD_SELECTION_KEY = 'sasha-card';
+// Legacy bucket name used in historical cash rows.
+const OWNER_PENDING_CASH_WORKER_NAME = 'Карты владельца';
 let calendarCursorDate = new Date();
 let calendarWorkerFilters = [];
 let ownerTodayDateFilter = '';
@@ -120,6 +122,15 @@ async function initApp() {
   if (typeof loadManualClients === 'function' && canViewClients()) {
     tasks.push(loadManualClients());
   }
+  tasks.push((async () => {
+    try {
+      if (typeof sbFetchPaymentMethods === 'function') {
+        paymentMethods = await sbFetchPaymentMethods();
+      }
+    } catch (e) {
+      paymentMethods = [];
+    }
+  })());
   if (currentRole === 'owner') {
     tasks.push((async () => {
       try { window.allCashLog = await sbFetchAllCashLog(); } catch(e) { window.allCashLog = []; }
@@ -940,40 +951,34 @@ function getOwnerCashSeniorNames() {
   const names = (workers || [])
     .filter(w => w.systemRole === 'senior' || w.systemRole === 'extra')
     .map(w => w.name);
-  if ((workers || []).some(w => w.name === 'Sasha Manager') && !names.includes('Sasha Manager')) {
-    names.push('Sasha Manager');
-  }
+  (typeof getPaymentMethods === 'function' ? getPaymentMethods() : [])
+    .filter(row => row?.active !== false)
+    .map(row => String(row?.worker_name || '').trim())
+    .filter(Boolean)
+    .forEach(name => { if (!names.includes(name)) names.push(name); });
   return names;
 }
 
 function getOwnerSpecialCashSections() {
-  return [
-    {
-      key: OWNER_CARD_MAXIM_SELECTION_KEY,
-      label: 'Киртока Максим',
-      matches: entry => getCashEntryAccountType(entry) === 'cash' && getCashEntryPaymentMethod(entry) === '👤 Киртока Максим 💳 4441 1144 6035 9811 (MONO)',
-    },
-    {
-      key: OWNER_CARD_ANASTASIA_SELECTION_KEY,
-      label: 'Киртока Анастасия',
-      matches: entry => getCashEntryAccountType(entry) === 'cash' && getCashEntryPaymentMethod(entry) === '👤 Киртока Анастасия 💳 4149 6090 2872 4237 (PRIVAT)',
-    },
-    {
-      key: OLEG_CARD_SELECTION_KEY,
-      label: 'Бабенко Олег карта',
-      matches: entry => getCashEntryAccountType(entry) === 'cash' && isOlegCardPaymentMethod(getCashEntryPaymentMethod(entry)),
-    },
-    {
-      key: SASHA_CARD_SELECTION_KEY,
-      label: 'Шепель Александр карта',
-      matches: entry => getCashEntryAccountType(entry) === 'cash' && isSashaManagerCardPaymentMethod(getCashEntryPaymentMethod(entry)),
-    },
-    {
-      key: OWNER_FOP_SELECTION_KEY,
-      label: 'БАБЕНКО ФОП',
-      matches: entry => getCashEntryAccountType(entry) === 'fop',
-    },
-  ];
+  const methods = (typeof getPaymentMethods === 'function' ? getPaymentMethods() : [])
+    .filter(row => row?.active !== false)
+    .filter(row => ['card', 'fop'].includes(String(row?.method_type || '').trim().toLowerCase()));
+  return methods.map(row => {
+    const label = String(row?.label || '').trim();
+    const type = String(row?.method_type || '').trim().toLowerCase();
+    const id = String(row?.id ?? '');
+    return {
+      key: `pm:${id || label}`,
+      label,
+      matches: entry => {
+        if (!entry) return false;
+        const account = getCashEntryAccountType(entry);
+        if (type === 'fop' && account !== 'fop') return false;
+        if (type === 'card' && account !== 'cash') return false;
+        return getCashEntryPaymentMethod(entry) === label;
+      },
+    };
+  });
 }
 
 function getOwnerSpecialCashLogs(sectionKey, confirmFilter = ownerCashConfirmFilter) {
@@ -1000,7 +1005,7 @@ function getOwnerCashLogs(confirmFilter = ownerCashConfirmFilter) {
       if (account === 'fop') return false;
       const method = getCashEntryPaymentMethod(entry);
       if (!account || account !== 'cash') return false;
-      if (isOwnerCardPaymentMethod(method) || isOlegCardPaymentMethod(method) || isSashaManagerCardPaymentMethod(method) || isFopPaymentMethod(method)) return false;
+      if ((typeof isCardPaymentMethod === 'function' && isCardPaymentMethod(method)) || (typeof isFopPaymentMethod === 'function' && isFopPaymentMethod(method))) return false;
       return account === 'cash';
     })
     .filter(entry => {
@@ -1252,7 +1257,10 @@ function setOwnerCashSelectedWorker(workerName) {
 function getOwnerFopCashLogs(confirmFilter = ownerCashConfirmFilter) {
   return [...(window.allCashLog || [])]
     .filter(entry => getCashEntryAccountType(entry) === 'fop')
-    .filter(entry => entry.worker_name === 'Oleg Starshiy')
+    .filter(entry => {
+      const method = getCashEntryPaymentMethod(entry);
+      return typeof isFopPaymentMethod === 'function' ? isFopPaymentMethod(method) : true;
+    })
     .filter(entry => {
       if (confirmFilter === 'confirmed') return getCashEntryApprovalStatus(entry) === 'confirmed';
       if (confirmFilter === 'pending') return getCashEntryApprovalStatus(entry) !== 'confirmed';
@@ -2485,15 +2493,16 @@ function getOwnerPaymentEntries() {
     .filter(entry => {
       const paymentMethod = getCashEntryPaymentMethod(entry);
       if (getCashEntryAccountType(entry) !== 'cash' || getCashEntryApprovalStatus(entry) !== 'confirmed') return false;
-      if (!isSashaManagerCardPaymentMethod(paymentMethod)) return false;
-      return !String(entry.fop_source_key || '').startsWith('order:');
+      if (String(entry.fop_source_key || '').startsWith('order:')) return false;
+      return typeof isCardPaymentMethod === 'function' ? isCardPaymentMethod(paymentMethod) : false;
     })
     .forEach(entry => {
+      const paymentMethod = getCashEntryPaymentMethod(entry);
       entries.push({
         type: 'client',
-        title: 'Карта Саши',
+        title: 'Карта',
         amount: Number(entry.amount) || 0,
-        method: 'Карта Саши',
+        method: paymentMethod || 'Карта',
         date: entry.fop_date || _ownerCashEntryDate(entry),
         cashEntry: entry,
         pendingConfirm: false,
@@ -2579,7 +2588,10 @@ function renderOwnerPaymentFilters() {
 }
 
 function renderOwnerManualPaymentForm() {
-  const methods = (PAYMENT_METHOD_OPTIONS || []).map(normalizePaymentMethod);
+  const methods = (typeof getPaymentMethods === 'function' ? getPaymentMethods() : [])
+    .filter(row => row?.active !== false)
+    .map(row => normalizePaymentMethod(row.label))
+    .filter(Boolean);
   return `
     <div class="owner-manual-payment-card">
       <div class="owner-manual-payment-title">Ручная запись</div>

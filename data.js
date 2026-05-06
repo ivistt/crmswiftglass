@@ -677,6 +677,44 @@ async function sbDeleteCashEntriesBySourceKeys(sourceKeys = []) {
   return res.json();
 }
 
+// ── PAYMENT METHODS (dynamic) ────────────────────────────────
+
+async function sbFetchPaymentMethods() {
+  const res = await fetch(`${WORKER_URL}/api/payment-methods`, { headers: getHeaders() });
+  if (!res.ok) await throwApiError(res);
+  const rows = await res.json().catch(() => []);
+  return Array.isArray(rows) ? rows : [];
+}
+
+async function sbCreatePaymentMethod(payload) {
+  const res = await fetch(`${WORKER_URL}/api/payment-methods`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(payload || {}),
+  });
+  if (!res.ok) await throwApiError(res);
+  return res.json();
+}
+
+async function sbUpdatePaymentMethod(id, patch) {
+  const res = await fetch(`${WORKER_URL}/api/payment-methods/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+    body: JSON.stringify(patch || {}),
+  });
+  if (!res.ok) await throwApiError(res);
+  return res.json();
+}
+
+async function sbDeletePaymentMethod(id) {
+  const res = await fetch(`${WORKER_URL}/api/payment-methods/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers: getHeaders(),
+  });
+  if (!res.ok) await throwApiError(res);
+  return res.json();
+}
+
 const FX_USD_CASH_PREFIX = 'FXUSD|';
 
 function buildCurrencyCashComment({ usdAmount, rate, uahAmount, note = '' }) {
@@ -1485,7 +1523,7 @@ function buildWorkerSalaryFormula(rule) {
 
 const SALARY_CONFIG = {
   'Artyom':     { selectedServices: true, dailyBaseIfCompleted: 500 },
-  'Roma':       { selectedServices: true, dailyBaseIfCompleted: 500, tatuBonusPct: 0.20, globalTatuBonus: true },
+  'Roma':       { selectedServices: true, dailyBaseIfCompleted: 500 },
   'Vitya':      { selectedServices: true },
   'Zhenya':     { selectedServices: true },
   'Sasha Doga': { selectedServices: true },
@@ -1494,7 +1532,7 @@ const SALARY_CONFIG = {
   'Kostya':     { selectedServices: true, glassMarginPct: 0.10, moldingPct: 0.10, dailyBaseIfCompleted: 800 },
   'Sasha Manager': { glassMarginPct: 0.10, attendanceBase: 800, managerOnly: true },
   'Nastya':      { attendanceBase: 2000 },
-  'Lyosha':     { selectedServices: true, toningBonusPct: 0.40, globalToningBonus: true },
+  'Lyosha':     { selectedServices: true },
 
   // ── Дефолты по роли ──────────────────────────────────────
   _senior:  { selectedServices: true },
@@ -1620,6 +1658,10 @@ function _customServiceSalary(order) {
   return Math.round((Number(order?.mount) || 0) * 0.2);
 }
 
+function _extraWorkSalary(order) {
+  return Math.round((Number(order?.extraWork) || 0) * 0.2);
+}
+
 function _selectedServicesSalary(workerName, order) {
   const rule = getSalaryRule(workerName);
   if (!rule.selectedServices) return 0;
@@ -1667,8 +1709,9 @@ function calcOrderSalary(workerName, order) {
   const fromGlass   = Math.round(glassMargin * (rule.glassMarginPct || 0));
   const fromMolding = Math.round(molding * (rule.moldingPct || 0));
   const fromServ    = _selectedServicesSalary(workerName, order);
+  const extraWork   = _extraWorkSalary(order);
 
-  return fromGlass + fromMolding + fromServ;
+  return fromGlass + fromMolding + fromServ + extraWork;
 }
 
 function calcWorkerOrderSalary(workerName, order) {
@@ -1699,6 +1742,10 @@ function getWorkerOrderSalaryBreakdown(workerName, order) {
     if (rule.selectedServices) {
       if (hasCustomSalaryService(order)) {
         parts.push({ label: 'Нестандартные работы 20% от монтажа', amount: _customServiceSalary(order) });
+      }
+      const extraWorkSalary = _extraWorkSalary(order);
+      if (extraWorkSalary > 0) {
+        parts.push({ label: 'Доп. работы 20%', amount: extraWorkSalary });
       }
       const adjustments = rule.serviceAdjustments || {};
       const groupedServices = {};
@@ -1923,27 +1970,47 @@ const ROLE_LABELS = {
   extra:   'Экстра специалист',
 };
 
-const PAYMENT_METHOD_OPTIONS = [
-  '🪙 Наличка',
-  '👤 Шепель Александр 💳 4149 4975 1422 9980 (PRIVAT)',
-  '👤 Киртока Максим 💳 4441 1144 6035 9811 (MONO)',
-  '👤 Киртока Анастасия 💳 4149 6090 2872 4237 (PRIVAT)',
-  '👤 Бабенко Олег 💳 5457 0825 0103 4743 (PRIVAT)',
-  '📂 БЕЗНАЛ БАБЕНКО',
-];
-const SASHA_MANAGER_CARD_METHOD = '👤 Шепель Александр 💳 4149 4975 1422 9980 (PRIVAT)';
-const OLEG_CARD_METHOD = '👤 Бабенко Олег 💳 5457 0825 0103 4743 (PRIVAT)';
-const OWNER_CARD_METHODS = [
-  '👤 Киртока Максим 💳 4441 1144 6035 9811 (MONO)',
-  '👤 Киртока Анастасия 💳 4149 6090 2872 4237 (PRIVAT)',
-];
 const CASH_ACCOUNT_CASH = 'cash';
 const CASH_ACCOUNT_FOP = 'fop';
-const OWNER_PENDING_CASH_WORKER_NAME = 'Карты владельца';
 const ORDER_META_TATU_STATUS_TOKEN = '__tatu_status__';
 const ORDER_META_TONING_STATUS_TOKEN = '__toning_status__';
 const ORDER_META_TATU_RESP_PREFIX = '__tatu_resp__:';
 const ORDER_META_TONING_RESP_PREFIX = '__toning_resp__:';
+
+let paymentMethods = [];
+
+function getPaymentMethods() {
+  return Array.isArray(paymentMethods) ? paymentMethods : [];
+}
+
+function findPaymentMethodConfigByLabel(label) {
+  const normalized = normalizePaymentMethod(label);
+  if (!normalized) return null;
+  return getPaymentMethods().find(row => normalizePaymentMethod(row?.label) === normalized) || null;
+}
+
+function isCardPaymentMethod(method) {
+  const cfg = findPaymentMethodConfigByLabel(method);
+  return String(cfg?.method_type || '').trim().toLowerCase() === 'card';
+}
+
+function isFopPaymentMethod(method) {
+  const cfg = findPaymentMethodConfigByLabel(method);
+  return String(cfg?.method_type || '').trim().toLowerCase() === 'fop';
+}
+
+function isCashPaymentMethod(method) {
+  const cfg = findPaymentMethodConfigByLabel(method);
+  if (cfg) return String(cfg?.method_type || '').trim().toLowerCase() === 'cash';
+  // Backward compatibility for legacy data / before methods loaded.
+  return normalizePaymentMethod(method) === '🪙 Наличка';
+}
+
+function paymentMethodRequiresConfirmation(method) {
+  const cfg = findPaymentMethodConfigByLabel(method);
+  if (cfg) return cfg.requires_confirmation === true || cfg.method_type === 'card' || cfg.method_type === 'fop';
+  return !isCashPaymentMethod(method);
+}
 
 function parseOrderConfigurationMeta(configuration) {
   const parts = String(configuration || '')
@@ -2002,26 +2069,6 @@ function normalizePaymentMethod(method) {
   const value = String(method).trim();
   if (value === 'Наличка') return '🪙 Наличка';
   return value;
-}
-
-function isCashPaymentMethod(method) {
-  return normalizePaymentMethod(method) === '🪙 Наличка';
-}
-
-function isFopPaymentMethod(method) {
-  return normalizePaymentMethod(method) === '📂 БЕЗНАЛ БАБЕНКО';
-}
-
-function isSashaManagerCardPaymentMethod(method) {
-  return normalizePaymentMethod(method) === SASHA_MANAGER_CARD_METHOD;
-}
-
-function isOlegCardPaymentMethod(method) {
-  return normalizePaymentMethod(method) === OLEG_CARD_METHOD;
-}
-
-function isOwnerCardPaymentMethod(method) {
-  return OWNER_CARD_METHODS.includes(normalizePaymentMethod(method));
 }
 
 function buildPaymentSourceKey(orderId, method, paymentType = 'client', payment = null) {
@@ -2134,7 +2181,8 @@ function isConfirmableCashEntry(entry) {
   const account = getCashEntryAccountType(entry);
   const paymentMethod = getCashEntryPaymentMethod(entry);
   if ((account !== CASH_ACCOUNT_CASH && account !== CASH_ACCOUNT_FOP) || !paymentMethod) return false;
-  return !isCashPaymentMethod(paymentMethod);
+  if (account === CASH_ACCOUNT_FOP) return true;
+  return paymentMethodRequiresConfirmation(paymentMethod);
 }
 
 function isConfirmablePaymentMethod(method) {
@@ -2184,44 +2232,19 @@ function getOrderSupplierPaidAmount(order) {
 function getPaymentCashRoute(method, fallbackWorkerName = '') {
   const normalized = normalizePaymentMethod(method);
   const targetWorkerName = fallbackWorkerName || currentWorkerName || '';
-  if (isCashPaymentMethod(normalized)) {
+  const cfg = findPaymentMethodConfigByLabel(normalized);
+  if (!cfg || String(cfg?.method_type || '').trim().toLowerCase() === 'cash' || isCashPaymentMethod(normalized)) {
     return {
       workerName: targetWorkerName,
       cashAccount: CASH_ACCOUNT_CASH,
       requiresConfirmation: false,
     };
   }
-  if (isOwnerCardPaymentMethod(normalized)) {
-    return {
-      workerName: OWNER_PENDING_CASH_WORKER_NAME,
-      cashAccount: CASH_ACCOUNT_CASH,
-      requiresConfirmation: true,
-    };
-  }
-  if (isSashaManagerCardPaymentMethod(normalized)) {
-    return {
-      workerName: 'Sasha Manager',
-      cashAccount: CASH_ACCOUNT_CASH,
-      requiresConfirmation: true,
-    };
-  }
-  if (isOlegCardPaymentMethod(normalized)) {
-    return {
-      workerName: 'Oleg Starshiy',
-      cashAccount: CASH_ACCOUNT_CASH,
-      requiresConfirmation: true,
-    };
-  }
-  if (isFopPaymentMethod(normalized)) {
-    return {
-      workerName: 'Oleg Starshiy',
-      cashAccount: CASH_ACCOUNT_FOP,
-      requiresConfirmation: true,
-    };
-  }
+  const type = String(cfg?.method_type || '').trim().toLowerCase();
+  const ownerWorker = String(cfg?.worker_name || '').trim();
   return {
-    workerName: targetWorkerName,
-    cashAccount: CASH_ACCOUNT_CASH,
+    workerName: ownerWorker || targetWorkerName,
+    cashAccount: type === 'fop' ? CASH_ACCOUNT_FOP : CASH_ACCOUNT_CASH,
     requiresConfirmation: true,
   };
 }

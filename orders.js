@@ -2096,6 +2096,27 @@ function populateRefSelects() {
   // Марки авто — теперь datalist
   populateCarDatalist();
 
+  // Способы оплаты (dynamic, from Supabase)
+  const paymentMethods = (typeof getPaymentMethods === 'function' ? getPaymentMethods() : [])
+    .filter(row => row?.active !== false)
+    .sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0) || String(a.label || '').localeCompare(String(b.label || ''), 'ru'));
+  const paymentOptionsHtml = [
+    '<option value="">— выбрать —</option>',
+    ...paymentMethods.map(row => `<option value="${escapeAttr(row.label)}">${escapeHtml(row.label)}</option>`),
+  ].join('');
+  const clientMethodSel = document.getElementById('f-payment-method');
+  if (clientMethodSel) {
+    const cur = clientMethodSel.value;
+    clientMethodSel.innerHTML = paymentOptionsHtml;
+    if (cur) clientMethodSel.value = cur;
+  }
+  const supplierMethodSel = document.getElementById('f-new-supplier-payment-method');
+  if (supplierMethodSel) {
+    const cur = supplierMethodSel.value;
+    supplierMethodSel.innerHTML = paymentOptionsHtml;
+    if (cur) supplierMethodSel.value = cur;
+  }
+
   // Услуги — чекбоксы
   const svcBox = document.getElementById('service-type-checkboxes');
   if (svcBox) {

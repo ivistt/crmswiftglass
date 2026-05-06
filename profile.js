@@ -756,18 +756,6 @@ function isFopCashEntry(entry) {
   return getCashEntryAccountType(entry) === CASH_ACCOUNT_FOP;
 }
 
-function isManagerCardCashEntry(entry) {
-  return getCashEntryAccountType(entry) === CASH_ACCOUNT_CASH
-    && getCashEntryOwner(entry) === 'Sasha Manager'
-    && isSashaManagerCardPaymentMethod(getCashEntryPaymentMethod(entry));
-}
-
-function isOlegCardCashEntry(entry) {
-  return getCashEntryAccountType(entry) === CASH_ACCOUNT_CASH
-    && getCashEntryOwner(entry) === 'Oleg Starshiy'
-    && isOlegCardPaymentMethod(getCashEntryPaymentMethod(entry));
-}
-
 function isConfirmedFopCashEntry(entry) {
   return isFopCashEntry(entry) && getCashEntryApprovalStatus(entry) === 'confirmed';
 }
@@ -1007,9 +995,8 @@ async function confirmFopCashEntry(id) {
     if (document.getElementById('screen-profile')?.classList.contains('active')) renderProfile();
     const account = getCashEntryAccountType(updated);
     const paymentMethod = getCashEntryPaymentMethod(updated);
-    if (account === 'fop') showToast('БАБЕНКО подтверждено ✓');
-    else if (isSashaManagerCardPaymentMethod(paymentMethod)) showToast('Карта Саши подтверждена ✓');
-    else if (isOlegCardPaymentMethod(paymentMethod)) showToast('Карта Олега подтверждена ✓');
+    if (account === 'fop') showToast('ФОП подтверждено ✓');
+    else if (typeof isCardPaymentMethod === 'function' && isCardPaymentMethod(paymentMethod)) showToast('Карта подтверждена ✓');
     else if (paymentMethod) showToast(`Подтверждено: ${paymentMethod} ✓`);
     else showToast('Запись подтверждена ✓');
   } catch (e) {

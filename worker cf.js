@@ -106,6 +106,113 @@ export default {
       return Response.json({ ok: true }, { headers: cors });
     }
 
+    // ── /api/payment-methods ─────────────────────────────────
+    if (url.pathname === '/api/payment-methods') {
+      if (request.method === 'GET') {
+        const res = await fetch(
+          `${sb}/rest/v1/ref_payment_methods?active=eq.true&order=sort_order.asc,label.asc`,
+          { headers: sbHeaders }
+        );
+        const rows = await res.json().catch(() => []);
+        return Response.json(Array.isArray(rows) ? rows : [], { headers: cors });
+      }
+
+      if (request.method === 'POST') {
+        if (authedRole !== 'owner') {
+          return Response.json({ ok: false, error: 'Forbidden' }, { status: 403, headers: cors });
+        }
+        const body = await request.json().catch(() => ({}));
+        const payload = {
+          label: String(body?.label || '').trim(),
+          method_type: String(body?.method_type || '').trim().toLowerCase(),
+          worker_name: body?.worker_name === null || body?.worker_name === undefined ? null : String(body.worker_name || '').trim(),
+          requires_confirmation: body?.requires_confirmation === true,
+          active: body?.active !== false,
+          sort_order: Number(body?.sort_order) || 0,
+          updated_at: new Date().toISOString(),
+        };
+        if (!payload.label) return Response.json({ ok: false, error: 'label required' }, { status: 400, headers: cors });
+        if (!['cash', 'card', 'fop'].includes(payload.method_type)) {
+          return Response.json({ ok: false, error: 'Invalid method_type' }, { status: 400, headers: cors });
+        }
+        if (payload.method_type === 'cash') {
+          payload.worker_name = null;
+          payload.requires_confirmation = false;
+        } else {
+          if (!payload.worker_name) return Response.json({ ok: false, error: 'worker_name required' }, { status: 400, headers: cors });
+          payload.requires_confirmation = true;
+        }
+        const res = await fetch(`${sb}/rest/v1/ref_payment_methods`, {
+          method: 'POST',
+          headers: sbHeaders,
+          body: JSON.stringify(payload),
+        });
+        const rows = await res.json().catch(() => []);
+        if (!res.ok) return Response.json({ ok: false, error: Array.isArray(rows) ? 'Insert failed' : (rows?.message || rows?.error || 'Insert failed') }, { status: 400, headers: cors });
+        return Response.json(Array.isArray(rows) ? rows[0] : null, { headers: cors });
+      }
+    }
+
+    if (url.pathname.startsWith('/api/payment-methods/') && request.method === 'PATCH') {
+      if (authedRole !== 'owner') {
+        return Response.json({ ok: false, error: 'Forbidden' }, { status: 403, headers: cors });
+      }
+      const id = decodeURIComponent(url.pathname.split('/').pop());
+      const body = await request.json().catch(() => ({}));
+      const patch = {};
+      if (Object.prototype.hasOwnProperty.call(body, 'label')) patch.label = String(body.label || '').trim();
+      if (Object.prototype.hasOwnProperty.call(body, 'method_type')) patch.method_type = String(body.method_type || '').trim().toLowerCase();
+      if (Object.prototype.hasOwnProperty.call(body, 'worker_name')) patch.worker_name = body.worker_name === null ? null : String(body.worker_name || '').trim();
+      if (Object.prototype.hasOwnProperty.call(body, 'active')) patch.active = body.active !== false;
+      if (Object.prototype.hasOwnProperty.call(body, 'sort_order')) patch.sort_order = Number(body.sort_order) || 0;
+
+      if (patch.method_type && !['cash', 'card', 'fop'].includes(patch.method_type)) {
+        return Response.json({ ok: false, error: 'Invalid method_type' }, { status: 400, headers: cors });
+      }
+      patch.updated_at = new Date().toISOString();
+
+      const currentRes = await fetch(`${sb}/rest/v1/ref_payment_methods?id=eq.${encodeURIComponent(id)}&limit=1`, { headers: sbHeaders });
+      const currentRows = await currentRes.json().catch(() => []);
+      const current = Array.isArray(currentRows) ? currentRows[0] : null;
+      if (!current) return Response.json({ ok: false, error: 'Not found' }, { status: 404, headers: cors });
+
+      const nextType = patch.method_type || String(current.method_type || '').trim().toLowerCase();
+      if (nextType === 'cash') {
+        patch.worker_name = null;
+        patch.requires_confirmation = false;
+      } else {
+        const nextWorker = (Object.prototype.hasOwnProperty.call(patch, 'worker_name') ? patch.worker_name : current.worker_name) || '';
+        if (!String(nextWorker || '').trim()) {
+          return Response.json({ ok: false, error: 'worker_name required' }, { status: 400, headers: cors });
+        }
+        patch.requires_confirmation = true;
+      }
+
+      const res = await fetch(`${sb}/rest/v1/ref_payment_methods?id=eq.${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: sbHeaders,
+        body: JSON.stringify(patch),
+      });
+      const rows = await res.json().catch(() => []);
+      if (!res.ok) return Response.json({ ok: false, error: Array.isArray(rows) ? 'Update failed' : (rows?.message || rows?.error || 'Update failed') }, { status: 400, headers: cors });
+      return Response.json(Array.isArray(rows) ? rows[0] : null, { headers: cors });
+    }
+
+    if (url.pathname.startsWith('/api/payment-methods/') && request.method === 'DELETE') {
+      if (authedRole !== 'owner') {
+        return Response.json({ ok: false, error: 'Forbidden' }, { status: 403, headers: cors });
+      }
+      const id = decodeURIComponent(url.pathname.split('/').pop());
+      const res = await fetch(`${sb}/rest/v1/ref_payment_methods?id=eq.${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: sbHeaders,
+        body: JSON.stringify({ active: false, updated_at: new Date().toISOString() }),
+      });
+      const rows = await res.json().catch(() => []);
+      if (!res.ok) return Response.json({ ok: false, error: Array.isArray(rows) ? 'Delete failed' : (rows?.message || rows?.error || 'Delete failed') }, { status: 400, headers: cors });
+      return Response.json({ ok: true }, { headers: cors });
+    }
+
     // ── /api/orders ──────────────────────────────────────────
     if (url.pathname === '/api/orders') {
       if (request.method === 'GET') {
@@ -1251,14 +1358,16 @@ export default {
       const ordersData = await res.json().catch(() => []);
       const sourceMap = new Map();
 
-      (Array.isArray(ordersData) ? ordersData : []).forEach(order => {
-        if (!order || order.is_cancelled || !order.in_work) return;
-        buildOrderDerivedCashEntries(order).forEach(entry => {
+      for (const order of (Array.isArray(ordersData) ? ordersData : [])) {
+        if (!order || order.is_cancelled || !order.in_work) continue;
+        // eslint-disable-next-line no-await-in-loop
+        const derived = await buildOrderDerivedCashEntries(order, sb, sbHeaders);
+        derived.forEach(entry => {
           const key = String(entry?.fop_source_key || '').trim();
           if (!key) return;
           sourceMap.set(key, entry);
         });
-      });
+      }
 
       const entries = Array.from(sourceMap.values());
       if (!entries.length) {
@@ -2089,7 +2198,28 @@ function getPaymentMethodFromCashSourceKey(sourceKey) {
   }
 }
 
+let _paymentMethodsCache = { ts: 0, rows: [] };
+async function fetchPaymentMethodsCached(sb, sbHeaders) {
+  const now = Date.now();
+  if (_paymentMethodsCache.ts && (now - _paymentMethodsCache.ts) < 60_000 && Array.isArray(_paymentMethodsCache.rows)) {
+    return _paymentMethodsCache.rows;
+  }
+  const res = await fetch(`${sb}/rest/v1/ref_payment_methods?active=eq.true&order=sort_order.asc,label.asc`, { headers: sbHeaders });
+  const rows = await res.json().catch(() => []);
+  _paymentMethodsCache = { ts: now, rows: Array.isArray(rows) ? rows : [] };
+  return _paymentMethodsCache.rows;
+}
+
+async function findPaymentMethodRowByLabel(label, sb, sbHeaders) {
+  const normalized = normalizeCashPaymentMethod(label);
+  if (!normalized) return null;
+  const rows = await fetchPaymentMethodsCached(sb, sbHeaders);
+  return rows.find(row => normalizeCashPaymentMethod(row?.label) === normalized) || null;
+}
+
 function isConfirmableCardCashMethod(method) {
+  // Legacy helper kept for non-order cash inserts where we don't want an extra DB call.
+  // Proper classification for order-derived entries should be driven by ref_payment_methods.
   const normalized = String(method || '').trim();
   return !!normalized && normalized !== '🪙 Наличка';
 }
@@ -2104,13 +2234,11 @@ function getCashPaymentMethod(rowOrBody = {}) {
 }
 
 function getCashApprovalOwner(method = '', cashAccount = 'cash') {
+  // Keep legacy heuristic if ref_payment_methods is not available.
   const normalizedMethod = normalizeCashPaymentMethod(method);
   const normalizedAccount = String(cashAccount || 'cash').trim().toLowerCase();
   if (normalizedAccount === 'fop') return 'Oleg Starshiy';
-  if (isSashaCardPaymentMethodForSync(normalizedMethod)) return 'Sasha Manager';
-  if (isOlegCardPaymentMethodForSync(normalizedMethod)) return 'Oleg Starshiy';
-  if (isOwnerCardPaymentMethodForSync(normalizedMethod)) return 'Maksim';
-  if (normalizedMethod && !isCashPaymentMethodForSync(normalizedMethod)) return 'Maksim';
+  if (normalizedMethod && normalizedMethod !== '🪙 Наличка') return 'Maksim';
   return null;
 }
 
@@ -2144,6 +2272,37 @@ function parseExpenseCommentMeta(comment = '') {
 
 function isCurrencyComment(comment = '') {
   return String(comment || '').startsWith('FXUSD|');
+}
+
+function normalizePaymentMethodType(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return ['cash', 'card', 'fop'].includes(normalized) ? normalized : '';
+}
+
+async function buildPaymentMethodRoute(methodLabel, fallbackWorkerName, sb, sbHeaders) {
+  const label = normalizeCashPaymentMethod(methodLabel);
+  const targetWorkerName = String(fallbackWorkerName || '').trim();
+  if (!label) {
+    return { worker_name: targetWorkerName, cash_account: 'cash', requires_confirmation: false };
+  }
+  if (label === '🪙 Наличка') {
+    return { worker_name: targetWorkerName, cash_account: 'cash', requires_confirmation: false };
+  }
+  const row = await findPaymentMethodRowByLabel(label, sb, sbHeaders);
+  if (!row) {
+    // Unknown method: treat as confirmable card by default (safe).
+    return { worker_name: targetWorkerName, cash_account: 'cash', requires_confirmation: true };
+  }
+  const type = normalizePaymentMethodType(row.method_type);
+  if (type === 'cash') {
+    return { worker_name: targetWorkerName, cash_account: 'cash', requires_confirmation: false };
+  }
+  const owner = String(row.worker_name || '').trim() || targetWorkerName;
+  return {
+    worker_name: owner,
+    cash_account: type === 'fop' ? 'fop' : 'cash',
+    requires_confirmation: true,
+  };
 }
 
 function buildStructuredCashFields(body = {}) {
@@ -2255,48 +2414,13 @@ function getOrderPaymentCashRouteForSync(method, fallbackWorkerName = '') {
   const normalized = normalizeCashPaymentMethod(method);
   const targetWorkerName = String(fallbackWorkerName || '').trim();
   if (isCashPaymentMethodForSync(normalized)) {
-    return {
-      worker_name: targetWorkerName,
-      cash_account: 'cash',
-      fop_confirmed: false,
-    };
+    return { worker_name: targetWorkerName, cash_account: 'cash', fop_confirmed: false };
   }
-  if (isOwnerCardPaymentMethodForSync(normalized)) {
-    return {
-      worker_name: 'Карты владельца',
-      cash_account: 'cash',
-      fop_confirmed: false,
-    };
-  }
-  if (isSashaCardPaymentMethodForSync(normalized)) {
-    return {
-      worker_name: 'Sasha Manager',
-      cash_account: 'cash',
-      fop_confirmed: false,
-    };
-  }
-  if (isOlegCardPaymentMethodForSync(normalized)) {
-    return {
-      worker_name: 'Oleg Starshiy',
-      cash_account: 'cash',
-      fop_confirmed: false,
-    };
-  }
-  if (isFopPaymentMethodForSync(normalized)) {
-    return {
-      worker_name: 'Oleg Starshiy',
-      cash_account: 'fop',
-      fop_confirmed: false,
-    };
-  }
-  return {
-    worker_name: targetWorkerName,
-    cash_account: 'cash',
-    fop_confirmed: false,
-  };
+  // Legacy fallback (will be overridden by dynamic lookup in buildOrderDerivedCashEntries).
+  return { worker_name: targetWorkerName, cash_account: 'cash', fop_confirmed: false };
 }
 
-function buildOrderDerivedCashEntries(order) {
+async function buildOrderDerivedCashEntries(order, sb, sbHeaders) {
   if (!order?.id) return [];
   const entries = [];
   const fallbackWorkerName = String(order?.responsible || '').trim();
@@ -2305,11 +2429,11 @@ function buildOrderDerivedCashEntries(order) {
   const clientLabel = order?.client || '—';
   const carLabel = order?.car || order?.client || '—';
 
-  const appendEntry = (payment, paymentType) => {
+  const appendEntry = async (payment, paymentType) => {
     const amount = Number(payment?.amount) || 0;
     const method = normalizeCashPaymentMethod(payment?.method);
     if (!amount || !method || isCashPaymentMethodForSync(method)) return;
-    const route = getOrderPaymentCashRouteForSync(method, fallbackWorkerName);
+    const route = await buildPaymentMethodRoute(method, fallbackWorkerName, sb, sbHeaders);
     if (!route.worker_name) return;
     const paymentDate = String(payment?.date || orderDate || '').trim();
     const dateLabel = paymentDate
@@ -2324,7 +2448,7 @@ function buildOrderDerivedCashEntries(order) {
       amount: signedAmount,
       comment: `${actionLabel} ${method} ${orderId}, ${dateLabel}, клиент: ${clientLabel}, авто: ${carLabel}`,
       cash_account: route.cash_account,
-      fop_confirmed: route.fop_confirmed,
+      fop_confirmed: false,
       fop_source_key: buildOrderPaymentSourceKey(orderId, method, paymentType, payment),
       fop_date: paymentDate || null,
       manual_payment: false,
@@ -2337,9 +2461,23 @@ function buildOrderDerivedCashEntries(order) {
     };
   };
 
-  (Array.isArray(order.client_payments) ? order.client_payments : []).forEach(payment => appendEntry(payment, 'client'));
-  (Array.isArray(order.supplier_payments) ? order.supplier_payments : []).forEach(payment => appendEntry(payment, 'supplier'));
-  (Array.isArray(order.drop_shipper_payments) ? order.drop_shipper_payments : []).forEach(payment => appendEntry(payment, 'dropshipper'));
+  // NOTE: This function is called in sync flows where sb/sbHeaders are in scope.
+  // We keep it async to allow lookup of payment method routing.
+  const clientPayments = Array.isArray(order.client_payments) ? order.client_payments : [];
+  const supplierPayments = Array.isArray(order.supplier_payments) ? order.supplier_payments : [];
+  const dropshipperPayments = Array.isArray(order.drop_shipper_payments) ? order.drop_shipper_payments : [];
+  for (const payment of clientPayments) {
+    // eslint-disable-next-line no-await-in-loop
+    await appendEntry(payment, 'client');
+  }
+  for (const payment of supplierPayments) {
+    // eslint-disable-next-line no-await-in-loop
+    await appendEntry(payment, 'supplier');
+  }
+  for (const payment of dropshipperPayments) {
+    // eslint-disable-next-line no-await-in-loop
+    await appendEntry(payment, 'dropshipper');
+  }
   return entries;
 }
 
@@ -2376,7 +2514,7 @@ async function rollbackOrderSaveWithCash({ sb, sbHeaders, orderId, isNew, rollba
 async function syncOrderFopCashEntries(order, sb, sbHeaders) {
   await deleteUnconfirmedOrderFopCashEntries(order?.id, sb, sbHeaders);
   if (!order?.id || order?.is_cancelled || !order?.in_work) return [];
-  const entries = buildOrderDerivedCashEntries(order);
+  const entries = await buildOrderDerivedCashEntries(order, sb, sbHeaders);
   if (!entries.length) return [];
   await fetch(`${sb}/rest/v1/cash_log?on_conflict=fop_source_key`, {
     method: 'POST',
