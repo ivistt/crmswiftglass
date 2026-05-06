@@ -156,8 +156,6 @@ function canCurrentUserToggleSpecialServiceStatus(order, type) {
   if (!order) return false;
   const canHandle = workerCanHandleSpecialService(currentWorkerName, type);
   if (!canHandle) return false;
-  const assignedWorker = getOrderSpecialServiceAssignedWorker(order, type);
-  if (assignedWorker && assignedWorker !== currentWorkerName) return false;
   if (type === 'tatu') {
     return Number(order.tatu) > 0;
   }

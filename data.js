@@ -1097,7 +1097,7 @@ async function sbUpsertManualClient(client) {
 
 async function loadRefData() {
   try {
-    const [cars, wh, eq, ps, part, ss, carDir, drops, settingsRows] = await Promise.all([
+    const [cars, wh, eq, ps, part, ss, carDir, drops, settingsRows, paymentMethodRows] = await Promise.all([
       sbFetchRefOptional('ref_cars'),
       sbFetchRefOptional('ref_warehouses'),
       sbFetchRefOptional('ref_equipment'),
@@ -1107,6 +1107,7 @@ async function loadRefData() {
       sbFetchCarDirectory().catch(() => []),
       sbFetchRefOptional('ref_dropshippers'),
       sbFetchRefOptional('ref_app_settings'),
+      sbFetchPaymentMethods().catch(() => []),
     ]);
     refCars             = carDir.length ? carDir : cars;
     refWarehouses       = wh;
@@ -1114,6 +1115,7 @@ async function loadRefData() {
     refPaymentStatuses  = ps.map(s => s.name === 'Борг' ? { ...s, name: 'Долг' } : s);
     refPartners         = part;
     refSupplierStatuses = ss;
+    paymentMethods      = Array.isArray(paymentMethodRows) ? paymentMethodRows : [];
     carDirectory        = carDir;
     refDropshippers     = ensureBuiltInDropshippers(drops);
     appSettings         = Array.isArray(settingsRows)
