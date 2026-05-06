@@ -2661,12 +2661,20 @@ async function removeSupplierPayment(idx) {
 }
 
 // ---------- МОДАЛ СОЗДАНИЯ / РЕДАКТИРОВАНИЯ ----------
-function openOrderModal(id) {
+async function openOrderModal(id) {
   const accessOrder = id ? orders.find(item => item.id === id) : null;
   if (id && !canCurrentUserOpenOrderModal(accessOrder)) return;
   editingOrderId = id;
   currentClientPayments = [];
   currentSupplierPayments = [];
+
+  if ((!Array.isArray(getPaymentMethods?.()) || !getPaymentMethods().length) && typeof sbFetchPaymentMethods === 'function') {
+    try {
+      paymentMethods = await sbFetchPaymentMethods();
+    } catch (e) {
+      paymentMethods = [];
+    }
+  }
 
   populateRefSelects();
   populateClientDatalist();

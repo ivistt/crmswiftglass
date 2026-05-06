@@ -1981,8 +1981,24 @@ const ORDER_META_TONING_RESP_PREFIX = '__toning_resp__:';
 
 let paymentMethods = [];
 
+const PAYMENT_METHOD_LABEL_ALIASES = {
+  'Шепель карта': '👤 Шепель Александр 💳 4149 4975 1422 9980 (PRIVAT)',
+  'Киртока Максим': '👤 Киртока Максим 💳 4441 1144 6035 9811 (MONO)',
+  'Киртока Анастасия': '👤 Киртока Анастасия 💳 4149 6090 2872 4237 (PRIVAT)',
+  'Бабенко карта': '👤 Бабенко Олег 💳 5457 0825 0103 4743 (PRIVAT)',
+  'Бабенко фоп': '📂 БЕЗНАЛ БАБЕНКО',
+};
+
 function getPaymentMethods() {
-  return Array.isArray(paymentMethods) ? paymentMethods : [];
+  const rows = Array.isArray(paymentMethods) ? paymentMethods : [];
+  const seen = new Set();
+  return rows.reduce((acc, row) => {
+    const normalizedLabel = normalizePaymentMethod(row?.label);
+    if (!normalizedLabel || seen.has(normalizedLabel)) return acc;
+    seen.add(normalizedLabel);
+    acc.push({ ...row, label: normalizedLabel });
+    return acc;
+  }, []);
 }
 
 function findPaymentMethodConfigByLabel(label) {
@@ -2070,6 +2086,7 @@ function normalizePaymentMethod(method) {
   if (!method) return '';
   const value = String(method).trim();
   if (value === 'Наличка') return '🪙 Наличка';
+  if (PAYMENT_METHOD_LABEL_ALIASES[value]) return PAYMENT_METHOD_LABEL_ALIASES[value];
   return value;
 }
 
