@@ -193,6 +193,11 @@ function getWorkerDisplayPair(responsible, assistant) {
   return assistant ? `${lead} + ${getWorkerDisplayName(assistant)}` : lead;
 }
 
+function getOrderMainWorkerNames(order) {
+  if (!order) return [];
+  return [...new Set([order.responsible, order.assistant, order.extraAssistant].filter(Boolean))];
+}
+
 function parseWorkerNoteMeta(rawNote) {
   const source = String(rawNote || '');
   const start = source.indexOf(WORKER_PERMISSIONS_META_PREFIX);
@@ -1258,6 +1263,8 @@ function rowToOrder(r) {
     workerDone:      r.worker_done || false,
     assistant:       r.assistant || '',
     assistantWorkerId: r.assistant_worker_id || null,
+    extraAssistant:  r.extra_assistant || '',
+    extraAssistantWorkerId: r.extra_assistant_worker_id || null,
     isCancelled:     r.is_cancelled || false,
     manager:         r.manager || '',
     managerWorkerId: r.manager_worker_id || null,
@@ -1346,6 +1353,8 @@ function orderToRow(o) {
     worker_done:      o.workerDone || false,
     assistant:        o.assistant  || null,
     assistant_worker_id: o.assistantWorkerId || getWorkerIdByName(o.assistant),
+    extra_assistant:  o.extraAssistant || null,
+    extra_assistant_worker_id: o.extraAssistantWorkerId || getWorkerIdByName(o.extraAssistant),
     is_cancelled:     o.isCancelled || false,
     manager:          o.manager    || null,
     manager_worker_id: o.managerWorkerId || getWorkerIdByName(o.manager),
@@ -1422,6 +1431,7 @@ function orderToRowSparse(o) {
     ['ownWarehouse', 'own_warehouse'],
     ['workerDone', 'worker_done'],
     ['assistant', 'assistant'],
+    ['extraAssistant', 'extra_assistant'],
     ['isCancelled', 'is_cancelled'],
     ['manager', 'manager'],
     ['onlySale', 'only_sale'],
@@ -1438,6 +1448,7 @@ function orderToRowSparse(o) {
   });
   if (Object.prototype.hasOwnProperty.call(o, 'responsible')) sparse.responsible_worker_id = full.responsible_worker_id;
   if (Object.prototype.hasOwnProperty.call(o, 'assistant')) sparse.assistant_worker_id = full.assistant_worker_id;
+  if (Object.prototype.hasOwnProperty.call(o, 'extraAssistant')) sparse.extra_assistant_worker_id = full.extra_assistant_worker_id;
   if (Object.prototype.hasOwnProperty.call(o, 'manager')) sparse.manager_worker_id = full.manager_worker_id;
   if (Object.prototype.hasOwnProperty.call(o, 'tatuResponsible')) sparse.tatu_responsible_worker_id = full.tatu_responsible_worker_id;
   if (Object.prototype.hasOwnProperty.call(o, 'toningResponsible')) sparse.toning_responsible_worker_id = full.toning_responsible_worker_id;
@@ -1626,6 +1637,7 @@ function _workerParticipatesInOrder(order, workerName) {
   if (!order || !workerName) return false;
   return order.responsible === workerName
       || order.assistant === workerName
+      || order.extraAssistant === workerName
       || order.manager === workerName
       || order.reworkData?.responsible === workerName
       || order.reworkData?.assistant === workerName;
@@ -1707,7 +1719,7 @@ function _extraWorkSalary(order, workerName = '') {
   const amount = Math.round((Number(order?.extraWork) || 0) * pct);
   if (!amount || pct < 0) return 0;
   if (!workerName) return amount;
-  return (order?.responsible === workerName || order?.assistant === workerName) ? amount : 0;
+  return [order?.responsible, order?.assistant, order?.extraAssistant].includes(workerName) ? amount : 0;
 }
 
 function _selectedServicesSalary(workerName, order) {
@@ -1769,7 +1781,7 @@ function calcWorkerOrderSalary(workerName, order) {
   if (!workerName || !order || !isOrderFinanciallyActive(order)) return 0;
   let total = 0;
   if (order.workerDone) {
-    if (order.responsible === workerName || order.assistant === workerName) {
+    if ([order.responsible, order.assistant, order.extraAssistant].includes(workerName)) {
       total += calcOrderSalary(workerName, order);
     }
     if (order.reworkData?.responsible === workerName || order.reworkData?.assistant === workerName) {
@@ -1789,7 +1801,7 @@ function getWorkerOrderSalaryBreakdown(workerName, order) {
   const parts = [];
   const rule = getSalaryRule(workerName);
 
-  if (order.workerDone && (order.responsible === workerName || order.assistant === workerName)) {
+  if (order.workerDone && [order.responsible, order.assistant, order.extraAssistant].includes(workerName)) {
     if (rule.selectedServices) {
       if (hasCustomSalaryService(order)) {
         parts.push({ label: 'Нестандартные работы 20% от монтажа', amount: _customServiceSalary(order) });
@@ -1890,10 +1902,11 @@ function calcDaySalary(workerName, date) {
       .filter(o => o.workerDone && !o.isCancelled && o.date === date &&
               isOrderFinanciallyActive(o) &&
               (o.responsible === workerName || o.assistant === workerName || o.manager === workerName || o.reworkData?.responsible === workerName || o.reworkData?.assistant === workerName ||
+               o.extraAssistant === workerName ||
                _calcTatuBonus(workerName, o) > 0 || _calcToningBonus(workerName, o) > 0))
       .reduce((sum, o) => {
         let total = sum;
-        if (o.responsible === workerName || o.assistant === workerName) {
+        if ([o.responsible, o.assistant, o.extraAssistant].includes(workerName)) {
           total += calcOrderSalary(workerName, o);
         }
         if (o.reworkData?.responsible === workerName || o.reworkData?.assistant === workerName) {
@@ -2407,7 +2420,7 @@ function canEditPrice(order) {
   if (currentRole === 'owner') return true;
   if (currentRole === 'manager') return true;
   if (currentRole === 'extra') {
-    if (order && (order.responsible === currentWorkerName || order.assistant === currentWorkerName)) return true;
+    if (order && (order.responsible === currentWorkerName || order.assistant === currentWorkerName || order.extraAssistant === currentWorkerName)) return true;
     return !order.priceLocked;
   }
   if (currentRole === 'senior') return !order.priceLocked;

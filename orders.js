@@ -672,7 +672,7 @@ function renderManagerOrderCardMeta(order) {
       { iconLabel: icon('car'), value: order.car || '—' },
       { iconLabel: icon('phone'), value: order.phone || '—' },
       { iconLabel: icon('calendar'), value: order.time ? `${formatDate(order.date)} / ${order.time}` : formatDate(order.date) },
-      { iconLabel: icon('users'), value: getWorkerDisplayPair(order.responsible, order.assistant) || '—' },
+      { iconLabel: icon('users'), value: [getWorkerDisplayName(order.responsible), getWorkerDisplayName(order.assistant), getWorkerDisplayName(order.extraAssistant)].filter(Boolean).join(' + ') || '—' },
     ],
     [
       { value: order.code || '—' },
@@ -1003,7 +1003,7 @@ function renderOrderStatusBadges(o) {
 function _isCurrentWorkerOrder(order) {
   if (!order) return false;
   if (currentUserCanViewAllOrders()) return true;
-  return order.responsible === currentWorkerName || order.assistant === currentWorkerName;
+  return order.responsible === currentWorkerName || order.assistant === currentWorkerName || order.extraAssistant === currentWorkerName;
 }
 
 function _filterSpecialistOrdersByTab(list) {
@@ -1241,6 +1241,7 @@ function renderOrders() {
   if (workerF) list = list.filter(o =>
     o.responsible === workerF
     || o.assistant === workerF
+    || o.extraAssistant === workerF
     || o.manager === workerF
     || getOrderSpecialServiceAssignedWorker(o, 'tatu') === workerF
     || getOrderSpecialServiceAssignedWorker(o, 'toning') === workerF
@@ -1335,7 +1336,7 @@ function openOrderDetail(id) {
         <div>
           <div style="font-size:12px;color:var(--text3);font-family:'JetBrains Mono',monospace;margin-bottom:6px;">${o.id}</div>
           <div class="detail-title">${o.car || '—'}</div>
-          <div class="detail-subtitle">${icon('calendar')} ${formatDate(o.date)}${o.time ? ' · ' + icon('clock') + ' ' + o.time : ''} &nbsp;·&nbsp; ${icon('hard-hat')} ${getWorkerDisplayPair(o.responsible, o.assistant)}</div>
+          <div class="detail-subtitle">${icon('calendar')} ${formatDate(o.date)}${o.time ? ' · ' + icon('clock') + ' ' + o.time : ''} &nbsp;·&nbsp; ${icon('hard-hat')} ${[getWorkerDisplayName(o.responsible), getWorkerDisplayName(o.assistant), getWorkerDisplayName(o.extraAssistant)].filter(Boolean).join(' + ') || '—'}</div>
         </div>
         <div class="detail-badges">
           ${o.inWork ? `<span class="status-badge" style="background:#F59E0B;color:#fff;">${icon('hammer')} Планёрка</span>` : ''}
@@ -1351,6 +1352,7 @@ function openOrderDetail(id) {
         ${field(`${icon('clock')} Время`, o.time)}
         ${field(`${icon('hard-hat')} Ответственный`, getWorkerDisplayName(o.responsible))}
         ${field(`${icon('users')} Помощник`, getWorkerDisplayName(o.assistant))}
+        ${field(`${icon('users')} Доп. помощник`, getWorkerDisplayName(o.extraAssistant))}
         ${field(`${icon('clipboard-list')} Менеджер`, getWorkerDisplayName(o.manager))}
         ${field(`${icon('user')} Клиент`, o.client)}
         ${field(`${icon('phone')} Телефон`, phoneCallLink(o.phone), 'mono detail-phone-value')}
@@ -2188,6 +2190,13 @@ function populateRefSelects() {
       workers.filter(w => ['senior', 'junior', 'extra'].includes(w.systemRole)).map(w => `<option value="${w.name}">${getWorkerDisplayName(w.name)} (${w.role})</option>`).join('');
     if (cur) assistantSel.value = cur;
   }
+  const extraAssistantSel = document.getElementById('f-extra-assistant');
+  if (extraAssistantSel) {
+    const cur = extraAssistantSel.value;
+    extraAssistantSel.innerHTML = '<option value="">— выбрать / нет —</option>' +
+      workers.filter(w => ['senior', 'junior', 'extra'].includes(w.systemRole)).map(w => `<option value="${w.name}">${getWorkerDisplayName(w.name)} (${w.role})</option>`).join('');
+    if (cur) extraAssistantSel.value = cur;
+  }
 
   // Ответственный — старшие специалисты
   const respSel = document.getElementById('f-responsible');
@@ -2871,6 +2880,7 @@ function getOrderDraftFromForm(baseOrder = null) {
   order.time = get('f-time') || baseOrder?.time || '';
   order.responsible = get('f-responsible') || baseOrder?.responsible || '';
   order.assistant = document.getElementById('f-assistant')?.value || baseOrder?.assistant || '';
+  order.extraAssistant = document.getElementById('f-extra-assistant')?.value || baseOrder?.extraAssistant || '';
   order.manager = document.getElementById('f-manager')?.value || baseOrder?.manager || '';
   order.dropshipper = get('f-dropshipper') || baseOrder?.dropshipper || '';
   order.molding = getN('f-molding');
@@ -2907,6 +2917,7 @@ function getOrderSalaryPreviewRows(order) {
   const candidateNames = [
     order.responsible,
     order.assistant,
+    order.extraAssistant,
     order.manager,
     getOrderSpecialServiceAssignedWorker(order, 'tatu'),
     getOrderSpecialServiceAssignedWorker(order, 'toning'),
@@ -2940,7 +2951,7 @@ function getWorkerOrderSalaryPreviewBreakdown(workerName, order) {
   if (!workerName || !order || order.isCancelled) return [];
   const parts = [];
   const rule = typeof getSalaryRule === 'function' ? getSalaryRule(workerName) : {};
-  const isMainWorker = order.responsible === workerName || order.assistant === workerName;
+  const isMainWorker = [order.responsible, order.assistant, order.extraAssistant].includes(workerName);
 
   if (isMainWorker) {
     if (rule.selectedServices) {
@@ -2998,7 +3009,7 @@ function getWorkerOrderSalaryPreviewBreakdown(workerName, order) {
     parts.push({ label: 'Тонировка ' + Math.round((rule.toningBonusPct || 0) * 100) + '%', amount: Math.round((Number(order.toning) || 0) * (rule.toningBonusPct || 0)) });
   }
 
-  if (!parts.length && (order.responsible === workerName || order.assistant === workerName || order.manager === workerName)) {
+  if (!parts.length && ([order.responsible, order.assistant, order.extraAssistant].includes(workerName) || order.manager === workerName)) {
     parts.push({ label: 'Пока начисление 0', amount: 0 });
   }
 
@@ -3048,6 +3059,7 @@ function renderOrderSummary(order = null) {
         ['Время', formatOrderSummaryValue(draftOrder.time)],
         ['Ответственный', formatOrderSummaryValue(getWorkerDisplayName(draftOrder.responsible || ''))],
         ['Помощник', formatOrderSummaryValue(getWorkerDisplayName(draftOrder.assistant || ''))],
+        ['Доп. помощник', formatOrderSummaryValue(getWorkerDisplayName(draftOrder.extraAssistant || ''))],
         ['Менеджер', formatOrderSummaryValue(getWorkerDisplayName(draftOrder.manager || ''))],
         ['Ответственный за тату', formatOrderSummaryValue(getWorkerDisplayName(draftOrder.tatuResponsible || ''))],
         ['Ответственный за тонировку', formatOrderSummaryValue(getWorkerDisplayName(draftOrder.toningResponsible || ''))],
@@ -3467,6 +3479,17 @@ function fillOrderForm(o) {
     }
     asEl.value = assistantValue;
   }
+  const extraAsEl = document.getElementById('f-extra-assistant');
+  if (extraAsEl) {
+    const extraAssistantValue = o.extraAssistant || '';
+    if (extraAssistantValue && !Array.from(extraAsEl.options).some(opt => opt.value === extraAssistantValue)) {
+      const option = document.createElement('option');
+      option.value = extraAssistantValue;
+      option.textContent = getWorkerDisplayName(extraAssistantValue);
+      extraAsEl.appendChild(option);
+    }
+    extraAsEl.value = extraAssistantValue;
+  }
   // перерисовать чекбоксы комплектации
   const confArr = (o.configuration || '').split(',');
   document.querySelectorAll('#f-configuration-checkboxes input[type="checkbox"]').forEach(el => {
@@ -3485,7 +3508,7 @@ function clearOrderForm() {
     'f-remainder','f-payment-method','f-dropshipper','f-margin-total',
     'f-payout-dropshipper','f-payout-manager-glass','f-payout-resp-glass',
     'f-payout-lesha','f-payout-roma','f-payout-extra-resp','f-payout-extra-assist',
-    'f-payout-molding-resp','f-payout-molding-assist','f-assistant','f-manager','f-tatu-responsible','f-toning-responsible',
+    'f-payout-molding-resp','f-payout-molding-assist','f-assistant','f-extra-assistant','f-manager','f-tatu-responsible','f-toning-responsible',
     'f-new-payment-amount','f-new-payment-date','f-new-supplier-payment-amount','f-new-supplier-payment-date','f-new-supplier-payment-method'
   ];
   ids.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
@@ -3718,6 +3741,7 @@ async function saveOrder() {
       : (existingOrder ? !!existingOrder.isCancelled : false),
     workerDone:      isNew ? false : (orders.find(x => x.id === editingOrderId)?.workerDone || false),
     assistant:       document.getElementById('f-assistant')?.value || '',
+    extraAssistant:  document.getElementById('f-extra-assistant')?.value || '',
     manager:         document.getElementById('f-manager')?.value || '',
     priceLocked:     (currentRole === 'senior') ? true : (existingOrder ? existingOrder.priceLocked : false),
     toningExternal:  existingOrder ? !!existingOrder.toningExternal : false,
@@ -4108,6 +4132,7 @@ function renderOrdersForMonth(ym) {
   if (workerF) list = list.filter(o =>
     o.responsible === workerF
     || o.assistant === workerF
+    || o.extraAssistant === workerF
     || o.manager === workerF
     || getOrderSpecialServiceAssignedWorker(o, 'tatu') === workerF
     || getOrderSpecialServiceAssignedWorker(o, 'toning') === workerF
@@ -4216,7 +4241,7 @@ async function _upsertOrderSalaries(order) {
 
   if (order.workerDone) {
     // 1. Основные участники
-    [...new Set([order.responsible, order.assistant].filter(Boolean))].forEach(w => {
+    [...new Set([order.responsible, order.assistant, order.extraAssistant].filter(Boolean))].forEach(w => {
       affectedWorkers.add(w);
       amounts[w] = (amounts[w] || 0) + calcOrderSalary(w, order);
     });

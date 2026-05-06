@@ -312,7 +312,7 @@ function getCalendarPlannerOrders() {
 function getCalendarWorkerNames() {
   const names = new Set();
   getCalendarPlannerOrders().forEach(order => {
-    [order.responsible, order.assistant, order.manager].filter(Boolean).forEach(name => names.add(name));
+    [order.responsible, order.assistant, order.extraAssistant, order.manager].filter(Boolean).forEach(name => names.add(name));
   });
   return Array.from(names).sort((a, b) => getWorkerDisplayName(a).localeCompare(getWorkerDisplayName(b), 'ru'));
 }
@@ -320,7 +320,7 @@ function getCalendarWorkerNames() {
 function orderMatchesCalendarWorkers(order) {
   if (!calendarWorkerFilters.length) return true;
   return calendarWorkerFilters.some(workerName =>
-    order.responsible === workerName || order.assistant === workerName || order.manager === workerName
+    order.responsible === workerName || order.assistant === workerName || order.extraAssistant === workerName || order.manager === workerName
   );
 }
 
@@ -480,7 +480,7 @@ function openCalendarDayModal(dateKey) {
         <div class="calendar-modal-order-time">${escapeHtml(order.time || '—')}</div>
       </div>
       <div class="calendar-modal-order-meta">
-        <span>${icon('user')} ${escapeHtml(getWorkerDisplayPair(order.responsible, order.assistant) || '—')}</span>
+        <span>${icon('user')} ${escapeHtml([getWorkerDisplayName(order.responsible), getWorkerDisplayName(order.assistant), getWorkerDisplayName(order.extraAssistant)].filter(Boolean).join(' + ') || '—')}</span>
         ${order.manager ? `<span>${icon('users')} ${escapeHtml(getWorkerDisplayName(order.manager) || order.manager)}</span>` : ''}
         ${order.address ? `<span>${escapeHtml(order.address)}</span>` : ''}
       </div>
@@ -930,7 +930,7 @@ function getHomeDashboardOrdersCount() {
     if (currentUserHasPermission('own_warehouse_view') && order.ownWarehouse) {
       return true;
     }
-    const isMainWorker = order.responsible === currentWorkerName || order.assistant === currentWorkerName;
+    const isMainWorker = order.responsible === currentWorkerName || order.assistant === currentWorkerName || order.extraAssistant === currentWorkerName;
     const isAssignedSpecialist = getOrderSpecialServiceAssignedWorker(order, 'tatu') === currentWorkerName
       || getOrderSpecialServiceAssignedWorker(order, 'toning') === currentWorkerName;
     return isMainWorker || isAssignedSpecialist;

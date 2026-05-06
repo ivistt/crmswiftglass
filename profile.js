@@ -515,6 +515,9 @@ function getSeniorWorkedAssistants() {
     if (order.responsible === currentWorkerName && order.assistant) {
       names.add(order.assistant);
     }
+    if (order.responsible === currentWorkerName && order.extraAssistant) {
+      names.add(order.extraAssistant);
+    }
     if (order.reworkData?.responsible === currentWorkerName && order.reworkData?.assistant) {
       names.add(order.reworkData.assistant);
     }
