@@ -942,16 +942,60 @@ function _ownerCashEntryDate(entry) {
   return new Date(entry.created_at).toISOString().slice(0, 10);
 }
 
-function getOwnerCashSeniorNames() {
-  const names = (workers || [])
+function getOwnerCashWorkerDescriptors() {
+  const map = new Map();
+  const addDescriptor = ({ workerId = '', workerName = '' }) => {
+    const rawId = String(workerId || '').trim();
+    const resolvedById = rawId && typeof getWorkerRecordById === 'function' ? getWorkerRecordById(rawId) : null;
+    const resolvedByName = workerName && typeof getWorkerRecordByName === 'function' ? getWorkerRecordByName(workerName) : null;
+    const resolved = resolvedById || resolvedByName || null;
+    const resolvedId = String(resolved?.id || rawId || '').trim();
+    const resolvedName = String(resolved?.name || workerName || '').trim();
+    if (!resolvedId && !resolvedName) return;
+    const key = resolvedId ? `worker:${resolvedId}` : `worker-name:${resolvedName}`;
+    if (map.has(key)) return;
+    map.set(key, {
+      key,
+      workerId: resolvedId || null,
+      workerName: resolvedName,
+      label: getWorkerDisplayName(resolvedName) || resolvedName,
+      matches(entry) {
+        const entryOwnerId = String(entry?.cash_owner_id || entry?.worker_id || '').trim()
+          || (typeof getWorkerIdByName === 'function' ? String(getWorkerIdByName(getCashEntryOwner(entry)) || '').trim() : '');
+        const entryOwnerName = String(getCashEntryOwner(entry) || '').trim();
+        if (resolvedId && entryOwnerId) return entryOwnerId === resolvedId;
+        if (resolvedId && entryOwnerName && typeof getWorkerIdByName === 'function') {
+          return String(getWorkerIdByName(entryOwnerName) || '').trim() === resolvedId;
+        }
+        return entryOwnerName === resolvedName;
+      },
+    });
+  };
+
+  (workers || [])
     .filter(w => w.systemRole === 'senior' || w.systemRole === 'extra')
-    .map(w => w.name);
+    .forEach(w => addDescriptor({ workerId: w.id, workerName: w.name }));
+
   (typeof getPaymentMethods === 'function' ? getPaymentMethods() : [])
     .filter(row => row?.active !== false)
-    .map(row => String(row?.worker_name || '').trim())
-    .filter(Boolean)
-    .forEach(name => { if (!names.includes(name)) names.push(name); });
-  return names;
+    .forEach(row => addDescriptor({
+      workerId: row?.worker_id || '',
+      workerName: String(row?.worker_name || '').trim(),
+    }));
+
+  return Array.from(map.values());
+}
+
+function getOwnerCashSeniorNames() {
+  return getOwnerCashWorkerDescriptors().map(item => item.workerName).filter(Boolean);
+}
+
+function getOwnerCashWorkerDescriptorByKey(workerKey) {
+  return getOwnerCashWorkerDescriptors().find(item => item.key === workerKey) || null;
+}
+
+function getOwnerCashWorkerDescriptorByEntry(entry) {
+  return getOwnerCashWorkerDescriptors().find(item => item.matches(entry)) || null;
 }
 
 function getOwnerSpecialCashSections() {
@@ -991,10 +1035,10 @@ function getOwnerSpecialCashLogs(sectionKey, confirmFilter = ownerCashConfirmFil
 }
 
 function getOwnerCashLogs(confirmFilter = ownerCashConfirmFilter) {
-  const seniorNames = getOwnerCashSeniorNames();
+  const workerDescriptors = getOwnerCashWorkerDescriptors();
   return [...(window.allCashLog || [])]
     .filter(entry => entry?.manual_payment !== true)
-    .filter(entry => seniorNames.includes(getCashEntryOwner(entry)))
+    .filter(entry => workerDescriptors.some(item => item.matches(entry)))
     .filter(entry => {
       const account = getCashEntryAccountType(entry);
       if (account === 'fop') return false;
@@ -1218,10 +1262,10 @@ function getOwnerCashBalanceLogs() {
 }
 
 function getOwnerCurrencyCashLogs() {
-  const seniorNames = getOwnerCashSeniorNames();
+  const workerDescriptors = getOwnerCashWorkerDescriptors();
   return [...(window.allCashLog || [])]
     .filter(entry => entry?.manual_payment !== true)
-    .filter(entry => seniorNames.includes(getCashEntryOwner(entry)))
+    .filter(entry => workerDescriptors.some(item => item.matches(entry)))
     .filter(isCurrencyCashEntry);
 }
 
@@ -1282,7 +1326,8 @@ function setOwnerCashCurrencyView(currency) {
 function getOwnerCashHistoryTitle(workerKey) {
   const special = getOwnerSpecialCashSections().find(item => item.key === workerKey);
   if (special) return special.label;
-  return getWorkerDisplayName(workerKey) || workerKey || 'Касса';
+  const descriptor = getOwnerCashWorkerDescriptorByKey(workerKey);
+  return descriptor?.label || getWorkerDisplayName(workerKey) || workerKey || 'Касса';
 }
 
 function getOwnerExpenseHistoryTitle(workerName) {
@@ -1353,7 +1398,9 @@ function closeOwnerCashHistoryModal() {
 }
 
 function getOwnerCashEditableWorkers() {
-  return getOwnerCashSeniorNames().filter(workerName => workerName && workerName !== OWNER_PENDING_CASH_WORKER_NAME);
+  return getOwnerCashWorkerDescriptors()
+    .map(item => item.workerName)
+    .filter(workerName => workerName && workerName !== OWNER_PENDING_CASH_WORKER_NAME);
 }
 
 function renderOwnerCashWorkerOptions(selectedWorker = '') {
@@ -1904,10 +1951,11 @@ function renderOwnerExpensesScreen() {
 }
 
 function renderOwnerEmployeeCashHistory(workerName, logs) {
+  const workerDescriptor = getOwnerCashWorkerDescriptorByKey(workerName);
   const rows = (logs || [])
     .filter(entry => {
       if (getOwnerSpecialCashSections().some(item => item.key === workerName)) return true;
-      return getCashEntryOwner(entry) === workerName;
+      return workerDescriptor ? workerDescriptor.matches(entry) : getCashEntryOwner(entry) === workerName;
     })
     .slice()
     .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
@@ -2981,7 +3029,7 @@ function renderOwnerCashScreen() {
   const container = document.getElementById('owner-cash-content');
   if (!container) return;
 
-  const seniorNames = getOwnerCashSeniorNames();
+  const workerDescriptors = getOwnerCashWorkerDescriptors();
   const specialSections = getOwnerSpecialCashSections();
   const balanceLogs = getOwnerCashBalanceLogs()
     .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
@@ -2990,25 +3038,29 @@ function renderOwnerCashScreen() {
 
   const balances = {};
   for (const entry of balanceLogs) {
-    const workerName = getCashEntryOwner(entry);
-    balances[workerName] = (balances[workerName] || 0) + (Number(entry.amount) || 0);
+    const descriptor = getOwnerCashWorkerDescriptorByEntry(entry);
+    if (!descriptor) continue;
+    balances[descriptor.key] = (balances[descriptor.key] || 0) + (Number(entry.amount) || 0);
   }
 
   const currencyBalances = {};
   for (const entry of currencyLogs) {
     const parsed = parseCurrencyCashEntry(entry);
     if (!parsed) continue;
-    const workerName = getCashEntryOwner(entry);
-    currencyBalances[workerName] = (currencyBalances[workerName] || 0) + parsed.usdAmount;
+    const descriptor = getOwnerCashWorkerDescriptorByEntry(entry);
+    if (!descriptor) continue;
+    currencyBalances[descriptor.key] = (currencyBalances[descriptor.key] || 0) + parsed.usdAmount;
   }
 
-  const currentCashRows = seniorNames.map(name => ({
-    workerName: name,
-    balance: Number(balances[name] || 0),
+  const currentCashRows = workerDescriptors.map(item => ({
+    workerName: item.key,
+    label: item.label,
+    balance: Number(balances[item.key] || 0),
   }));
-  const currentCurrencyRows = seniorNames.map(name => ({
-    workerName: name,
-    balance: Number(currencyBalances[name] || 0),
+  const currentCurrencyRows = workerDescriptors.map(item => ({
+    workerName: item.key,
+    label: item.label,
+    balance: Number(currencyBalances[item.key] || 0),
   }));
   const specialRows = specialSections.map(section => {
     const total = getOwnerSpecialCashLogs(section.key, 'confirmed')
