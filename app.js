@@ -1320,6 +1320,28 @@ function getOwnerCashEntryTime(entry) {
   return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 }
 
+function getOrderIdFromCashEntry(entry) {
+  const directId = String(entry?.order_id || '').trim();
+  if (directId) return directId;
+  const sourceKey = String(entry?.fop_source_key || entry?.source_id || '').trim();
+  const match = sourceKey.match(/^order:([^|]+)/);
+  return match ? String(match[1] || '').trim() : '';
+}
+
+function openOrderFromCashEntry(entryId, event) {
+  event?.stopPropagation?.();
+  const entry = (window.allCashLog || []).find(item => String(item?.id || '') === String(entryId || ''));
+  const orderId = getOrderIdFromCashEntry(entry);
+  if (!orderId) return;
+  const order = (orders || []).find(item => String(item?.id || '') === String(orderId));
+  if (!order) return;
+  if (typeof canCurrentUserOpenOrderModal === 'function' && canCurrentUserOpenOrderModal(order)) {
+    openOrderModal(orderId);
+    return;
+  }
+  openOrderDetail(orderId);
+}
+
 function escapeOwnerCashJsString(value) {
   return String(value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
@@ -1692,8 +1714,9 @@ function renderOwnerEmployeeExpenseHistory(workerName, logs) {
           const amount = getExpenseCashAmount(entry);
           const comment = getCashEntryDisplayComment(entry) || 'Без комментария';
           const time = getOwnerCashEntryTime(entry);
+          const linkedOrderId = getOrderIdFromCashEntry(entry);
           return `
-            <div class="owner-cash-entry-row">
+            <div class="owner-cash-entry-row" ${linkedOrderId ? `onclick="openOrderFromCashEntry('${escapeAttr(entry.id)}', event)" style="cursor:pointer;"` : ''}>
               <div class="owner-cash-entry-main">
                 <div class="owner-cash-entry-comment">${escapeHtml(comment)}</div>
                 ${renderOwnerCashEntryTags(entry)}
@@ -1883,8 +1906,9 @@ function openOwnerDeletedCashModal() {
         const parsedCurrency = isCurrencyCashEntry(entry) ? parseCurrencyCashEntry(entry) : null;
         const amount = parsedCurrency ? Number(parsedCurrency.usdAmount || 0) : (Number(entry.amount) || 0);
         const deletedAt = entry.deleted_at ? new Date(entry.deleted_at).toLocaleString('ru-RU') : '—';
+        const linkedOrderId = getOrderIdFromCashEntry(entry);
         return `
-          <div class="owner-cash-entry-row">
+          <div class="owner-cash-entry-row" ${linkedOrderId ? `onclick="openOrderFromCashEntry('${escapeAttr(entry.id)}', event)" style="cursor:pointer;"` : ''}>
             <div class="owner-cash-entry-main">
               <div class="owner-cash-entry-comment">${escapeHtml(getWorkerDisplayName(entry.worker_name) || entry.worker_name || '—')} · ${escapeHtml(getCashEntryDisplayComment(entry) || 'Без комментария')}</div>
               ${renderOwnerCashEntryTags(entry)}
@@ -2044,6 +2068,7 @@ function renderOwnerEmployeeCashHistory(workerName, logs) {
           const comment = getCashEntryDisplayComment(entry) || 'Без комментария';
           const extraMeta = getCashEntryDisplayMeta(entry);
           const time = getOwnerCashEntryTime(entry);
+          const linkedOrderId = getOrderIdFromCashEntry(entry);
           const isCurrency = isCurrencyCashEntry(entry);
           const isConfirmable = isConfirmableCashEntry(entry);
           const isPendingConfirm = isConfirmable && getCashEntryApprovalStatus(entry) !== 'confirmed';
@@ -2058,7 +2083,7 @@ function renderOwnerEmployeeCashHistory(workerName, logs) {
             ? '<span style="display:inline-flex;align-items:center;padding:2px 7px;border-radius:999px;background:rgba(29,233,182,.12);border:1px solid rgba(29,233,182,.22);color:var(--accent);font-size:10px;font-weight:800;margin-left:6px;">карта</span>'
             : '';
           return `
-            <div class="owner-cash-entry-row">
+            <div class="owner-cash-entry-row" ${linkedOrderId ? `onclick="openOrderFromCashEntry('${escapeAttr(entry.id)}', event)" style="cursor:pointer;"` : ''}>
               <div class="owner-cash-entry-main">
                 <div class="owner-cash-entry-comment">${escapeHtml(comment)}${cardTag}</div>
                 ${renderOwnerCashEntryTags(entry)}
@@ -2194,8 +2219,9 @@ function renderOwnerEmployeeFopCashHistory(logs) {
           const amount = Number(entry.amount) || 0;
           const comment = getCashEntryDisplayComment(entry) || 'Без комментария';
           const time = getOwnerCashEntryTime(entry);
+          const linkedOrderId = getOrderIdFromCashEntry(entry);
           return `
-            <div class="owner-cash-entry-row">
+            <div class="owner-cash-entry-row" ${linkedOrderId ? `onclick="openOrderFromCashEntry('${escapeAttr(entry.id)}', event)" style="cursor:pointer;"` : ''}>
               <div class="owner-cash-entry-main">
                 <div class="owner-cash-entry-comment">${escapeHtml(comment)}</div>
                 ${renderOwnerCashEntryTags(entry)}
@@ -2311,8 +2337,9 @@ function renderOwnerEmployeeCurrencyCashHistory(workerName, logs) {
           const time = getOwnerCashEntryTime(entry);
           const title = getCashEntryDisplayComment(entry) || 'Обмен в валютную кассу';
           const meta = getCashEntryDisplayMeta(entry);
+          const linkedOrderId = getOrderIdFromCashEntry(entry);
           return `
-            <div class="owner-cash-entry-row">
+            <div class="owner-cash-entry-row" ${linkedOrderId ? `onclick="openOrderFromCashEntry('${escapeAttr(entry.id)}', event)" style="cursor:pointer;"` : ''}>
               <div class="owner-cash-entry-main">
                 <div class="owner-cash-entry-comment">${escapeHtml(title)}</div>
                 ${renderOwnerCashEntryTags(entry)}

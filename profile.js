@@ -1010,8 +1010,11 @@ function _cashEntryRow(e) {
   const cardTag = isConfirmedCard
     ? '<span style="display:inline-flex;align-items:center;padding:2px 7px;border-radius:999px;background:rgba(29,233,182,.12);border:1px solid rgba(29,233,182,.22);color:var(--accent);font-size:10px;font-weight:800;margin-left:6px;">карта</span>'
     : '';
+  const linkedOrderId = typeof getOrderIdFromCashEntry === 'function' ? getOrderIdFromCashEntry(e) : '';
   return '<div style="display:flex;justify-content:space-between;align-items:center;'
-    + 'padding:10px 0;border-bottom:1px solid var(--border);">'
+    + 'padding:10px 0;border-bottom:1px solid var(--border);' + (linkedOrderId ? 'cursor:pointer;' : '') + '"'
+    + (linkedOrderId ? ' onclick="openOrderFromCashEntry(\'' + escapeJsString(e.id) + '\', event)"' : '')
+    + '>'
     + '<div>'
     + '<div style="font-size:13px;color:var(--text2);display:flex;align-items:center;flex-wrap:wrap;">' + escapeHtml(displayComment || '—') + cardTag + '</div>'
     + (tagLabels.length
