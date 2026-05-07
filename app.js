@@ -1902,14 +1902,14 @@ function openOwnerDeletedCashModal() {
   modal.innerHTML = `
     <div class="modal" style="max-width:760px;max-height:88vh;display:flex;flex-direction:column;">
       <div class="modal-header" style="flex-shrink:0;">
-        <div class="modal-title">${isCurrencyView ? 'Удаленные записи валютной кассы' : 'Удаленные записи кассы'}</div>
+        <div class="modal-title">${isCurrencyView ? 'Архив валютной кассы' : 'Архив кассы'}</div>
         <button class="modal-close" onclick="closeOwnerDeletedCashModal()">${icon('x')}</button>
       </div>
       <div class="modal-body" style="overflow-y:auto;flex:1;">
         <div class="fin-month-card owner-cash-history-card">
           <div class="owner-cash-history-title">
             <div>
-              <div class="fin-month-name">${isCurrencyView ? 'Корзина валютной кассы' : 'Корзина кассы'}</div>
+              <div class="fin-month-name">${isCurrencyView ? 'Архив валютной кассы' : 'Архив кассы'}</div>
               <div class="fin-month-sub">${deletedEntries.length} зап.</div>
             </div>
           </div>
@@ -2409,13 +2409,26 @@ async function confirmOwnerCashEntry(id) {
   if (currentRole !== 'owner' || !id) return;
   try {
     const updated = await sbUpdateCashEntry(id, { fop_confirmed: true });
-    if (Array.isArray(window.allCashLog)) {
-      window.allCashLog = window.allCashLog.map(entry =>
-        entry.id === id ? { ...entry, ...updated, fop_confirmed: true, approval_status: 'confirmed' } : entry
-      );
+    try {
+      window.allCashLog = await sbFetchAllCashLog();
+    } catch (refreshError) {
+      console.warn('Failed to refresh cash log after confirmation:', refreshError);
+      if (Array.isArray(window.allCashLog)) {
+        window.allCashLog = window.allCashLog.map(entry =>
+          entry.id === id ? { ...entry, ...updated, fop_confirmed: true, approval_status: 'confirmed' } : entry
+        );
+      }
+    }
+    try {
+      orders = await sbFetchOrders();
+    } catch (ordersRefreshError) {
+      console.warn('Failed to refresh orders after cash confirmation:', ordersRefreshError);
     }
     renderOwnerCashScreen();
     renderOwnerExpensesScreen();
+    if (document.getElementById('screen-owner-payments')?.classList.contains('active')) {
+      renderOwnerPaymentsScreen();
+    }
     const paymentMethod = getCashEntryPaymentMethod(updated);
     if (paymentMethod) showToast(`Подтверждено: ${paymentMethod} ✓`);
     else showToast('Запись подтверждена ✓');
@@ -3131,7 +3144,7 @@ function renderOwnerCashScreen() {
               <div style="font-size:22px;font-weight:900;color:${total >= 0 ? 'var(--accent)' : '#ef4444'};white-space:nowrap;">${total.toLocaleString('ru')} ${isUahView ? '₴' : '$'}</div>
               <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;">
                 ${isUahView ? `<button class="btn-secondary" style="font-size:12px;padding:6px 10px;" onclick="openOwnerCashEntryModal()">+ Запись</button>` : ''}
-                <button class="btn-secondary" style="font-size:12px;padding:6px 10px;" onclick="openOwnerDeletedCashModal()">Корзина</button>
+                <button class="btn-secondary" style="font-size:12px;padding:6px 10px;" onclick="openOwnerDeletedCashModal()">Архив</button>
               </div>
             </div>
           </div>

@@ -4301,10 +4301,6 @@ async function toggleWorkerDone(orderId) {
     }
     const refreshedOrder = orders.find(x => x.id === orderId) || { ...o, serviceType: draftOrder.serviceType, workerDone: true };
     await _upsertOrderSalaries(refreshedOrder);
-    // Legacy fallback для старых заказов без истории оплат.
-    if (typeof addLegacyCashFromCompletedOrder === 'function') {
-      await addLegacyCashFromCompletedOrder(refreshedOrder);
-    }
     try {
       orders = await sbFetchOrders();
     } catch (refreshError) {
