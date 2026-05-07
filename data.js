@@ -17,8 +17,8 @@ const WORKER_PERMISSION_PRESETS = {
     dropshippers_manage: false,
     calendar_view: false,
     groups_view: false,
-    personal_cash_view: false,
-    cash_add_entries: false,
+    personal_cash_view: true,
+    cash_add_entries: true,
     finance_view: false,
     owner_cash_view: false,
     owner_expenses_view: false,
@@ -202,37 +202,44 @@ function parseWorkerNoteMeta(rawNote) {
   const source = String(rawNote || '');
   const start = source.indexOf(WORKER_PERMISSIONS_META_PREFIX);
   if (start === -1) {
-    return { note: source.trim(), permissions: {}, telegramNick: '' };
+    return { note: source.trim(), permissions: {}, telegramNick: '', orderCardLayout: null };
   }
   const end = source.indexOf(WORKER_PERMISSIONS_META_SUFFIX, start);
   if (end === -1) {
-    return { note: source.trim(), permissions: {}, telegramNick: '' };
+    return { note: source.trim(), permissions: {}, telegramNick: '', orderCardLayout: null };
   }
   const encoded = source.slice(start + WORKER_PERMISSIONS_META_PREFIX.length, end);
   const note = (source.slice(0, start) + source.slice(end + WORKER_PERMISSIONS_META_SUFFIX.length)).trim();
   try {
     const decoded = JSON.parse(atob(encoded));
     const meta = decoded && typeof decoded === 'object' && !Array.isArray(decoded) ? decoded : {};
-    const isLegacyPermissionsOnly = !Object.prototype.hasOwnProperty.call(meta, 'permissions') && !Object.prototype.hasOwnProperty.call(meta, 'telegramNick');
+    const isLegacyPermissionsOnly = !Object.prototype.hasOwnProperty.call(meta, 'permissions')
+      && !Object.prototype.hasOwnProperty.call(meta, 'telegramNick')
+      && !Object.prototype.hasOwnProperty.call(meta, 'orderCardLayout');
     return {
       note,
       permissions: isLegacyPermissionsOnly
         ? meta
         : ((meta.permissions && typeof meta.permissions === 'object' && !Array.isArray(meta.permissions)) ? meta.permissions : {}),
       telegramNick: String(isLegacyPermissionsOnly ? '' : (meta.telegramNick || '')).trim().replace(/^@+/, ''),
+      orderCardLayout: isLegacyPermissionsOnly ? null : (meta.orderCardLayout && typeof meta.orderCardLayout === 'object' ? meta.orderCardLayout : null),
     };
   } catch (e) {
-    return { note, permissions: {}, telegramNick: '' };
+    return { note, permissions: {}, telegramNick: '', orderCardLayout: null };
   }
 }
 
-function buildWorkerNoteWithMeta(note, permissions, telegramNick = '') {
+function buildWorkerNoteWithMeta(note, permissions, telegramNick = '', orderCardLayout = null) {
   const cleanNote = String(note || '').trim();
   const cleanPermissions = permissions && typeof permissions === 'object' ? permissions : {};
   const cleanTelegramNick = String(telegramNick || '').trim().replace(/^@+/, '');
+  const cleanOrderCardLayout = orderCardLayout && typeof orderCardLayout === 'object' && !Array.isArray(orderCardLayout)
+    ? orderCardLayout
+    : null;
   const meta = {};
   if (Object.keys(cleanPermissions).length) meta.permissions = cleanPermissions;
   if (cleanTelegramNick) meta.telegramNick = cleanTelegramNick;
+  if (cleanOrderCardLayout) meta.orderCardLayout = cleanOrderCardLayout;
   if (!Object.keys(meta).length) return cleanNote;
   const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(meta))));
   return `${cleanNote}${cleanNote ? '\n' : ''}${WORKER_PERMISSIONS_META_PREFIX}${encoded}${WORKER_PERMISSIONS_META_SUFFIX}`;
@@ -283,7 +290,113 @@ function getCurrentWorkerRecord() {
     name: currentWorkerName,
     systemRole: currentRole,
     permissions: {},
+    orderCardLayout: null,
   };
+}
+
+const ORDER_CARD_LAYOUT_FIELD_DEFINITIONS = [
+  { key: 'client_total', label: 'Имя и сумма' },
+  { key: 'car', label: 'Авто' },
+  { key: 'phone', label: 'Телефон' },
+  { key: 'date', label: 'Дата' },
+  { key: 'time', label: 'Время' },
+  { key: 'workers', label: 'Ответственные' },
+  { key: 'manager', label: 'Менеджер' },
+  { key: 'warehouse', label: 'Склад' },
+  { key: 'warehouse_code', label: 'Код склада' },
+  { key: 'supplier_paid_total', label: 'Оплата поставщику' },
+  { key: 'services', label: 'Услуги' },
+  { key: 'notes', label: 'Заметка' },
+  { key: 'code', label: 'Еврокод' },
+  { key: 'extra_note', label: 'Доп. заметка' },
+  { key: 'vin', label: 'VIN' },
+];
+
+const ORDER_CARD_LAYOUT_ROLE_DEFAULTS = {
+  owner: {
+    groups: [
+      { id: 'owner-main', title: 'Основное', fields: ['client_total', 'car', 'phone'] },
+      { id: 'owner-meta', title: 'Организация', fields: ['date', 'time', 'workers', 'manager', 'warehouse'] },
+      { id: 'owner-services', title: 'Работы', fields: ['services'] },
+    ],
+  },
+  manager: {
+    groups: [
+      { id: 'manager-main', title: 'Основное', fields: ['client_total', 'car', 'phone'] },
+      { id: 'manager-meta', title: 'Организация', fields: ['date', 'time', 'workers', 'manager', 'warehouse'] },
+      { id: 'manager-services', title: 'Работы', fields: ['services'] },
+    ],
+  },
+  senior: {
+    groups: [
+      { id: 'senior-main', title: 'Основное', fields: ['client_total', 'car', 'phone'] },
+      { id: 'senior-meta', title: 'Организация', fields: ['date', 'time', 'workers', 'manager', 'warehouse'] },
+      { id: 'senior-services', title: 'Работы', fields: ['services'] },
+    ],
+  },
+  junior: {
+    groups: [
+      { id: 'junior-main', title: 'Основное', fields: ['client_total', 'car', 'phone'] },
+      { id: 'junior-meta', title: 'Организация', fields: ['date', 'time', 'workers', 'manager', 'warehouse'] },
+      { id: 'junior-services', title: 'Работы', fields: ['services'] },
+    ],
+  },
+  extra: {
+    groups: [
+      { id: 'extra-main', title: 'Основное', fields: ['client_total', 'car', 'phone'] },
+      { id: 'extra-meta', title: 'Организация', fields: ['date', 'time', 'workers', 'manager', 'warehouse'] },
+      { id: 'extra-services', title: 'Работы', fields: ['services'] },
+    ],
+  },
+};
+
+function cloneOrderCardLayout(layout) {
+  return {
+    groups: Array.isArray(layout?.groups)
+      ? layout.groups.map((group, index) => ({
+          id: String(group?.id || `group-${index + 1}`),
+          title: String(group?.title || '').trim(),
+          fields: Array.isArray(group?.fields) ? group.fields.map(String) : [],
+        }))
+      : [],
+  };
+}
+
+function getOrderCardLayoutFieldDefinitions() {
+  return ORDER_CARD_LAYOUT_FIELD_DEFINITIONS.map(item => ({ ...item }));
+}
+
+function getOrderCardLayoutDefaults(systemRole = 'junior') {
+  const roleKey = String(systemRole || 'junior').trim().toLowerCase();
+  return cloneOrderCardLayout(ORDER_CARD_LAYOUT_ROLE_DEFAULTS[roleKey] || ORDER_CARD_LAYOUT_ROLE_DEFAULTS.junior);
+}
+
+function normalizeOrderCardLayout(layout, systemRole = 'junior') {
+  const definitions = getOrderCardLayoutFieldDefinitions();
+  const allowed = new Set(definitions.map(item => item.key));
+  const fallback = getOrderCardLayoutDefaults(systemRole);
+  if (!layout || typeof layout !== 'object' || Array.isArray(layout) || !Array.isArray(layout.groups)) {
+    return fallback;
+  }
+  const used = new Set();
+  const groups = layout.groups.map((group, index) => {
+    const title = String(group?.title || '').trim();
+    const fields = (Array.isArray(group?.fields) ? group.fields : [])
+      .map(value => String(value || '').trim())
+      .filter(key => key && allowed.has(key) && !used.has(key) && (used.add(key) || true));
+    if (!fields.length) return null;
+    return {
+      id: String(group?.id || `group-${index + 1}`),
+      title,
+      fields,
+    };
+  }).filter(Boolean);
+  return groups.length ? { groups } : fallback;
+}
+
+function getResolvedOrderCardLayout(workerLike) {
+  const systemRole = workerLike?.systemRole || workerLike?.system_role || currentRole || 'junior';
+  return normalizeOrderCardLayout(workerLike?.orderCardLayout, systemRole);
 }
 
 function currentUserHasPermission(key, legacyFallback = false) {
@@ -484,12 +597,13 @@ async function sbSetWorkerPin(workerId, pin) {
 
 async function sbInsertWorker(entry) {
   const payload = { ...(entry || {}) };
-  if (payload.note !== undefined || payload.permissions !== undefined) {
-    payload.note = buildWorkerNoteWithMeta(payload.note || '', payload.permissions || {});
+  if (payload.note !== undefined || payload.permissions !== undefined || payload.orderCardLayout !== undefined) {
+    payload.note = buildWorkerNoteWithMeta(payload.note || '', payload.permissions || {}, payload.telegramNick || '', payload.orderCardLayout || null);
   }
   if (payload.telegramNick !== undefined) payload.telegram_nick = String(payload.telegramNick || '').trim().replace(/^@+/, '');
   delete payload.permissions;
   delete payload.telegramNick;
+  delete payload.orderCardLayout;
   const res = await fetch(`${WORKER_URL}/api/workers`, {
     method: 'POST',
     headers: getHeaders(),
@@ -509,10 +623,12 @@ async function sbUpdateWorker(workerId, updates) {
   if (updates.assistant !== undefined) body.assistant = updates.assistant || '';
   if (updates.alias !== undefined) body.alias = updates.alias || '';
   if (updates.telegramNick !== undefined) body.telegram_nick = String(updates.telegramNick || '').trim().replace(/^@+/, '');
-  if (updates.note !== undefined || updates.permissions !== undefined) {
+  if (updates.note !== undefined || updates.permissions !== undefined || updates.orderCardLayout !== undefined || updates.telegramNick !== undefined) {
     body.note = buildWorkerNoteWithMeta(
       updates.note !== undefined ? updates.note : '',
-      updates.permissions !== undefined ? updates.permissions : {}
+      updates.permissions !== undefined ? updates.permissions : {},
+      updates.telegramNick !== undefined ? updates.telegramNick : '',
+      updates.orderCardLayout !== undefined ? updates.orderCardLayout : null
     );
   }
   // Пароль обновляется через set-pin если передан
@@ -1458,27 +1574,30 @@ function orderToRowSparse(o) {
 
 function rowToWorker(r) {
   const noteMeta = parseWorkerNoteMeta(r.note);
+  const systemRole = r.system_role || 'junior';
   return {
     id:            r.id,
     name:          r.name,
     alias:         r.alias         || '',
-    role:          r.role          || '',
-    systemRole:    r.system_role   || 'junior',
+    role:          r.role || (ROLE_LABELS[systemRole] || systemRole),
+    systemRole:    systemRole,
     note:          noteMeta.note,
     permissions:   noteMeta.permissions || {},
     telegramNick:  String(r.telegram_nick || noteMeta.telegramNick || '').trim().replace(/^@+/, ''),
+    orderCardLayout: noteMeta.orderCardLayout || null,
     salaryFormula: r.salary_formula || '',
     assistant:     r.assistant     || '',
   };
 }
 
 function workerToRow(w) {
+  const systemRole = w.systemRole || 'junior';
   return {
     name:           w.name,
     alias:          w.alias         || '',
-    role:           w.role          || '',
-    system_role:    w.systemRole    || 'junior',
-    note:           buildWorkerNoteWithMeta(w.note, w.permissions),
+    role:           w.role || (ROLE_LABELS[systemRole] || systemRole),
+    system_role:    systemRole,
+    note:           buildWorkerNoteWithMeta(w.note, w.permissions, w.telegramNick || '', w.orderCardLayout || null),
     telegram_nick:  String(w.telegramNick || '').trim().replace(/^@+/, ''),
     salary_formula: w.salaryFormula || '',
     assistant:      w.assistant     || '',
@@ -2036,6 +2155,10 @@ const ROLE_LABELS = {
   junior:  'Младший специалист',
   extra:   'Экстра специалист',
 };
+
+function getWorkerSystemRoleLabel(systemRole) {
+  return ROLE_LABELS[String(systemRole || '').trim()] || String(systemRole || '').trim() || 'Сотрудник';
+}
 
 const CASH_ACCOUNT_CASH = 'cash';
 const CASH_ACCOUNT_FOP = 'fop';

@@ -742,22 +742,8 @@
             </div>
           </div>
           <div class="form-group">
-            <label class="form-label">🧩 Доп. помощник</label>
-            <select class="form-select" id="f-extra-assistant"></select>
-          </div>
-          <div class="form-group">
             <label class="form-label">📋 Ответст менеджер</label>
             <select class="form-select" id="f-manager"></select>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label">🎨 Ответственный за тату</label>
-              <select class="form-select" id="f-tatu-responsible"></select>
-            </div>
-            <div class="form-group">
-              <label class="form-label">🕶️ Ответственный за тонировку</label>
-              <select class="form-select" id="f-toning-responsible"></select>
-            </div>
           </div>
           <div class="form-group">
             <label class="form-label">👤 Клиент</label>
@@ -910,6 +896,14 @@
           <div class="form-group">
             <label class="form-label">🔧 Сумма услуг</label>
             <input class="form-input" type="text" inputmode="numeric" id="f-total" placeholder="0" oninput="recalcTotal('manualTotal')">
+          </div>
+          <div class="form-group">
+            <label class="form-label">🎨 Ответственный за тату</label>
+            <select class="form-select" id="f-tatu-responsible"></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">🕶️ Ответственный за тонировку</label>
+            <select class="form-select" id="f-toning-responsible"></select>
           </div>
           <div class="form-group span-full" id="order-special-status-section" style="display:none;">
             <div class="form-section-title form-section-title--teal" style="margin-bottom:10px;">
@@ -1135,15 +1129,6 @@
         <div class="form-group">
           <label class="form-label">Telegram @ник</label>
           <input class="form-input" type="text" id="w-telegram" placeholder="username">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Должность (отображается в карточке)</label>
-          <select class="form-select" id="w-role">
-            <option value="Старший специалист">Старший специалист</option>
-            <option value="Младший специалист">Младший специалист</option>
-            <option value="Монтажник">Монтажник</option>
-            <option value="Менеджер">Менеджер</option>
-          </select>
         </div>
         <div class="form-group">
           <label class="form-label">Роль в системе (права доступа)</label>

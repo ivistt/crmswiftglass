@@ -942,6 +942,37 @@ function _ownerCashEntryDate(entry) {
   return new Date(entry.created_at).toISOString().slice(0, 10);
 }
 
+function getOwnerCashResolvedWorker(entry) {
+  if (!entry) return null;
+  const ownerId = String(entry?.cash_owner_id || entry?.worker_id || '').trim();
+  if (ownerId && typeof getWorkerRecordById === 'function') {
+    const byId = getWorkerRecordById(ownerId);
+    if (byId) return byId;
+  }
+
+  const method = typeof getCashEntryPaymentMethod === 'function' ? getCashEntryPaymentMethod(entry) : '';
+  const cfg = method && typeof findPaymentMethodConfigByLabel === 'function'
+    ? findPaymentMethodConfigByLabel(method)
+    : null;
+  const cfgWorkerId = String(cfg?.worker_id || '').trim();
+  if (cfgWorkerId && typeof getWorkerRecordById === 'function') {
+    const byCfgId = getWorkerRecordById(cfgWorkerId);
+    if (byCfgId) return byCfgId;
+  }
+  const cfgWorkerName = String(cfg?.worker_name || '').trim();
+  if (cfgWorkerName && typeof getWorkerRecordByName === 'function') {
+    const byCfgName = getWorkerRecordByName(cfgWorkerName);
+    if (byCfgName) return byCfgName;
+  }
+
+  const ownerName = String(getCashEntryOwner(entry) || '').trim();
+  if (ownerName && typeof getWorkerRecordByName === 'function') {
+    const byOwnerName = getWorkerRecordByName(ownerName);
+    if (byOwnerName) return byOwnerName;
+  }
+  return null;
+}
+
 function getOwnerCashWorkerDescriptors() {
   const map = new Map();
   const addDescriptor = ({ workerId = '', workerName = '' }) => {
@@ -960,14 +991,12 @@ function getOwnerCashWorkerDescriptors() {
       workerName: resolvedName,
       label: getWorkerDisplayName(resolvedName) || resolvedName,
       matches(entry) {
-        const entryOwnerId = String(entry?.cash_owner_id || entry?.worker_id || '').trim()
-          || (typeof getWorkerIdByName === 'function' ? String(getWorkerIdByName(getCashEntryOwner(entry)) || '').trim() : '');
-        const entryOwnerName = String(getCashEntryOwner(entry) || '').trim();
-        if (resolvedId && entryOwnerId) return entryOwnerId === resolvedId;
-        if (resolvedId && entryOwnerName && typeof getWorkerIdByName === 'function') {
-          return String(getWorkerIdByName(entryOwnerName) || '').trim() === resolvedId;
-        }
-        return entryOwnerName === resolvedName;
+        const resolvedEntryWorker = getOwnerCashResolvedWorker(entry);
+        if (!resolvedEntryWorker) return false;
+        const resolvedEntryId = String(resolvedEntryWorker.id || '').trim();
+        const resolvedEntryName = String(resolvedEntryWorker.name || '').trim();
+        if (resolvedId && resolvedEntryId) return resolvedEntryId === resolvedId;
+        return resolvedEntryName === resolvedName;
       },
     });
   };
@@ -978,10 +1007,21 @@ function getOwnerCashWorkerDescriptors() {
 
   (typeof getPaymentMethods === 'function' ? getPaymentMethods() : [])
     .filter(row => row?.active !== false)
-    .forEach(row => addDescriptor({
-      workerId: row?.worker_id || '',
-      workerName: String(row?.worker_name || '').trim(),
-    }));
+    .forEach(row => {
+      const resolvedWorker = (row?.worker_id && typeof getWorkerRecordById === 'function')
+        ? getWorkerRecordById(row.worker_id)
+        : (typeof getWorkerRecordByName === 'function' ? getWorkerRecordByName(String(row?.worker_name || '').trim()) : null);
+      addDescriptor({
+        workerId: resolvedWorker?.id || row?.worker_id || '',
+        workerName: resolvedWorker?.name || String(row?.worker_name || '').trim(),
+      });
+    });
+
+  [...(window.allCashLog || [])].forEach(entry => {
+    const resolvedWorker = getOwnerCashResolvedWorker(entry);
+    if (!resolvedWorker) return;
+    addDescriptor({ workerId: resolvedWorker.id, workerName: resolvedWorker.name });
+  });
 
   return Array.from(map.values());
 }
@@ -1948,7 +1988,9 @@ function renderOwnerEmployeeCashHistory(workerName, logs) {
     .slice()
     .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
 
-  const total = rows.reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
+  const confirmedRows = getOwnerCashBalanceLogs()
+    .filter(entry => workerDescriptor ? workerDescriptor.matches(entry) : getCashEntryOwner(entry) === workerName);
+  const total = confirmedRows.reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
   const workerKey = getOwnerCashSafeKey(workerName);
 
   if (!rows.length) {

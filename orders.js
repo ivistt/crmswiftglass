@@ -89,9 +89,6 @@ const GLASS_MANUFACTURERS = [
 ];
 const GLASS_MANUFACTURER_BY_NAME = Object.fromEntries(GLASS_MANUFACTURERS.map(item => [item.name, item]));
 
-const STATIC_MANAGER_OPTIONS = [
-  { name: 'Maksim', label: '🦊 Макс' },
-];
 const SERVICE_TYPE_BY_NAME = new Proxy({}, {
   get(_target, prop) {
     return getServiceTypeOptions().find(item => item.name === prop);
@@ -200,12 +197,28 @@ function canCurrentUserToggleSpecialServiceStatus(order, type) {
   const currentName = currentWorker?.name || currentWorkerName;
   const canHandle = workerCanHandleSpecialService(currentWorker || currentName, type);
   if (!canHandle) return false;
-  if (getOrderSpecialServiceAssignedWorker(order, type) !== currentName) return false;
+  const formAssignedName = String(document.getElementById(type === 'tatu' ? 'f-tatu-responsible' : 'f-toning-responsible')?.value || '').trim();
+  const normalizedCurrentName = String(currentName || '').trim().toLowerCase();
+  const normalizedCurrentAlias = String(currentWorker?.alias || '').trim().toLowerCase();
+  const normalizedFormAssignedName = String(formAssignedName || '').trim().toLowerCase();
+  const explicitlyAssignedInForm = !!normalizedFormAssignedName && (
+    normalizedFormAssignedName === normalizedCurrentName
+    || (!!normalizedCurrentAlias && normalizedFormAssignedName === normalizedCurrentAlias)
+  );
+  const effectiveOrder = formAssignedName
+    ? {
+        ...order,
+        ...(type === 'tatu'
+          ? { tatuResponsible: formAssignedName }
+          : { toningResponsible: formAssignedName }),
+      }
+    : order;
+  if (!explicitlyAssignedInForm && !isCurrentWorkerAssignedSpecialService(effectiveOrder, type, currentWorker || currentName)) return false;
   if (type === 'tatu') {
-    return Number(order.tatu) > 0;
+    return orderHasSpecialService(effectiveOrder, 'tatu');
   }
   if (type === 'toning') {
-    return Number(order.toning) > 0 && !order.toningExternal;
+    return orderHasSpecialService(effectiveOrder, 'toning') && !effectiveOrder.toningExternal;
   }
   return false;
 }
@@ -584,9 +597,11 @@ function renderOrderCard(o) {
   const phoneHtml = (currentRole === 'senior' || currentRole === 'junior' || currentRole === 'extra')
     ? orderCardPhoneCallLink(o.phone)
     : `${icon('phone')} ${escapeHtml(o.phone || '—')}`;
-  const servicesHtml = renderOrderCardServices(o);
-  const callNotesHtml = renderOrderCardCallNotes(o);
-  const managerMetaHtml = renderManagerOrderCardMeta(o);
+  const layoutHtml = renderOrderCardLayout(o, {
+    phoneHtml,
+    warehousePillHtml,
+    clientPaidInlineHtml,
+  });
   const specialistBonusFlags = [
     (o.priorityTask && !o.workerDone)
       ? `<span class="status-badge status-priority" title="Приоритетная задача">Приоритет</span>`
@@ -612,35 +627,68 @@ function renderOrderCard(o) {
           </div>
         </div>
       </div>
-      ${currentRole === 'manager' ? `
       <div class="order-card-primary-group">
-        <div class="order-card-title-row">
-          <span class="order-name">${escapeHtml(primaryTitle)}</span>
-          ${clientPaidInlineHtml}
-        </div>
-        ${managerMetaHtml}
-      </div>` : `
-      <div class="order-card-primary-group">
-        <div class="order-card-title-row">
-          <span class="order-name">${escapeHtml(primaryTitle)}</span>
-          ${clientPaidInlineHtml}
-        </div>
-        <div class="order-card-meta order-card-primary-meta">
-          <span class="order-meta-item order-meta-pill order-meta-client-pill">${icon('car')} <span class="order-meta-client-name">${o.car || '—'}</span></span>
-          <span class="order-meta-item order-meta-pill">${phoneHtml}</span>
-        </div>
+        ${layoutHtml}
       </div>
-      <div class="order-card-meta">
-        <span class="order-meta-item order-meta-pill">${icon('calendar')} ${formatDate(o.date)}</span>
-        ${o.time ? `<span class="order-meta-item order-meta-pill">${icon('clock')} ${escapeHtml(o.time)}</span>` : ''}
-        <span class="order-meta-item order-meta-pill">${getWorkerDisplayPair(o.responsible, o.assistant)}</span>
-        ${o.manager ? `<span class="order-meta-item order-meta-pill">${getWorkerDisplayName(o.manager)}</span>` : ''}
-        ${warehousePillHtml}
-      </div>`}
-      ${servicesHtml}
-      ${callNotesHtml}
     </div>
   `;
+}
+
+function getOrderCardFieldValue(order, fieldKey, context = {}) {
+  const supplierPaidAmount = getOrderSupplierPaidAmount(order);
+  const supplierPaidInlineHtml = (supplierPaidAmount > 0 || Number(order.purchase) > 0)
+    ? `<span class="order-meta-inline-money"><span>${supplierPaidAmount.toLocaleString('ru')}</span><span class="order-meta-money-separator">/</span><span>${(Number(order.purchase) || 0).toLocaleString('ru')} ₴</span></span>`
+    : '';
+  const warehouseCodeInlineHtml = order.warehouseCode
+    ? `<span style="margin-left:6px;color:var(--accent);font-weight:900;">${escapeHtml(order.warehouseCode)}</span>`
+    : '';
+  const warehousePillHtml = context.warehousePillHtml || ((order.warehouse || warehouseCodeInlineHtml || supplierPaidInlineHtml)
+    ? `<span class="order-meta-item order-meta-pill">${escapeHtml(order.warehouse || 'Склад —')}${warehouseCodeInlineHtml}${supplierPaidInlineHtml}</span>`
+    : '');
+  const values = {
+    client_total: {
+      html: `<span class="order-meta-item order-meta-pill" style="width:auto;justify-content:space-between;gap:12px;padding:14px 16px;font-size:18px;font-weight:900;min-width:0;"><span class="order-name" style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(order.client || '—')}</span>${context.clientPaidInlineHtml || ''}</span>`,
+    },
+    car: { html: `<span class="order-meta-item order-meta-pill order-meta-client-pill">${icon('car')} <span class="order-meta-client-name">${escapeHtml(order.car || '—')}</span></span>` },
+    phone: { html: `<span class="order-meta-item order-meta-pill">${context.phoneHtml || `${icon('phone')} ${escapeHtml(order.phone || '—')}`}</span>` },
+    date: { html: `<span class="order-meta-item order-meta-pill">${icon('calendar')} ${formatDate(order.date)}</span>` },
+    time: order.time ? { html: `<span class="order-meta-item order-meta-pill">${icon('clock')} ${escapeHtml(order.time)}</span>` } : null,
+    workers: { html: `<span class="order-meta-item order-meta-pill">${escapeHtml(getWorkerDisplayPair(order.responsible, order.assistant))}</span>` },
+    manager: order.manager ? { html: `<span class="order-meta-item order-meta-pill">${escapeHtml(getWorkerDisplayName(order.manager))}</span>` } : null,
+    warehouse: warehousePillHtml ? { html: warehousePillHtml } : null,
+    warehouse_code: order.warehouseCode ? { html: `<span class="order-meta-item order-meta-pill">${icon('hash')} ${escapeHtml(order.warehouseCode)}</span>` } : null,
+    supplier_paid_total: supplierPaidInlineHtml ? { html: `<span class="order-meta-item order-meta-pill">${icon('wallet')} ${supplierPaidInlineHtml}</span>` } : null,
+    services: renderOrderCardServices(order) ? { blockHtml: renderOrderCardServices(order) } : null,
+    notes: order.notes ? { blockHtml: `<div class="order-card-note">${escapeHtml(order.notes)}</div>` } : null,
+    code: order.code ? { html: `<span class="order-meta-item order-meta-pill">${icon('hash')} ${escapeHtml(order.code)}</span>` } : null,
+    extra_note: order.extraNote ? { html: `<span class="order-meta-item order-meta-pill">${icon('file-text')} ${escapeHtml(order.extraNote)}</span>` } : null,
+    vin: order.vin ? { html: `<span class="order-meta-item order-meta-pill">VIN ${escapeHtml(order.vin)}</span>` } : null,
+  };
+  return values[fieldKey] || null;
+}
+
+function renderOrderCardLayout(order, context = {}) {
+  const viewer = typeof getCurrentWorkerRecord === 'function' ? getCurrentWorkerRecord() : { systemRole: currentRole, orderCardLayout: null };
+  const layout = typeof getResolvedOrderCardLayout === 'function'
+    ? getResolvedOrderCardLayout(viewer)
+    : { groups: [] };
+  const groups = Array.isArray(layout?.groups) ? layout.groups : [];
+  const groupsHtml = groups.map((group, groupIndex) => {
+    const fieldBlocks = (Array.isArray(group.fields) ? group.fields : [])
+      .map(fieldKey => getOrderCardFieldValue(order, fieldKey, context))
+      .filter(Boolean);
+    if (!fieldBlocks.length) return '';
+    const inlineHtml = fieldBlocks.filter(item => item.html).map(item => item.html).join('');
+    const blockHtml = fieldBlocks.filter(item => item.blockHtml).map(item => item.blockHtml).join('');
+    const isPrimaryGroup = groupIndex === 0;
+    return `
+      <div class="order-card-layout-group" style="width:100%;display:flex;flex-direction:column;gap:8px;${isPrimaryGroup ? 'padding:10px 12px;background:rgba(255,255,255,.72);border:1px solid var(--border);border-radius:14px;' : ''}">
+        ${inlineHtml ? `<div class="order-card-meta${blockHtml ? ' order-card-primary-meta' : ''}" style="gap:10px;align-items:center;${isPrimaryGroup ? 'flex-wrap:nowrap;overflow:hidden;' : 'flex-wrap:wrap;'}">${inlineHtml}</div>` : ''}
+        ${blockHtml}
+      </div>
+    `;
+  }).filter(Boolean).join('');
+  return groupsHtml ? `<div style="width:100%;display:flex;flex-direction:column;gap:12px;margin-top:10px;">${groupsHtml}</div>` : '';
 }
 
 function orderHasDebtTabFinancialMeaning(order) {
@@ -735,17 +783,43 @@ function getOrderIdSortValue(order) {
 function renderOrderCardServices(order) {
   const services = getOrderServiceSelections(order?.serviceType);
   const extraPills = [];
-  if (order?.tatuResponsible && Number(order?.tatu) > 0) {
+  if (order?.tatuResponsible && orderHasSpecialService(order, 'tatu')) {
     extraPills.push(`<span class="order-service-pill">Тату: ${escapeHtml(getWorkerDisplayName(order.tatuResponsible) || order.tatuResponsible)}</span>`);
   }
-  if (order?.toningResponsible && Number(order?.toning) > 0 && !order?.toningExternal) {
+  if (order?.toningResponsible && orderHasSpecialService(order, 'toning') && !order?.toningExternal) {
     extraPills.push(`<span class="order-service-pill">Тонировка: ${escapeHtml(getWorkerDisplayName(order.toningResponsible) || order.toningResponsible)}</span>`);
   }
   if (!services.length && !extraPills.length) return '';
-  return '<div class="order-card-services">'
+  return '<div class="order-card-services" style="margin-top:0;">'
     + services.map(item => `<span class="order-service-pill">${escapeHtml(formatOrderServiceLabel(item.name, item.qty))}</span>`).join('')
     + extraPills.join('')
     + '</div>';
+}
+
+function orderHasSpecialService(order, type) {
+  if (!order) return false;
+  if (type === 'tatu' && Number(order.tatu) > 0) return true;
+  if (type === 'toning' && Number(order.toning) > 0 && !order.toningExternal) return true;
+  const selectedServices = getOrderServiceSelections(order?.serviceType).map(item => String(item?.name || '').trim().toLowerCase());
+  if (type === 'tatu') return selectedServices.includes('тату');
+  if (type === 'toning') return selectedServices.includes('тонировка');
+  return false;
+}
+
+function isCurrentWorkerAssignedSpecialService(order, type, workerLike = null) {
+  if (!order) return false;
+  const worker = typeof workerLike === 'string' ? getWorkerRecordByName(workerLike) : workerLike;
+  const currentName = String(worker?.name || currentWorkerName || '').trim().toLowerCase();
+  const currentAlias = String(worker?.alias || '').trim().toLowerCase();
+  const currentId = String(worker?.id || '').trim();
+  const assignedName = String(getOrderSpecialServiceAssignedWorker(order, type) || '').trim().toLowerCase();
+  const rawAssignedName = String(type === 'tatu' ? (order.tatuResponsible || '') : (order.toningResponsible || '')).trim().toLowerCase();
+  const assignedId = String(type === 'tatu' ? (order.tatuResponsibleWorkerId || '') : (order.toningResponsibleWorkerId || '')).trim();
+  if (currentId && assignedId && currentId === assignedId) return true;
+  if (currentName && assignedName && currentName === assignedName) return true;
+  if (currentName && rawAssignedName && currentName === rawAssignedName) return true;
+  if (currentAlias && rawAssignedName && currentAlias === rawAssignedName) return true;
+  return false;
 }
 
 function renderOrderCardCallNotes(order) {
@@ -760,16 +834,16 @@ function getSpecialServiceAction(order) {
   const currentName = currentWorker?.name || currentWorkerName;
   if (
     workerCanHandleSpecialService(currentWorker || currentName, 'tatu')
-    && getOrderSpecialServiceAssignedWorker(order, 'tatu') === currentName
-    && Number(order.tatu) > 0
+    && isCurrentWorkerAssignedSpecialService(order, 'tatu', currentWorker || currentName)
+    && orderHasSpecialService(order, 'tatu')
     && !order.tatuStatus
   ) {
     return { type: 'tatu', label: 'Выполнить тату', title: 'Подтвердить выполнение тату' };
   }
   if (
     workerCanHandleSpecialService(currentWorker || currentName, 'toning')
-    && getOrderSpecialServiceAssignedWorker(order, 'toning') === currentName
-    && Number(order.toning) > 0
+    && isCurrentWorkerAssignedSpecialService(order, 'toning', currentWorker || currentName)
+    && orderHasSpecialService(order, 'toning')
     && !order.toningStatus
     && !order.toningExternal
   ) {
@@ -1012,16 +1086,16 @@ function _filterSpecialistOrdersByTab(list) {
   const currentName = currentWorker?.name || currentWorkerName;
   list = list.filter(o => !isOrderDeleted(o));
   if (workerCanHandleSpecialService(currentWorker || currentName, 'tatu') && currentWorkerTab === 'tatuActual') {
-    return list.filter(o => o.inWork && !o.isCancelled && Number(o.tatu) > 0 && !o.tatuStatus && getOrderSpecialServiceAssignedWorker(o, 'tatu') === currentName);
+    return list.filter(o => o.inWork && !o.isCancelled && orderHasSpecialService(o, 'tatu') && !o.tatuStatus && isCurrentWorkerAssignedSpecialService(o, 'tatu', currentWorker || currentName));
   }
   if (workerCanHandleSpecialService(currentWorker || currentName, 'tatu') && currentWorkerTab === 'tatuDone') {
-    return list.filter(o => o.inWork && !o.isCancelled && Number(o.tatu) > 0 && !!o.tatuStatus && getOrderSpecialServiceAssignedWorker(o, 'tatu') === currentName);
+    return list.filter(o => o.inWork && !o.isCancelled && orderHasSpecialService(o, 'tatu') && !!o.tatuStatus && isCurrentWorkerAssignedSpecialService(o, 'tatu', currentWorker || currentName));
   }
   if (workerCanHandleSpecialService(currentWorker || currentName, 'toning') && currentWorkerTab === 'toningActual') {
-    return list.filter(o => o.inWork && !o.isCancelled && Number(o.toning) > 0 && !o.toningStatus && !o.toningExternal && getOrderSpecialServiceAssignedWorker(o, 'toning') === currentName);
+    return list.filter(o => o.inWork && !o.isCancelled && orderHasSpecialService(o, 'toning') && !o.toningStatus && !o.toningExternal && isCurrentWorkerAssignedSpecialService(o, 'toning', currentWorker || currentName));
   }
   if (workerCanHandleSpecialService(currentWorker || currentName, 'toning') && currentWorkerTab === 'toningDone') {
-    return list.filter(o => o.inWork && !o.isCancelled && Number(o.toning) > 0 && !!o.toningStatus && !o.toningExternal && getOrderSpecialServiceAssignedWorker(o, 'toning') === currentName);
+    return list.filter(o => o.inWork && !o.isCancelled && orderHasSpecialService(o, 'toning') && !!o.toningStatus && !o.toningExternal && isCurrentWorkerAssignedSpecialService(o, 'toning', currentWorker || currentName));
   }
   if (currentUserHasPermission('own_warehouse_view') && currentWorkerTab === 'ownWarehouse') {
     return list.filter(o => o.ownWarehouse && !o.workerDone && !o.isCancelled);
@@ -2210,11 +2284,8 @@ function populateRefSelects() {
   if (managerSel) {
     const cur = managerSel.value;
     const managerWorkers = workers.filter(w => w.systemRole === 'manager');
-    const staticManagers = STATIC_MANAGER_OPTIONS
-      .filter(manager => !managerWorkers.some(w => w.name === manager.name));
     managerSel.innerHTML = '<option value="">— выбрать —</option>' +
-      managerWorkers.map(w => `<option value="${escapeAttr(w.name)}">${escapeHtml(getWorkerDisplayName(w.name))}</option>`).join('') +
-      staticManagers.map(w => `<option value="${escapeAttr(w.name)}">${escapeHtml(w.label)}</option>`).join('');
+      managerWorkers.map(w => `<option value="${escapeAttr(w.name)}">${escapeHtml(getWorkerDisplayName(w.name))}</option>`).join('');
     if (cur) managerSel.value = cur;
   }
 
@@ -2254,11 +2325,8 @@ function populateOrderWorkerFilter() {
   const sel = document.getElementById('filter-worker');
   if (!sel) return;
   const cur = sel.value;
-  const staticManagers = STATIC_MANAGER_OPTIONS
-    .filter(manager => !(workers || []).some(w => w.name === manager.name));
   sel.innerHTML = '<option value="">Все сотрудники</option>' +
-    (workers || []).map(w => `<option value="${escapeAttr(w.name)}">${escapeHtml(getWorkerDisplayName(w.name))}</option>`).join('') +
-    staticManagers.map(w => `<option value="${escapeAttr(w.name)}">${escapeHtml(w.label)}</option>`).join('');
+    (workers || []).map(w => `<option value="${escapeAttr(w.name)}">${escapeHtml(getWorkerDisplayName(w.name))}</option>`).join('');
   if (cur) sel.value = cur;
 }
 
@@ -3180,8 +3248,14 @@ function updateOrderModalAccess(order = null) {
   const isPrivileged = currentRole === 'owner' || currentRole === 'manager';
   const canManagePayments = canCurrentUserManageOrderPayments(draftOrder);
   const canEditServices = canCurrentUserEditOrderServices(existingOrder);
-  const canToggleTatuStatus = canCurrentUserToggleSpecialServiceStatus(draftOrder, 'tatu');
-  const canToggleToningStatus = canCurrentUserToggleSpecialServiceStatus(draftOrder, 'toning');
+  const currentWorker = typeof getCurrentWorkerRecord === 'function' ? getCurrentWorkerRecord() : null;
+  const currentName = currentWorker?.name || currentWorkerName;
+  const tatuTabFallback = currentRole !== 'owner' && currentRole !== 'manager'
+    && (currentWorkerTab === 'tatuActual' || currentWorkerTab === 'tatuDone');
+  const toningTabFallback = currentRole !== 'owner' && currentRole !== 'manager'
+    && (currentWorkerTab === 'toningActual' || currentWorkerTab === 'toningDone');
+  const canToggleTatuStatus = canCurrentUserToggleSpecialServiceStatus(draftOrder, 'tatu') || tatuTabFallback;
+  const canToggleToningStatus = canCurrentUserToggleSpecialServiceStatus(draftOrder, 'toning') || toningTabFallback;
   const canComplete = canCurrentUserCompleteOrder(existingOrder);
   const canSave = isPrivileged || (canEditServices && hasSeniorServiceChanges(existingOrder));
   const headerActions = document.getElementById('order-modal-owner-actions');
@@ -3209,8 +3283,10 @@ function updateOrderModalAccess(order = null) {
 
   const workCostsSection = document.getElementById('order-work-costs-section');
   if (workCostsSection) {
-    workCostsSection.style.display = isPrivileged
-      ? (document.querySelector('[data-order-modal-tab].active')?.dataset.orderModalTab === 'work' ? '' : 'none')
+    const isWorkTabActive = document.querySelector('[data-order-modal-tab].active')?.dataset.orderModalTab === 'work';
+    const shouldShowForSpecialist = !isPrivileged && (canToggleTatuStatus || canToggleToningStatus);
+    workCostsSection.style.display = (isPrivileged || shouldShowForSpecialist)
+      ? (isWorkTabActive ? '' : 'none')
       : 'none';
   }
   const specialStatusSection = document.getElementById('order-special-status-section');
@@ -3420,8 +3496,28 @@ function fillOrderForm(o) {
   const newPostEl = document.getElementById('f-new-post');
   if (newPostEl) newPostEl.checked = !!o.newPost;
   set('f-configuration', o.configuration || '');
-  set('f-tatu-responsible', o.tatuResponsible || '');
-  set('f-toning-responsible', o.toningResponsible || '');
+  const tatuResponsibleEl = document.getElementById('f-tatu-responsible');
+  if (tatuResponsibleEl) {
+    const tatuResponsibleValue = o.tatuResponsible || '';
+    if (tatuResponsibleValue && !Array.from(tatuResponsibleEl.options).some(option => option.value === tatuResponsibleValue)) {
+      const option = document.createElement('option');
+      option.value = tatuResponsibleValue;
+      option.textContent = getWorkerDisplayName(tatuResponsibleValue);
+      tatuResponsibleEl.appendChild(option);
+    }
+    tatuResponsibleEl.value = tatuResponsibleValue;
+  }
+  const toningResponsibleEl = document.getElementById('f-toning-responsible');
+  if (toningResponsibleEl) {
+    const toningResponsibleValue = o.toningResponsible || '';
+    if (toningResponsibleValue && !Array.from(toningResponsibleEl.options).some(option => option.value === toningResponsibleValue)) {
+      const option = document.createElement('option');
+      option.value = toningResponsibleValue;
+      option.textContent = getWorkerDisplayName(toningResponsibleValue);
+      toningResponsibleEl.appendChild(option);
+    }
+    toningResponsibleEl.value = toningResponsibleValue;
+  }
   const tatuStatusEl = document.getElementById('f-tatu-status');
   if (tatuStatusEl) tatuStatusEl.checked = !!o.tatuStatus;
   const toningStatusEl = document.getElementById('f-toning-status');

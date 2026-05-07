@@ -39,8 +39,8 @@ const WORKER_ROLE_PERMISSION_PRESETS = {
     dropshippers_manage: false,
     calendar_view: false,
     groups_view: false,
-    personal_cash_view: false,
-    cash_add_entries: false,
+    personal_cash_view: true,
+    cash_add_entries: true,
     finance_view: false,
     owner_cash_view: false,
     owner_expenses_view: false,
@@ -182,6 +182,149 @@ function collectWorkerPermissionState() {
     acc[item.key] = !!document.getElementById(`we-perm-${item.key}`)?.checked;
     return acc;
   }, {});
+}
+
+let _workerOrderCardLayoutDraft = null;
+let _workerOrderCardLayoutUseDefault = true;
+
+function getEditableOrderCardLayoutForWorker(workerLike) {
+  const role = workerLike?.systemRole || workerLike?.system_role || document.getElementById('we-role')?.value || 'junior';
+  return typeof getResolvedOrderCardLayout === 'function'
+    ? getResolvedOrderCardLayout({ ...workerLike, systemRole: role })
+    : { groups: [] };
+}
+
+function renderWorkerOrderCardLayoutEditor(workerLike) {
+  const role = workerLike?.systemRole || workerLike?.system_role || document.getElementById('we-role')?.value || 'junior';
+  const definitions = typeof getOrderCardLayoutFieldDefinitions === 'function' ? getOrderCardLayoutFieldDefinitions() : [];
+  const defaultLayout = typeof getOrderCardLayoutDefaults === 'function' ? getOrderCardLayoutDefaults(role) : { groups: [] };
+  const activeLayout = _workerOrderCardLayoutUseDefault ? defaultLayout : (_workerOrderCardLayoutDraft || defaultLayout);
+  const usedFields = new Set((activeLayout.groups || []).flatMap(group => group.fields || []));
+  return ''
+    + '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;">'
+    + '<label class="worker-permission-row" style="padding:0;border:0;">'
+    + '<span class="worker-permission-label">Индивидуальная схема карточки</span>'
+    + '<span class="worker-permission-switch ' + (!_workerOrderCardLayoutUseDefault ? 'active' : '') + '">'
+    + `<input type="checkbox" id="we-order-card-custom-toggle" ${!_workerOrderCardLayoutUseDefault ? 'checked' : ''} onchange="toggleWorkerOrderCardCustom(this)">`
+    + '<span class="worker-permission-slider"></span>'
+    + '</span>'
+    + '</label>'
+    + '<button class="btn-secondary" type="button" onclick="resetWorkerOrderCardLayoutToRole()">Стандарт роли</button>'
+    + '</div>'
+    + '<div style="font-size:11px;color:var(--text3);margin-bottom:10px;">Настраивает только карточки заказов в списке.</div>'
+    + (!_workerOrderCardLayoutUseDefault ? ((activeLayout.groups || []).map((group, groupIndex) => {
+      const remainingFields = definitions.filter(item => !usedFields.has(item.key) || (group.fields || []).includes(item.key));
+      return ''
+        + '<div style="padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--surface2);margin-bottom:10px;">'
+        + '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">'
+        + `<input class="form-input" style="flex:1;min-width:0;" value="${escapeAttr(group.title || '')}" placeholder="Название группы" oninput="renameWorkerOrderCardGroup(${groupIndex}, this.value)">`
+        + `<button class="icon-btn" type="button" onclick="moveWorkerOrderCardGroup(${groupIndex}, -1)" ${groupIndex === 0 ? 'disabled' : ''}>${icon('chevron-up')}</button>`
+        + `<button class="icon-btn" type="button" onclick="moveWorkerOrderCardGroup(${groupIndex}, 1)" ${groupIndex === activeLayout.groups.length - 1 ? 'disabled' : ''}>${icon('chevron-down')}</button>`
+        + `<button class="icon-btn" type="button" onclick="removeWorkerOrderCardGroup(${groupIndex})">${icon('trash-2')}</button>`
+        + '</div>'
+        + ((group.fields || []).map((fieldKey, fieldIndex) => {
+          const label = definitions.find(item => item.key === fieldKey)?.label || fieldKey;
+          return ''
+            + '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--border);">'
+            + `<div style="flex:1;font-size:13px;font-weight:700;color:var(--text2);">${escapeHtml(label)}</div>`
+            + `<button class="icon-btn" type="button" onclick="moveWorkerOrderCardField(${groupIndex}, ${fieldIndex}, -1)" ${fieldIndex === 0 ? 'disabled' : ''}>${icon('chevron-up')}</button>`
+            + `<button class="icon-btn" type="button" onclick="moveWorkerOrderCardField(${groupIndex}, ${fieldIndex}, 1)" ${fieldIndex === group.fields.length - 1 ? 'disabled' : ''}>${icon('chevron-down')}</button>`
+            + `<button class="icon-btn" type="button" onclick="removeWorkerOrderCardField(${groupIndex}, '${escapeAttr(fieldKey)}')">${icon('x')}</button>`
+            + '</div>';
+        }).join(''))
+        + '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;">'
+        + `<select class="form-select" id="we-order-card-group-add-${groupIndex}" style="flex:1;min-width:0;">`
+        + '<option value="">— добавить поле —</option>'
+        + remainingFields
+          .filter(item => !(group.fields || []).includes(item.key))
+          .map(item => `<option value="${escapeAttr(item.key)}">${escapeHtml(item.label)}</option>`)
+          .join('')
+        + '</select>'
+        + `<button class="btn-secondary" type="button" onclick="addWorkerOrderCardField(${groupIndex})">Добавить поле</button>`
+        + '</div>'
+        + '</div>';
+    }).join('') || '<div style="font-size:12px;color:var(--text3);padding:6px 0;">Групп пока нет</div>')
+      + '<div style="display:flex;justify-content:flex-end;margin-top:8px;">'
+      + '<button class="btn-primary" type="button" onclick="addWorkerOrderCardGroup()">+ Группа</button>'
+      + '</div>'
+      : '<div style="font-size:12px;color:var(--text3);padding:10px;border:1px dashed var(--border);border-radius:10px;">Используется стандартная схема для роли.</div>');
+}
+
+function rerenderWorkerOrderCardLayoutEditor() {
+  const container = document.getElementById('we-order-card-layout-card');
+  const worker = workers.find(x => x.id === _editWorkerId) || { systemRole: document.getElementById('we-role')?.value || 'junior', orderCardLayout: null };
+  if (!container) return;
+  container.innerHTML = renderWorkerOrderCardLayoutEditor(worker);
+  initIcons();
+}
+
+function toggleWorkerOrderCardCustom(input) {
+  _workerOrderCardLayoutUseDefault = !input?.checked;
+  if (!_workerOrderCardLayoutUseDefault && !_workerOrderCardLayoutDraft) {
+    const worker = workers.find(x => x.id === _editWorkerId) || { systemRole: document.getElementById('we-role')?.value || 'junior', orderCardLayout: null };
+    _workerOrderCardLayoutDraft = getEditableOrderCardLayoutForWorker(worker);
+  }
+  rerenderWorkerOrderCardLayoutEditor();
+}
+
+function resetWorkerOrderCardLayoutToRole() {
+  _workerOrderCardLayoutUseDefault = true;
+  _workerOrderCardLayoutDraft = null;
+  rerenderWorkerOrderCardLayoutEditor();
+}
+
+function addWorkerOrderCardGroup() {
+  const role = document.getElementById('we-role')?.value || 'junior';
+  if (!_workerOrderCardLayoutDraft) _workerOrderCardLayoutDraft = getEditableOrderCardLayoutForWorker({ systemRole: role });
+  _workerOrderCardLayoutUseDefault = false;
+  _workerOrderCardLayoutDraft.groups.push({ id: `custom-${Date.now()}-${_workerOrderCardLayoutDraft.groups.length}`, title: 'Новая группа', fields: [] });
+  rerenderWorkerOrderCardLayoutEditor();
+}
+
+function removeWorkerOrderCardGroup(index) {
+  if (!_workerOrderCardLayoutDraft?.groups?.[index]) return;
+  _workerOrderCardLayoutDraft.groups.splice(index, 1);
+  rerenderWorkerOrderCardLayoutEditor();
+}
+
+function moveWorkerOrderCardGroup(index, delta) {
+  if (!_workerOrderCardLayoutDraft?.groups?.[index]) return;
+  const nextIndex = index + delta;
+  if (nextIndex < 0 || nextIndex >= _workerOrderCardLayoutDraft.groups.length) return;
+  const [item] = _workerOrderCardLayoutDraft.groups.splice(index, 1);
+  _workerOrderCardLayoutDraft.groups.splice(nextIndex, 0, item);
+  rerenderWorkerOrderCardLayoutEditor();
+}
+
+function renameWorkerOrderCardGroup(index, value) {
+  if (!_workerOrderCardLayoutDraft?.groups?.[index]) return;
+  _workerOrderCardLayoutDraft.groups[index].title = String(value || '');
+}
+
+function addWorkerOrderCardField(groupIndex) {
+  const select = document.getElementById(`we-order-card-group-add-${groupIndex}`);
+  const fieldKey = String(select?.value || '').trim();
+  if (!fieldKey || !_workerOrderCardLayoutDraft?.groups?.[groupIndex]) return;
+  const alreadyUsed = _workerOrderCardLayoutDraft.groups.some(group => (group.fields || []).includes(fieldKey));
+  if (alreadyUsed) return;
+  _workerOrderCardLayoutDraft.groups[groupIndex].fields.push(fieldKey);
+  rerenderWorkerOrderCardLayoutEditor();
+}
+
+function removeWorkerOrderCardField(groupIndex, fieldKey) {
+  if (!_workerOrderCardLayoutDraft?.groups?.[groupIndex]) return;
+  _workerOrderCardLayoutDraft.groups[groupIndex].fields = (_workerOrderCardLayoutDraft.groups[groupIndex].fields || []).filter(item => item !== fieldKey);
+  rerenderWorkerOrderCardLayoutEditor();
+}
+
+function moveWorkerOrderCardField(groupIndex, fieldIndex, delta) {
+  const fields = _workerOrderCardLayoutDraft?.groups?.[groupIndex]?.fields;
+  if (!Array.isArray(fields) || !fields[fieldIndex]) return;
+  const nextIndex = fieldIndex + delta;
+  if (nextIndex < 0 || nextIndex >= fields.length) return;
+  const [item] = fields.splice(fieldIndex, 1);
+  fields.splice(nextIndex, 0, item);
+  rerenderWorkerOrderCardLayoutEditor();
 }
 
 function getWorkerSalaryRuleState(workerLike) {
@@ -406,13 +549,13 @@ function renderWorkers() {
     ).length;
 
     return `
-      <div class="worker-card worker-card-simple">
-        <div class="worker-avatar">${getInitials(w.name)}</div>
-        <div class="worker-card-info">
-          <div class="worker-name">${getWorkerDisplayName(w.name)}</div>
-          <div class="worker-role">${w.role}</div>
-          <div class="worker-order-count">${icon('clipboard-list')} ${orderCount} заказов</div>
-        </div>
+        <div class="worker-card worker-card-simple">
+          <div class="worker-avatar">${getInitials(w.name)}</div>
+          <div class="worker-card-info">
+            <div class="worker-name">${getWorkerDisplayName(w.name)}</div>
+            <div class="worker-role">${typeof getWorkerSystemRoleLabel === 'function' ? getWorkerSystemRoleLabel(w.systemRole) : w.role}</div>
+            <div class="worker-order-count">${icon('clipboard-list')} ${orderCount} заказов</div>
+          </div>
         ${currentRole === 'owner' ? `
           <div style="display:flex;gap:8px;align-items:center;">
             <button class="btn-edit-worker" onclick="openWorkerEditModal('${w.id}')" title="Редактировать">
@@ -629,12 +772,34 @@ function _getServiceRateRows() {
     .sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0) || String(a.name || '').localeCompare(String(b.name || ''), 'ru'));
 }
 
+function getServiceRateSalaryCategoryOptions() {
+  return [
+    { value: 'mount', label: 'Монтаж' },
+    { value: 'cut', label: 'Срезка' },
+    { value: 'glue', label: 'Вклейка' },
+    { value: 'special', label: 'Спецуслуги' },
+    { value: 'custom', label: 'Нестандартные' },
+  ];
+}
+
+function getServiceRateGroupOptions() {
+  const baseOptions = (typeof getServiceTypeOptions === 'function' ? getServiceTypeOptions() : [])
+    .map(item => String(item?.group || '').trim())
+    .filter(Boolean);
+  const savedOptions = (Array.isArray(refServiceRates) ? refServiceRates : [])
+    .map(item => String(item?.service_group || '').trim())
+    .filter(Boolean);
+  return [...new Set([...baseOptions, ...savedOptions, 'Услуги'])];
+}
+
 function _renderServiceRateForm(row = null) {
   const isEdit = !!row?.id;
   const name = String(row?.name || '').trim();
   const rate = Number(row?.rate) || 0;
-  const group = String(row?.service_group || 'custom').trim();
-  const category = String(row?.salary_category || group || 'custom').trim();
+  const groupOptions = getServiceRateGroupOptions();
+  const categoryOptions = getServiceRateSalaryCategoryOptions();
+  const group = String(row?.service_group || groupOptions[0] || 'Услуги').trim();
+  const category = String(row?.salary_category || 'custom').trim();
   const sortOrder = Number(row?.sort_order) || 0;
   return `
     <div style="padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface2);">
@@ -651,13 +816,13 @@ function _renderServiceRateForm(row = null) {
         <div class="form-group">
           <label class="form-label">Группа</label>
           <select class="form-select" id="sr-group">
-            ${['mount','cut','glue','special','custom'].map(v => `<option value="${v}" ${group === v ? 'selected' : ''}>${v}</option>`).join('')}
+            ${groupOptions.map(v => `<option value="${escapeAttr(v)}" ${group === v ? 'selected' : ''}>${escapeHtml(v)}</option>`).join('')}
           </select>
         </div>
         <div class="form-group">
           <label class="form-label">Категория ЗП</label>
           <select class="form-select" id="sr-category">
-            ${['mount','cut','glue','special','custom'].map(v => `<option value="${v}" ${category === v ? 'selected' : ''}>${v}</option>`).join('')}
+            ${categoryOptions.map(item => `<option value="${item.value}" ${category === item.value ? 'selected' : ''}>${escapeHtml(item.label)}</option>`).join('')}
           </select>
         </div>
         <div class="form-group">
@@ -674,13 +839,14 @@ function _renderServiceRateForm(row = null) {
 }
 
 function _renderServiceRateRows() {
+  const categoryLabelMap = Object.fromEntries(getServiceRateSalaryCategoryOptions().map(item => [item.value, item.label]));
   const rows = _getServiceRateRows();
   if (!rows.length) return '<div style="font-size:12px;color:var(--text3);padding:10px 0;">Услуг нет</div>';
   return rows.map(row => `
     <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);">
       <div style="min-width:0;">
         <div style="font-size:13px;font-weight:800;color:var(--text2);">${escapeHtml(row.name || '—')}</div>
-        <div style="font-size:11px;color:var(--text3);margin-top:2px;">${escapeHtml(row.service_group || 'custom')} · ${escapeHtml(row.salary_category || 'custom')}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px;">${escapeHtml(row.service_group || 'Услуги')} · ${escapeHtml(categoryLabelMap[row.salary_category] || row.salary_category || 'Нестандартные')}</div>
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-shrink:0;">
         <div style="font-size:14px;font-weight:900;color:var(--accent);">${Number(row.rate || 0).toLocaleString('ru')} ₴</div>
@@ -737,8 +903,9 @@ async function saveServiceRateForm() {
   if (currentRole !== 'owner') return;
   const name = String(document.getElementById('sr-name')?.value || '').trim();
   const rate = Number(String(document.getElementById('sr-rate')?.value || '').replace(/\s+/g, '').replace(',', '.')) || 0;
-  const service_group = String(document.getElementById('sr-group')?.value || 'custom').trim();
-  const salary_category = String(document.getElementById('sr-category')?.value || service_group).trim();
+  const fallbackGroup = getServiceRateGroupOptions()[0] || 'Услуги';
+  const service_group = String(document.getElementById('sr-group')?.value || fallbackGroup).trim();
+  const salary_category = String(document.getElementById('sr-category')?.value || 'custom').trim();
   const sort_order = Number(document.getElementById('sr-sort')?.value) || 0;
   if (!name) return showToast('Введите название', 'error');
   try {
@@ -772,7 +939,6 @@ function openWorkerModal() {
   document.getElementById('w-name').value = '';
   document.getElementById('w-alias').value = '';
   document.getElementById('w-telegram').value = '';
-  document.getElementById('w-role').value = 'Старший специалист';
   document.getElementById('w-system-role').value = 'senior';
   document.getElementById('w-note').value = '';
   m.classList.add('active');
@@ -787,9 +953,9 @@ async function saveWorker() {
   const name = document.getElementById('w-name').value.trim();
   const alias = document.getElementById('w-alias').value.trim();
   const telegramNick = String(document.getElementById('w-telegram')?.value || '').trim().replace(/^@+/, '');
-  const role = document.getElementById('w-role').value;
   const sysRole = document.getElementById('w-system-role').value;
   const note = document.getElementById('w-note').value.trim();
+  const role = typeof getWorkerSystemRoleLabel === 'function' ? getWorkerSystemRoleLabel(sysRole) : sysRole;
 
   if (!name) {
     showToast('Введите имя', 'error');
@@ -859,16 +1025,6 @@ function openWorkerEditModal(workerId) {
             <input class="form-input" type="text" id="we-telegram" placeholder="username">
           </div>
 
-          <div class="form-group">
-            <label class="form-label">${icon('badge-check')} Роль в интерфейсе</label>
-            <select class="form-select" id="we-display-role">
-              <option value="Старший специалист">Старший специалист</option>
-              <option value="Младший специалист">Младший специалист</option>
-              <option value="Менеджер">Менеджер</option>
-              <option value="Монтажник">Монтажник</option>
-            </select>
-          </div>
-
           <!-- Роль -->
           <div class="form-group">
             <label class="form-label">${icon('user')} Роль (системная)</label>
@@ -901,6 +1057,11 @@ function openWorkerEditModal(workerId) {
           <div class="form-group">
             <label class="form-label">${icon('shield')} Права доступа</label>
             <div class="worker-permissions-card" id="we-permissions-card"></div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">${icon('layout-template')} Карточка заказа</label>
+            <div class="worker-permissions-card" id="we-order-card-layout-card"></div>
           </div>
 
           <!-- Проблемы -->
@@ -939,12 +1100,16 @@ function openWorkerEditModal(workerId) {
   document.getElementById('we-password').value = '';
   document.getElementById('we-alias').value = w.alias || '';
   document.getElementById('we-telegram').value = w.telegramNick || '';
-  document.getElementById('we-display-role').value = w.role || 'Старший специалист';
   document.getElementById('we-role').value = w.systemRole || 'senior';
   // Показываем условия ЗП
   _renderWeSalaryRule(w);
   const permissionsCard = document.getElementById('we-permissions-card');
   if (permissionsCard) permissionsCard.innerHTML = renderWorkerPermissionRows(w);
+  _workerOrderCardLayoutUseDefault = !w.orderCardLayout;
+  _workerOrderCardLayoutDraft = w.orderCardLayout && typeof getResolvedOrderCardLayout === 'function'
+    ? getResolvedOrderCardLayout({ ...w, orderCardLayout: w.orderCardLayout })
+    : null;
+  rerenderWorkerOrderCardLayoutEditor();
   document.getElementById('we-error').style.display = 'none';
 
   // Заполняем список помощников (только junior)
@@ -978,6 +1143,10 @@ function _updateWeFormulaVisibility() {
   // Перерисовываем условия ЗП при смене роли
   const w = workers.find(x => x.id === _editWorkerId);
   if (w) _renderWeSalaryRule({ ...w, systemRole: role });
+  if (_workerOrderCardLayoutUseDefault) {
+    _workerOrderCardLayoutDraft = null;
+  }
+  rerenderWorkerOrderCardLayoutEditor();
 }
 
 function _renderWeSalaryRule(workerLike) {
@@ -1024,6 +1193,8 @@ function closeWorkerEditModal() {
   const modal = document.getElementById('worker-edit-modal');
   if (modal) modal.classList.remove('active');
   _editWorkerId = null;
+  _workerOrderCardLayoutDraft = null;
+  _workerOrderCardLayoutUseDefault = true;
 }
 
 async function saveWorkerEdit() {
@@ -1034,10 +1205,15 @@ async function saveWorkerEdit() {
   const password  = document.getElementById('we-password').value.trim();
   const alias     = document.getElementById('we-alias')?.value.trim() || '';
   const telegramNick = String(document.getElementById('we-telegram')?.value || '').trim().replace(/^@+/, '');
-  const displayRole = document.getElementById('we-display-role')?.value || '';
   const role      = document.getElementById('we-role').value;
+  const displayRole = typeof getWorkerSystemRoleLabel === 'function' ? getWorkerSystemRoleLabel(role) : role;
   const assistant = document.getElementById('we-assistant')?.value || '';
   const permissions = collectWorkerPermissionState();
+  const orderCardLayout = _workerOrderCardLayoutUseDefault
+    ? null
+    : (typeof normalizeOrderCardLayout === 'function'
+      ? normalizeOrderCardLayout(_workerOrderCardLayoutDraft, role)
+      : _workerOrderCardLayoutDraft);
   const salaryFormula = typeof buildWorkerSalaryFormula === 'function'
     ? buildWorkerSalaryFormula(collectWorkerSalaryRuleState())
     : '';
@@ -1054,6 +1230,7 @@ async function saveWorkerEdit() {
       assistant: assistant,
       note: w.note || '',
       permissions,
+      orderCardLayout,
       salaryFormula,
     };
     if (password) updates.password = password;
@@ -1068,6 +1245,7 @@ async function saveWorkerEdit() {
     w.telegramNick = telegramNick;
     w.assistant = assistant;
     w.permissions = permissions;
+    w.orderCardLayout = orderCardLayout;
     w.salaryFormula = salaryFormula;
 
     closeWorkerEditModal();
