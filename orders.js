@@ -2019,6 +2019,13 @@ async function duplicateOrder(id) {
   duplicate.callStatus = false;
   duplicate.ownWarehouse = false;
   duplicate.isCancelled = false;
+  duplicate.clientPayments = [];
+  duplicate.supplierPayments = [];
+  duplicate.dropShipperPayments = [];
+  duplicate.debt = 0;
+  duplicate.check = 0;
+  duplicate.paymentStatus = 'Не оплачено';
+  duplicate.supplierStatus = 'Не оплачено';
 
   try {
     const saved = (await sbSaveOrderWithCash(duplicate, {
