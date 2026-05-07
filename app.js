@@ -1041,11 +1041,7 @@ function getOwnerCashLogs(confirmFilter = ownerCashConfirmFilter) {
     .filter(entry => workerDescriptors.some(item => item.matches(entry)))
     .filter(entry => {
       const account = getCashEntryAccountType(entry);
-      if (account === 'fop') return false;
-      const method = getCashEntryPaymentMethod(entry);
-      if (!account || account !== 'cash') return false;
-      if ((typeof isCardPaymentMethod === 'function' && isCardPaymentMethod(method)) || (typeof isFopPaymentMethod === 'function' && isFopPaymentMethod(method))) return false;
-      return account === 'cash';
+      return !!account && account !== 'currency';
     })
     .filter(entry => {
       const isConfirmable = isConfirmableCashEntry(entry);
@@ -1324,8 +1320,6 @@ function setOwnerCashCurrencyView(currency) {
 }
 
 function getOwnerCashHistoryTitle(workerKey) {
-  const special = getOwnerSpecialCashSections().find(item => item.key === workerKey);
-  if (special) return special.label;
   const descriptor = getOwnerCashWorkerDescriptorByKey(workerKey);
   return descriptor?.label || getWorkerDisplayName(workerKey) || workerKey || 'Касса';
 }
@@ -1358,11 +1352,6 @@ function getOwnerCashHistoryHtml(workerKey) {
     `;
   }
 
-  const specialLogs = getOwnerSpecialCashLogs(workerKey)
-    .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
-  if (getOwnerSpecialCashSections().some(item => item.key === workerKey)) {
-    return renderOwnerEmployeeCashHistory(workerKey, specialLogs);
-  }
   return renderOwnerEmployeeCashHistory(workerKey, logs);
 }
 
@@ -1954,7 +1943,6 @@ function renderOwnerEmployeeCashHistory(workerName, logs) {
   const workerDescriptor = getOwnerCashWorkerDescriptorByKey(workerName);
   const rows = (logs || [])
     .filter(entry => {
-      if (getOwnerSpecialCashSections().some(item => item.key === workerName)) return true;
       return workerDescriptor ? workerDescriptor.matches(entry) : getCashEntryOwner(entry) === workerName;
     })
     .slice()
@@ -3030,7 +3018,6 @@ function renderOwnerCashScreen() {
   if (!container) return;
 
   const workerDescriptors = getOwnerCashWorkerDescriptors();
-  const specialSections = getOwnerSpecialCashSections();
   const balanceLogs = getOwnerCashBalanceLogs()
     .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
   const currencyLogs = getOwnerCurrencyCashLogs()
@@ -3062,26 +3049,11 @@ function renderOwnerCashScreen() {
     label: item.label,
     balance: Number(currencyBalances[item.key] || 0),
   }));
-  const specialRows = specialSections.map(section => {
-    const total = getOwnerSpecialCashLogs(section.key, 'confirmed')
-      .reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
-    return {
-      workerName: section.key,
-      label: section.label,
-      balance: Number(total || 0),
-    };
-  });
   const currentCashTotal = currentCashRows.reduce((sum, row) => sum + row.balance, 0);
-  const specialCashTotal = specialRows.reduce((sum, row) => sum + row.balance, 0);
   const currentCurrencyTotal = currentCurrencyRows.reduce((sum, row) => sum + row.balance, 0);
   const isUahView = ownerCashCurrencyView !== 'usd';
-  const total = isUahView ? (currentCashTotal + specialCashTotal) : currentCurrencyTotal;
-  const rows = isUahView
-    ? [
-        ...currentCashRows,
-        ...specialRows,
-      ]
-    : currentCurrencyRows;
+  const total = isUahView ? currentCashTotal : currentCurrencyTotal;
+  const rows = isUahView ? currentCashRows : currentCurrencyRows;
   const filtersHtml = isUahView ? `
     <div class="owner-cash-confirm-filters">
       <button class="orders-tab ${ownerCashConfirmFilter === 'all' ? 'active' : ''}" onclick="setOwnerCashConfirmFilter('all')">Все</button>
@@ -3124,7 +3096,7 @@ function renderOwnerCashScreen() {
     </div>
   `;
 
-  if (!balanceLogs.length && !currencyLogs.length && !specialRows.some(row => row.balance || getOwnerSpecialCashLogs(row.workerName).length)) {
+  if (!balanceLogs.length && !currencyLogs.length) {
     container.innerHTML = currentCashHtml + `
       <div class="empty-state">
         <div class="empty-state-icon">${icon('banknote')}</div>
