@@ -47,8 +47,8 @@
   --bg: #0a0a0a;
   --bg2: #0f0f0f;
   --surface: #111111;
-  --surface2: #1a1a1a;
-  --surface3: #222222;
+  --surface2: #15181b;
+  --surface3: #1d2226;
   --border: rgba(255,255,255,0.08);
   --border2: rgba(255,255,255,0.14);
   --text: #ffffff;
@@ -76,10 +76,10 @@
   --navbar-bg: rgba(17,17,17,0.95);
   --navbar-shadow: 0 8px 40px rgba(0,0,0,0.6), 0 1px 0 rgba(255,255,255,0.06) inset;
   --modal-overlay-bg: rgba(0,0,0,0.7);
-  --order-pill-bg: rgba(255,255,255,0.09);
-  --order-pill-border: rgba(255,255,255,0.12);
+  --order-pill-bg: rgba(255,255,255,0.07);
+  --order-pill-border: rgba(255,255,255,0.1);
   --order-pill-text: #ffffff;
-  --order-pill-muted: rgba(255,255,255,0.55);
+  --order-pill-muted: rgba(255,255,255,0.6);
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -1046,9 +1046,9 @@ body {
 }
 
 .order-card {
-  background: var(--surface);
-  border-radius: var(--radius);
-  padding: 16px 18px;
+  background: linear-gradient(0deg, rgba(0,184,122,0.035), rgba(0,184,122,0.035)), var(--surface);
+  border-radius: 16px;
+  padding: 14px 14px 12px;
   border: 1px solid var(--border);
   cursor: pointer;
   transition: all 0.15s;
@@ -1056,7 +1056,7 @@ body {
 }
 .order-card:hover {
   border-color: var(--border2);
-  background: var(--surface2);
+  background: linear-gradient(0deg, rgba(0,184,122,0.055), rgba(0,184,122,0.055)), var(--surface);
 }
 .order-card:active { transform: scale(0.99); }
 
@@ -1115,7 +1115,7 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .order-card-left {
@@ -1142,13 +1142,13 @@ body {
 .order-card-primary-group {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-top: 10px;
-  margin-bottom: 10px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface2);
+  gap: 0;
+  margin-top: 0;
+  margin-bottom: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .order-card-primary-meta {
@@ -1317,6 +1317,38 @@ body {
   flex-wrap: wrap;
 }
 
+.order-card-layout {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.order-card-layout-group {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.order-card-layout-group-primary {
+  padding: 10px;
+  border: 1px solid rgba(0, 184, 122, 0.14);
+  border-radius: 14px;
+  background: rgba(255,255,255,0.7);
+}
+
+[data-theme="dark"] .order-card-layout-group-primary {
+  border-color: rgba(0, 229, 160, 0.14);
+  background: rgba(255,255,255,0.03);
+}
+
+.order-card-meta-primary {
+  gap: 8px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
 .order-meta-item {
   font-size: 12px;
   color: var(--text2);
@@ -1326,10 +1358,10 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  min-height: 25px;
+  min-height: 34px;
   max-width: 100%;
-  padding: 4px 9px;
-  border-radius: 8px;
+  padding: 7px 11px;
+  border-radius: 10px;
   background: var(--order-pill-bg);
   border: 1px solid var(--order-pill-border);
   color: var(--order-pill-text);
@@ -1337,37 +1369,68 @@ body {
   line-height: 1.25;
   overflow: hidden;
   text-overflow: ellipsis;
+  box-shadow: 0 1px 0 rgba(255,255,255,0.55) inset;
+}
+
+[data-theme="dark"] .order-meta-pill {
+  box-shadow: 0 1px 0 rgba(255,255,255,0.04) inset;
 }
 
 .order-meta-client-pill {
-  flex: 0 1 auto;
+  flex: 1 1 260px;
   min-width: 0;
-  width: fit-content;
-  max-width: min(100%, 420px);
+  width: auto;
+  max-width: 100%;
   white-space: nowrap;
 }
 
 .order-meta-client-name {
   min-width: 0;
-  max-width: 230px;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.order-meta-primary-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  min-width: 0;
+  font-size: 18px;
+  font-weight: 900;
+  background: #ffffff;
+}
+
+[data-theme="dark"] .order-meta-primary-title {
+  background: rgba(255,255,255,0.05);
+}
+
+.order-meta-primary-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 16px;
+  font-weight: 900;
 }
 
 .order-card-services {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: 10px;
+  margin-top: 0;
 }
 
 .order-service-pill {
   display: inline-flex;
   align-items: center;
-  min-height: 24px;
-  padding: 4px 8px;
-  border-radius: 8px;
+  min-height: 34px;
+  padding: 7px 12px;
+  border-radius: 10px;
   border: 1px solid rgba(29, 233, 182, 0.24);
   background: rgba(29, 233, 182, 0.1);
   color: var(--accent);
@@ -1522,11 +1585,42 @@ body {
 
 /* ===== STATUS BADGES ===== */
 .status-badge, .mount-badge {
-  font-size: 11px;
-  font-weight: 700;
-  padding: 3px 9px;
-  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 6px 10px;
+  border-radius: 10px;
   white-space: nowrap;
+}
+
+[data-theme="dark"] .status-selection,
+[data-theme="dark"] .status-default {
+  background: rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.82);
+}
+
+[data-theme="dark"] .status-call {
+  background: rgba(59,130,246,0.16);
+  color: #93c5fd;
+}
+
+[data-theme="dark"] .status-own-warehouse {
+  background: rgba(34,197,94,0.16);
+  color: #86efac;
+}
+
+[data-theme="dark"] .status-priority {
+  background: rgba(249,115,22,0.2);
+  color: #fdba74;
+}
+
+[data-theme="dark"] .status-unpaid {
+  background: rgba(255,92,106,0.16);
+  color: #ff9aa4;
+}
+
+[data-theme="dark"] .status-partial {
+  background: rgba(255,209,102,0.18);
+  color: #ffd166;
 }
 
 .status-paid     { background: rgba(0,229,160,0.12); color: var(--accent); }
@@ -2164,6 +2258,23 @@ input[type="datetime-local"] {
     gap: 6px;
   }
   .order-name { font-size: 14px; }
+  .order-card-layout { gap: 8px; }
+  .order-card-layout-group-primary { padding: 10px; }
+  .order-card-meta-primary { gap: 8px; }
+  .order-meta-primary-title {
+    padding: 10px 12px;
+    font-size: 17px;
+  }
+  .order-meta-primary-name { font-size: 15px; }
+  .order-meta-pill,
+  .order-service-pill {
+    min-height: 32px;
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+  .order-meta-client-pill {
+    flex: 1 1 100%;
+  }
 
   .clients-grid, .workers-grid { gap: 8px; }
 

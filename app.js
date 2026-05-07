@@ -1873,12 +1873,15 @@ function openOwnerDeletedCashModal() {
     modal.className = 'modal-overlay';
     document.body.appendChild(modal);
   }
+  const isCurrencyView = ownerCashCurrencyView === 'usd';
   const deletedEntries = (window.allCashLog || [])
     .filter(entry => !!String(entry?.deleted_at || '').trim())
+    .filter(entry => isCurrencyView ? isCurrencyCashEntry(entry) : !isCurrencyCashEntry(entry))
     .sort((a, b) => new Date(b.deleted_at || b.created_at || 0) - new Date(a.deleted_at || a.created_at || 0));
   const rowsHtml = deletedEntries.length
     ? deletedEntries.map(entry => {
-        const amount = Number(entry.amount) || 0;
+        const parsedCurrency = isCurrencyCashEntry(entry) ? parseCurrencyCashEntry(entry) : null;
+        const amount = parsedCurrency ? Number(parsedCurrency.usdAmount || 0) : (Number(entry.amount) || 0);
         const deletedAt = entry.deleted_at ? new Date(entry.deleted_at).toLocaleString('ru-RU') : '—';
         return `
           <div class="owner-cash-entry-row">
@@ -1888,7 +1891,7 @@ function openOwnerDeletedCashModal() {
               <div class="owner-cash-entry-meta">Удалено: ${escapeHtml(deletedAt)}${entry.deleted_by ? ' · ' + escapeHtml(entry.deleted_by) : ''}</div>
             </div>
             <div style="display:flex;align-items:center;gap:8px;">
-              <div class="owner-cash-entry-amount" style="color:${amount >= 0 ? 'var(--accent)' : '#ef4444'};">${amount.toLocaleString('ru')} ₴</div>
+              <div class="owner-cash-entry-amount" style="color:${amount >= 0 ? 'var(--accent)' : '#ef4444'};">${amount.toLocaleString('ru')} ${isCurrencyView ? '$' : '₴'}</div>
               <button class="icon-btn" title="Восстановить" onclick="event.stopPropagation(); restoreOwnerCashEntry('${escapeAttr(entry.id)}')">${icon('refresh-cw')}</button>
               <button class="icon-btn icon-action-danger" title="Удалить безвозвратно" onclick="event.stopPropagation(); deleteOwnerCashEntry('${escapeAttr(entry.id)}')">${icon('trash-2')}</button>
             </div>
@@ -1899,14 +1902,14 @@ function openOwnerDeletedCashModal() {
   modal.innerHTML = `
     <div class="modal" style="max-width:760px;max-height:88vh;display:flex;flex-direction:column;">
       <div class="modal-header" style="flex-shrink:0;">
-        <div class="modal-title">Удаленные записи кассы</div>
+        <div class="modal-title">${isCurrencyView ? 'Удаленные записи валютной кассы' : 'Удаленные записи кассы'}</div>
         <button class="modal-close" onclick="closeOwnerDeletedCashModal()">${icon('x')}</button>
       </div>
       <div class="modal-body" style="overflow-y:auto;flex:1;">
         <div class="fin-month-card owner-cash-history-card">
           <div class="owner-cash-history-title">
             <div>
-              <div class="fin-month-name">Корзина кассы</div>
+              <div class="fin-month-name">${isCurrencyView ? 'Корзина валютной кассы' : 'Корзина кассы'}</div>
               <div class="fin-month-sub">${deletedEntries.length} зап.</div>
             </div>
           </div>
@@ -3126,7 +3129,10 @@ function renderOwnerCashScreen() {
             </div>
             <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
               <div style="font-size:22px;font-weight:900;color:${total >= 0 ? 'var(--accent)' : '#ef4444'};white-space:nowrap;">${total.toLocaleString('ru')} ${isUahView ? '₴' : '$'}</div>
-              ${isUahView ? `<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;"><button class="btn-secondary" style="font-size:12px;padding:6px 10px;" onclick="openOwnerCashEntryModal()">+ Запись</button><button class="btn-secondary" style="font-size:12px;padding:6px 10px;" onclick="openOwnerDeletedCashModal()">Корзина</button></div>` : ''}
+              <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;">
+                ${isUahView ? `<button class="btn-secondary" style="font-size:12px;padding:6px 10px;" onclick="openOwnerCashEntryModal()">+ Запись</button>` : ''}
+                <button class="btn-secondary" style="font-size:12px;padding:6px 10px;" onclick="openOwnerDeletedCashModal()">Корзина</button>
+              </div>
             </div>
           </div>
         </div>

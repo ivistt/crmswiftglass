@@ -647,7 +647,7 @@ function getOrderCardFieldValue(order, fieldKey, context = {}) {
     : '');
   const values = {
     client_total: {
-      html: `<span class="order-meta-item order-meta-pill" style="width:auto;justify-content:space-between;gap:12px;padding:14px 16px;font-size:18px;font-weight:900;min-width:0;"><span class="order-name" style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(order.client || '—')}</span>${context.clientPaidInlineHtml || ''}</span>`,
+      html: `<span class="order-meta-item order-meta-pill order-meta-primary-title"><span class="order-name order-meta-primary-name">${escapeHtml(order.client || '—')}</span>${context.clientPaidInlineHtml || ''}</span>`,
     },
     car: { html: `<span class="order-meta-item order-meta-pill order-meta-client-pill">${icon('car')} <span class="order-meta-client-name">${escapeHtml(order.car || '—')}</span></span>` },
     phone: { html: `<span class="order-meta-item order-meta-pill">${context.phoneHtml || `${icon('phone')} ${escapeHtml(order.phone || '—')}`}</span>` },
@@ -682,13 +682,13 @@ function renderOrderCardLayout(order, context = {}) {
     const blockHtml = fieldBlocks.filter(item => item.blockHtml).map(item => item.blockHtml).join('');
     const isPrimaryGroup = groupIndex === 0;
     return `
-      <div class="order-card-layout-group" style="width:100%;display:flex;flex-direction:column;gap:8px;${isPrimaryGroup ? 'padding:10px 12px;background:rgba(255,255,255,.72);border:1px solid var(--border);border-radius:14px;' : ''}">
-        ${inlineHtml ? `<div class="order-card-meta${blockHtml ? ' order-card-primary-meta' : ''}" style="gap:10px;align-items:center;${isPrimaryGroup ? 'flex-wrap:nowrap;overflow:hidden;' : 'flex-wrap:wrap;'}">${inlineHtml}</div>` : ''}
+      <div class="order-card-layout-group${isPrimaryGroup ? ' order-card-layout-group-primary' : ''}">
+        ${inlineHtml ? `<div class="order-card-meta${blockHtml ? ' order-card-primary-meta' : ''}${isPrimaryGroup ? ' order-card-meta-primary' : ''}">${inlineHtml}</div>` : ''}
         ${blockHtml}
       </div>
     `;
   }).filter(Boolean).join('');
-  return groupsHtml ? `<div style="width:100%;display:flex;flex-direction:column;gap:12px;margin-top:10px;">${groupsHtml}</div>` : '';
+  return groupsHtml ? `<div class="order-card-layout">${groupsHtml}</div>` : '';
 }
 
 function orderHasDebtTabFinancialMeaning(order) {
