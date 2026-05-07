@@ -906,14 +906,11 @@ function getDropshipperPaid(order) {
   return (order?.dropshipperPayments || []).reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
 }
 
-const DROPSHIPPER_CASH_PAYMENT_WORKERS = {
-  'Оплата наличка Олег': 'Oleg Starshiy',
-  'Оплата наличка Лёша': 'Lyosha',
-};
-
 function getDropshipperPaymentMethods() {
-  const base = PAYMENT_METHOD_OPTIONS || [];
-  return ['Оплата наличка Олег', 'Оплата наличка Лёша', ...base];
+  const rows = (typeof getPaymentMethods === 'function' ? getPaymentMethods() : [])
+    .map(row => normalizePaymentMethod(row?.label))
+    .filter(Boolean);
+  return Array.from(new Set(rows));
 }
 
 function normalizeDropshipperWorkerText(value) {
@@ -1336,7 +1333,6 @@ async function saveDropshipperPayment() {
   let remaining = amount;
   const timestamp = new Date().toISOString();
   const updates = [];
-  let rolledBack = false;
   try {
     for (const item of eligible) {
       if (remaining <= 0) break;
@@ -1354,39 +1350,41 @@ async function saveDropshipperPayment() {
       remaining -= part;
     }
 
-    const savedUpdates = [];
     for (const item of updates) {
-      const saved = await sbUpdateOrder(item.nextOrder);
+      const saved = (await sbSaveOrderWithCash({
+        id: item.originalOrder.id,
+        dropshipperPayments: item.nextOrder.dropshipperPayments,
+      }, {
+        isNew: false,
+        cashEntries: [],
+        rollbackOrder: item.originalOrder,
+      })).order;
       const idx = orders.findIndex(o => o.id === item.originalOrder.id);
       if (idx !== -1) orders[idx] = saved || item.nextOrder;
-      savedUpdates.push(item);
     }
 
     try {
-      const cashWorkerName = DROPSHIPPER_CASH_PAYMENT_WORKERS[method] || '';
-      if (cashWorkerName) {
-        const cashEntry = await sbInsertCashEntry({
-          worker_name: cashWorkerName,
-          amount: -amount,
-          comment: `Выплата дропшипперу ${currentDropshipperFilter}, ${formatDate(date)}`,
-        });
-        if (Array.isArray(window.allCashLog) && cashEntry) window.allCashLog.unshift(cashEntry);
-        if (typeof workerCashLog !== 'undefined' && cashWorkerName === currentWorkerName && cashEntry) {
-          workerCashLog.unshift(cashEntry);
-        }
+      orders = await sbFetchOrders();
+    } catch (refreshError) {
+      console.warn('Failed to refresh orders after dropshipper payment save:', refreshError);
+    }
+    try {
+      if (currentRole === 'owner') {
+        window.allCashLog = await sbFetchAllCashLog();
+      } else if (typeof workerCashLog !== 'undefined' && currentWorkerName) {
+        workerCashLog = await sbFetchCashLog(currentWorkerName);
       }
-    } catch (cashError) {
-      await rollbackDropshipperPaymentOrders(savedUpdates);
-      rolledBack = true;
-      throw cashError;
+    } catch (cashRefreshError) {
+      console.warn('Failed to refresh cash after dropshipper payment save:', cashRefreshError);
     }
 
     closeDropshipperPaymentModal();
     renderDropshipperDetail();
     if (document.getElementById('screen-owner-payments')?.classList.contains('active')) renderOwnerPaymentsScreen();
+    if (typeof renderHome === 'function') renderHome();
     showToast('Выплата записана ✓');
   } catch (e) {
-    if (!rolledBack) await rollbackDropshipperPaymentOrders(updates);
+    await rollbackDropshipperPaymentOrders(updates);
     showToast('Ошибка выплаты: ' + e.message, 'error');
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Сохранить'; }
