@@ -2290,7 +2290,13 @@ function populateRefSelects() {
   const managerSel = document.getElementById('f-manager');
   if (managerSel) {
     const cur = managerSel.value;
-    const managerWorkers = workers.filter(w => w.systemRole === 'manager');
+    const managerWorkers = workers.filter(w => {
+      if (w.systemRole === 'manager') return true;
+      const permissions = typeof resolveWorkerPermissionState === 'function'
+        ? resolveWorkerPermissionState(w)
+        : (w.permissions || {});
+      return !!permissions.selectable_as_manager;
+    });
     managerSel.innerHTML = '<option value="">— выбрать —</option>' +
       managerWorkers.map(w => `<option value="${escapeAttr(w.name)}">${escapeHtml(getWorkerDisplayName(w.name))}</option>`).join('');
     if (cur) managerSel.value = cur;

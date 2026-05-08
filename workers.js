@@ -14,6 +14,7 @@ const WORKER_PERMISSION_DEFINITIONS = [
   { key: 'dropshippers_manage', label: 'Видеть и вести дропшипперов' },
   { key: 'calendar_view', label: 'Видеть календарь' },
   { key: 'groups_view', label: 'Видеть группы' },
+  { key: 'selectable_as_manager', label: 'Можно выбирать менеджером в заказе' },
   { key: 'personal_cash_view', label: 'Видеть личную кассу' },
   { key: 'cash_add_entries', label: 'Добавлять записи в кассу' },
   { key: 'finance_view', label: 'Видеть выручку' },
@@ -29,6 +30,31 @@ const WORKER_PERMISSION_DEFINITIONS = [
 ];
 
 const WORKER_ROLE_PERMISSION_PRESETS = {
+  owner: {
+    orders_view_all: true,
+    orders_create: true,
+    orders_edit: true,
+    clients_view: true,
+    workers_view: true,
+    warehouses_view: true,
+    dropshippers_manage: true,
+    calendar_view: true,
+    groups_view: true,
+    selectable_as_manager: false,
+    personal_cash_view: true,
+    cash_add_entries: true,
+    finance_view: true,
+    owner_cash_view: true,
+    owner_expenses_view: true,
+    owner_payments_view: true,
+    order_payments_manage: true,
+    order_services_edit: true,
+    order_complete: true,
+    special_service_status: true,
+    special_service_tatu: true,
+    special_service_toning: true,
+    own_warehouse_view: true,
+  },
   manager: {
     orders_view_all: true,
     orders_create: true,
@@ -39,6 +65,7 @@ const WORKER_ROLE_PERMISSION_PRESETS = {
     dropshippers_manage: false,
     calendar_view: false,
     groups_view: false,
+    selectable_as_manager: true,
     personal_cash_view: true,
     cash_add_entries: true,
     finance_view: false,
@@ -63,6 +90,7 @@ const WORKER_ROLE_PERMISSION_PRESETS = {
     dropshippers_manage: false,
     calendar_view: false,
     groups_view: false,
+    selectable_as_manager: false,
     personal_cash_view: true,
     cash_add_entries: true,
     finance_view: false,
@@ -87,6 +115,7 @@ const WORKER_ROLE_PERMISSION_PRESETS = {
     dropshippers_manage: false,
     calendar_view: false,
     groups_view: false,
+    selectable_as_manager: false,
     personal_cash_view: false,
     cash_add_entries: false,
     finance_view: false,
@@ -111,6 +140,7 @@ const WORKER_ROLE_PERMISSION_PRESETS = {
     dropshippers_manage: false,
     calendar_view: false,
     groups_view: false,
+    selectable_as_manager: false,
     personal_cash_view: true,
     cash_add_entries: true,
     finance_view: false,
@@ -465,7 +495,7 @@ function collectWorkerSalaryRuleState() {
 async function loadWorkers() {
   try {
     workers = await sbFetchWorkers();
-    if (currentWorkerName && currentRole !== 'owner') {
+    if (currentWorkerName) {
       const currentWorker = workers.find(worker => worker.name === currentWorkerName);
       const nextRole = currentWorker?.systemRole || currentRole;
       if (nextRole && nextRole !== currentRole) {
@@ -1029,6 +1059,7 @@ function openWorkerEditModal(workerId) {
           <div class="form-group">
             <label class="form-label">${icon('user')} Роль (системная)</label>
             <select class="form-select" id="we-role">
+              <option value="owner">owner — Владелец</option>
               <option value="senior">senior — Старший специалист</option>
               <option value="junior">junior — Младший специалист</option>
               <option value="manager">manager — Менеджер</option>

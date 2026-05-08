@@ -964,11 +964,17 @@ function getOwnerCashResolvedWorker(entry) {
     const byCfgName = getWorkerRecordByName(cfgWorkerName);
     if (byCfgName) return byCfgName;
   }
+  if (cfgWorkerName) {
+    return { id: cfgWorkerId || '', name: cfgWorkerName };
+  }
 
   const ownerName = String(getCashEntryOwner(entry) || '').trim();
   if (ownerName && typeof getWorkerRecordByName === 'function') {
     const byOwnerName = getWorkerRecordByName(ownerName);
     if (byOwnerName) return byOwnerName;
+  }
+  if (ownerName) {
+    return { id: ownerId || '', name: ownerName };
   }
   return null;
 }
