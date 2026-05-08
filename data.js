@@ -2479,8 +2479,11 @@ function getPaymentCashRoute(method, fallbackWorkerName = '') {
     };
   }
   const type = String(cfg?.method_type || '').trim().toLowerCase();
-  const ownerWorker = String(cfg?.worker_name || '').trim();
-  const ownerWorkerId = cfg?.worker_id || getWorkerIdByName(ownerWorker || targetWorkerName);
+  const resolvedOwner = cfg?.worker_id
+    ? getWorkerRecordById(String(cfg.worker_id).trim())
+    : getWorkerRecordByName(String(cfg?.worker_name || '').trim());
+  const ownerWorker = String(resolvedOwner?.name || cfg?.worker_name || '').trim();
+  const ownerWorkerId = resolvedOwner?.id || cfg?.worker_id || getWorkerIdByName(ownerWorker || targetWorkerName);
   return {
     workerName: ownerWorker || targetWorkerName,
     workerId: ownerWorkerId,

@@ -2300,16 +2300,18 @@ function renderOwnerEmployeeFopCashHistory(logs) {
   `;
 }
 
-function renderOwnerEmployeeCurrencyCashHistory(workerName, logs) {
+function renderOwnerEmployeeCurrencyCashHistory(workerKey, logs) {
+  const descriptor = getOwnerCashWorkerDescriptorByKey(workerKey);
+  const historyTitle = descriptor?.label || getWorkerDisplayName(workerKey) || workerKey || 'Касса';
   const rows = (logs || [])
-    .filter(entry => getCashEntryOwner(entry) === workerName)
+    .filter(entry => descriptor ? descriptor.matches(entry) : false)
     .slice()
     .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
 
   if (!rows.length) return '';
 
   const total = calcCurrencyCashBalance(rows);
-  const workerKey = getOwnerCashSafeKey(workerName + '-currency');
+  const safeWorkerKey = getOwnerCashSafeKey(String(workerKey || historyTitle) + '-currency');
   const tree = {};
 
   for (const entry of rows) {
@@ -2330,7 +2332,7 @@ function renderOwnerEmployeeCurrencyCashHistory(workerName, logs) {
   const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
   const yearsHtml = Object.keys(tree).sort((a, b) => b.localeCompare(a)).map(year => {
     const yearData = tree[year];
-    const yearKey = `owner-currency-worker-${workerKey}-year-${year}`;
+    const yearKey = `owner-currency-worker-${safeWorkerKey}-year-${year}`;
     const monthsHtml = Object.keys(yearData.months).sort((a, b) => b.localeCompare(a)).map(monthKey => {
       const monthData = yearData.months[monthKey];
       const monthToggleKey = `${yearKey}-month-${monthKey}`;
@@ -2414,7 +2416,7 @@ function renderOwnerEmployeeCurrencyCashHistory(workerName, logs) {
     <div class="fin-month-card owner-cash-history-card">
       <div class="owner-cash-history-title">
         <div>
-          <div class="fin-month-name">${escapeHtml(workerName)}</div>
+          <div class="fin-month-name">${escapeHtml(historyTitle)}</div>
           <div class="fin-month-sub">История валютной кассы</div>
         </div>
         <div style="font-size:18px;font-weight:900;color:${total >= 0 ? 'var(--accent)' : '#ef4444'};white-space:nowrap;">${total >= 0 ? '+' : ''}${total.toLocaleString('ru')} $</div>
