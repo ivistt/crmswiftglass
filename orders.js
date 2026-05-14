@@ -764,14 +764,24 @@ function compareOrdersForList(a, b, sort = 'desc', prioritize = false) {
     const priorityDelta = Number(!!b?.priorityTask) - Number(!!a?.priorityTask);
     if (priorityDelta) return priorityDelta;
   }
+  const ad = String(a?.date || '');
+  const bd = String(b?.date || '');
+  if (ad === bd) {
+    const aDaySort = getOrderDaySortValue(a);
+    const bDaySort = getOrderDaySortValue(b);
+    if (aDaySort !== bDaySort) return aDaySort - bDaySort;
+  }
   const av = getOrderIdSortValue(a);
   const bv = getOrderIdSortValue(b);
   if (av !== bv) return sort === 'asc' ? av - bv : bv - av;
-  const ad = String(a?.date || '');
-  const bd = String(b?.date || '');
   const dateCompare = sort === 'asc' ? ad.localeCompare(bd) : bd.localeCompare(ad);
   if (dateCompare) return dateCompare;
   return String(a?.time || '').localeCompare(String(b?.time || ''));
+}
+
+function getOrderDaySortValue(order) {
+  const raw = Number(order?.daySort);
+  return Number.isFinite(raw) ? raw : Number.MAX_SAFE_INTEGER;
 }
 
 function getOrderIdSortValue(order) {

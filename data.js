@@ -1341,6 +1341,7 @@ function rowToOrder(r) {
   return {
     id:              r.id,
     date:            r.date,
+    daySort:         Number.isFinite(Number(r.day_sort)) ? Number(r.day_sort) : null,
     responsible:     r.responsible,
     responsibleWorkerId: r.responsible_worker_id || null,
     client:          r.client,
@@ -1431,6 +1432,7 @@ function orderToRow(o) {
   return {
     id:               o.id,
     date:             o.date,
+    day_sort:         Number.isFinite(Number(o.daySort)) ? Number(o.daySort) : null,
     responsible:      o.responsible,
     responsible_worker_id: o.responsibleWorkerId || getWorkerIdByName(o.responsible),
     client:           o.client,
@@ -1518,6 +1520,7 @@ function orderToRowSparse(o) {
   const mapping = [
     ['id', 'id'],
     ['date', 'date'],
+    ['daySort', 'day_sort'],
     ['responsible', 'responsible'],
     ['client', 'client'],
     ['phone', 'phone'],

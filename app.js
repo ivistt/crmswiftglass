@@ -14,6 +14,7 @@ const OWNER_PENDING_CASH_WORKER_NAME = 'Карты владельца';
 let calendarCursorDate = new Date();
 let calendarWorkerFilters = [];
 let ownerTodayDateFilter = '';
+let ownerTodayEditMode = false;
 const THEME_STORAGE_KEY = 'crm_theme';
 let screenBackStack = [];
 let suppressScreenHistoryOnce = false;
@@ -296,6 +297,152 @@ function openOwnerTodayScreen() {
 function setOwnerTodayDateFilter(value) {
   ownerTodayDateFilter = value || getLocalDateString();
   renderOwnerTodayScreen();
+}
+
+function toggleOwnerTodayEditMode() {
+  ownerTodayEditMode = !ownerTodayEditMode;
+  renderOwnerTodayScreen();
+}
+
+function _getOwnerTodayOrderSortValue(order) {
+  const raw = Number(order?.daySort);
+  return Number.isFinite(raw) ? raw : Number.MAX_SAFE_INTEGER;
+}
+
+function _sortOwnerTodayOrders(list) {
+  return [...(list || [])].sort((a, b) => {
+    const aSort = _getOwnerTodayOrderSortValue(a);
+    const bSort = _getOwnerTodayOrderSortValue(b);
+    if (aSort !== bSort) return aSort - bSort;
+    return compareOrdersForList(a, b, 'asc', false);
+  });
+}
+
+function _buildOwnerTodayGroups(selectedDate) {
+  const dayOrders = (orders || [])
+    .filter(o => isOrderFinanciallyActive(o) && o.date === selectedDate);
+  const groups = {};
+  for (const order of dayOrders) {
+    const responsible = order.responsible || 'Без ответственного';
+    const worker = (workers || []).find(w => w.name === order.responsible);
+    const assistant = order.assistant || worker?.assistant || '';
+    const key = _ownerTodayGroupKey(order);
+    if (!groups[key]) groups[key] = { key, responsible, assistant, orders: [], total: 0 };
+    groups[key].orders.push(order);
+    groups[key].total += getOrderClientTotalAmount(order);
+  }
+  const groupList = Object.values(groups)
+    .map(group => ({ ...group, orders: _sortOwnerTodayOrders(group.orders) }))
+    .sort((a, b) => b.total - a.total || b.orders.length - a.orders.length || _ownerTodayGroupLabel(a).localeCompare(_ownerTodayGroupLabel(b), 'ru'));
+  return { dayOrders: _sortOwnerTodayOrders(dayOrders), groupList };
+}
+
+function getOwnerTodayGroupOrdersContainer(groupKey) {
+  return Array.from(document.querySelectorAll('[data-owner-today-group-orders]'))
+    .find(el => String(el.dataset.ownerTodayGroupOrders || '') === String(groupKey || '')) || null;
+}
+
+function getOwnerTodayOrderNode(groupKey, orderId) {
+  const container = getOwnerTodayGroupOrdersContainer(groupKey);
+  if (!container) return null;
+  return Array.from(container.querySelectorAll('[data-owner-today-order-id]'))
+    .find(el => String(el.dataset.ownerTodayOrderId || '') === String(orderId || '')) || null;
+}
+
+function reorderOwnerTodayGroupDom(orderId, targetOrderId, groupKey, place = 'before') {
+  const container = getOwnerTodayGroupOrdersContainer(groupKey);
+  if (!container) return;
+  const sourceNode = getOwnerTodayOrderNode(groupKey, orderId);
+  if (!sourceNode) return;
+  if (!targetOrderId) {
+    container.appendChild(sourceNode);
+    return;
+  }
+  const targetNode = getOwnerTodayOrderNode(groupKey, targetOrderId);
+  if (!targetNode || targetNode === sourceNode) return;
+  if (place === 'after') container.insertBefore(sourceNode, targetNode.nextSibling);
+  else container.insertBefore(sourceNode, targetNode);
+}
+
+function refreshOwnerTodayMoveButtons(groupKey) {
+  const container = getOwnerTodayGroupOrdersContainer(groupKey);
+  if (!container) return;
+  const nodes = Array.from(container.querySelectorAll('[data-owner-today-order-id]'));
+  nodes.forEach((node, index) => {
+    const upBtn = node.querySelector('[data-owner-today-move="up"]');
+    const downBtn = node.querySelector('[data-owner-today-move="down"]');
+    if (upBtn) {
+      const disabled = index === 0;
+      upBtn.disabled = disabled;
+      upBtn.style.cursor = disabled ? 'default' : 'pointer';
+      upBtn.style.opacity = disabled ? '0.45' : '1';
+    }
+    if (downBtn) {
+      const disabled = index === nodes.length - 1;
+      downBtn.disabled = disabled;
+      downBtn.style.cursor = disabled ? 'default' : 'pointer';
+      downBtn.style.opacity = disabled ? '0.45' : '1';
+    }
+  });
+}
+
+async function moveOwnerTodayOrder(orderId, targetOrderId, groupKey, place = 'before') {
+  const selectedDate = ownerTodayDateFilter || getLocalDateString();
+  const { groupList } = _buildOwnerTodayGroups(selectedDate);
+  const group = groupList.find(item => item.key === groupKey);
+  if (!group) return;
+  const reordered = [...group.orders];
+  const fromIndex = reordered.findIndex(item => String(item.id) === String(orderId));
+  if (fromIndex === -1) return;
+  const [dragged] = reordered.splice(fromIndex, 1);
+  let insertIndex = reordered.length;
+  if (targetOrderId) {
+    const targetIndex = reordered.findIndex(item => String(item.id) === String(targetOrderId));
+    if (targetIndex !== -1) insertIndex = place === 'after' ? targetIndex + 1 : targetIndex;
+  }
+  reordered.splice(insertIndex, 0, dragged);
+  const patches = reordered
+    .map((order, index) => ({ order, nextSort: (index + 1) * 10 }))
+    .filter(({ order, nextSort }) => Number(order.daySort) !== nextSort);
+  if (!patches.length) {
+    return;
+  }
+  try {
+    const savedRows = await Promise.all(
+      patches.map(({ order, nextSort }) => sbPatchOrderFields(order.id, { day_sort: nextSort }))
+    );
+    savedRows.forEach(saved => {
+      if (!saved?.id) return;
+      const idx = (orders || []).findIndex(item => item.id === saved.id);
+      if (idx !== -1) orders[idx] = saved;
+    });
+    patches.forEach(({ order, nextSort }) => {
+      const idx = (orders || []).findIndex(item => item.id === order.id);
+      if (idx !== -1 && !savedRows.find(saved => saved?.id === order.id)) {
+        orders[idx] = { ...orders[idx], daySort: nextSort };
+      }
+    });
+    showToast('Порядок обновлен ✓');
+  } catch (e) {
+    showToast('Ошибка порядка: ' + e.message, 'error');
+    renderOwnerTodayScreen();
+  }
+}
+
+async function moveOwnerTodayOrderByStep(orderId, groupKey, step) {
+  if (!ownerTodayEditMode || !step) return;
+  const selectedDate = ownerTodayDateFilter || getLocalDateString();
+  const { groupList } = _buildOwnerTodayGroups(selectedDate);
+  const group = groupList.find(item => item.key === groupKey);
+  if (!group) return;
+  const currentIndex = group.orders.findIndex(item => String(item.id) === String(orderId));
+  if (currentIndex === -1) return;
+  const targetIndex = currentIndex + step;
+  if (targetIndex < 0 || targetIndex >= group.orders.length) return;
+  const targetOrder = group.orders[targetIndex];
+  reorderOwnerTodayGroupDom(orderId, targetOrder.id, groupKey, step > 0 ? 'after' : 'before');
+  refreshOwnerTodayMoveButtons(groupKey);
+  await moveOwnerTodayOrder(orderId, targetOrder.id, groupKey, step > 0 ? 'after' : 'before');
 }
 
 function openCalendarScreen() {
@@ -2794,14 +2941,14 @@ function renderOwnerTodayScreen() {
   if (!container) return;
 
   const selectedDate = ownerTodayDateFilter || getLocalDateString();
-  const dayOrders = (orders || [])
-    .filter(o => isOrderFinanciallyActive(o) && o.date === selectedDate)
-    .sort((a, b) => String(a.time || '').localeCompare(String(b.time || '')));
+  const { dayOrders, groupList } = _buildOwnerTodayGroups(selectedDate);
+  const canEdit = currentRole === 'owner' || currentRole === 'manager';
 
   if (!dayOrders.length) {
     container.innerHTML = `
       <div class="filters-bar" style="margin-bottom:14px;">
         <input class="form-input" type="date" value="${selectedDate}" onchange="setOwnerTodayDateFilter(this.value)">
+        ${canEdit ? `<button class="btn btn-secondary" type="button" onclick="toggleOwnerTodayEditMode()" title="Редактировать порядок" style="min-width:auto;padding:0 12px;">${icon(ownerTodayEditMode ? 'check' : 'pencil')}</button>` : ''}
       </div>
       <div class="empty-state">
         <div class="empty-state-icon">${icon('calendar')}</div>
@@ -2813,26 +2960,12 @@ function renderOwnerTodayScreen() {
     return;
   }
 
-  const groups = {};
-  for (const order of dayOrders) {
-    const responsible = order.responsible || 'Без ответственного';
-    const worker = (workers || []).find(w => w.name === order.responsible);
-    const assistant = order.assistant || worker?.assistant || '';
-    const key = _ownerTodayGroupKey(order);
-    if (!groups[key]) {
-      groups[key] = { responsible, assistant, orders: [], total: 0 };
-    }
-    groups[key].orders.push(order);
-    groups[key].total += getOrderClientTotalAmount(order);
-  }
-
-  const groupList = Object.values(groups)
-    .sort((a, b) => b.total - a.total || b.orders.length - a.orders.length || _ownerTodayGroupLabel(a).localeCompare(_ownerTodayGroupLabel(b), 'ru'));
   const totalAmount = dayOrders.reduce((sum, order) => sum + getOrderClientTotalAmount(order), 0);
 
   container.innerHTML = `
     <div class="filters-bar" style="margin-bottom:14px;">
       <input class="form-input" type="date" value="${selectedDate}" onchange="setOwnerTodayDateFilter(this.value)">
+      ${canEdit ? `<button class="btn ${ownerTodayEditMode ? 'btn-primary' : 'btn-secondary'}" type="button" onclick="toggleOwnerTodayEditMode()" title="Редактировать порядок" style="min-width:auto;padding:0 12px;">${icon(ownerTodayEditMode ? 'check' : 'pencil')}</button>` : ''}
     </div>
     <div class="owner-today-summary">
       <div class="owner-today-summary-item">
@@ -2854,7 +2987,21 @@ function renderOwnerTodayScreen() {
 
     ${groupList.map((group, index) => {
       const key = `owner-today-group-${index}`;
-      const ordersHtml = group.orders.map(order => renderOrderCard(order)).join('');
+      const ordersHtml = `
+        <div data-owner-today-group-orders="${escapeAttr(group.key)}">
+        ${group.orders.map((order, orderIndex) => `
+        <div data-owner-today-order-id="${escapeAttr(order.id)}" style="position:relative;">
+          ${ownerTodayEditMode ? `
+            <div style="position:absolute;top:10px;right:10px;z-index:3;display:flex;gap:6px;">
+              <button type="button" data-owner-today-move="up" ${orderIndex === 0 ? 'disabled' : ''} onclick="moveOwnerTodayOrderByStep('${escapeAttr(order.id)}','${escapeAttr(group.key)}',-1)" title="Выше" style="border:1px solid var(--line);background:var(--card);border-radius:8px;padding:6px 8px;cursor:${orderIndex === 0 ? 'default' : 'pointer'};opacity:${orderIndex === 0 ? '0.45' : '1'};">↑</button>
+              <button type="button" data-owner-today-move="down" ${orderIndex === group.orders.length - 1 ? 'disabled' : ''} onclick="moveOwnerTodayOrderByStep('${escapeAttr(order.id)}','${escapeAttr(group.key)}',1)" title="Ниже" style="border:1px solid var(--line);background:var(--card);border-radius:8px;padding:6px 8px;cursor:${orderIndex === group.orders.length - 1 ? 'default' : 'pointer'};opacity:${orderIndex === group.orders.length - 1 ? '0.45' : '1'};">↓</button>
+            </div>
+          ` : ''}
+          ${renderOrderCard(order)}
+        </div>
+        `).join('')}
+        </div>
+      `;
       return `
         <div class="fin-month-card" style="margin-bottom:14px;">
           <div class="fin-month-header" onclick="toggleProfileMonth('${key}')">
