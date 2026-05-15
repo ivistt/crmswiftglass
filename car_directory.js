@@ -146,8 +146,9 @@ async function deleteCarDirEntry(id) {
 
   try {
     await sbDeleteCarDirectory(id);
-    carDirectory = carDirectory.filter(c => String(c.id) !== String(id));
+    carDirectory = await sbFetchCarDirectory();
     renderCarDirectory();
+    populateCarDatalist?.();
     showToast('Запись удалена');
   } catch (e) {
     showToast('Ошибка удаления: ' + e.message, 'error');

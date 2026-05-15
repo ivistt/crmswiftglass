@@ -1769,6 +1769,13 @@ https://share.google/EKtUDPReA8dCuWp4z`;
     appendTextLine(totalLine);
     appendHtmlLine(`<strong>${escapeHtml(totalLine)}</strong>`);
   }
+  const copyPaymentMethods = getOrderCopyPaymentMethods(o);
+  if (copyPaymentMethods.length) {
+    appendBlockSpacer();
+    const paymentLine = `Способ оплаты: ${copyPaymentMethods.join(', ')}`;
+    appendTextLine(paymentLine);
+    appendHtmlLine(escapeHtml(paymentLine));
+  }
 
   const text = textLines.join('\n');
   const html = `<div style="font-family:Arial,sans-serif;font-size:16px;line-height:1.45;">${htmlParts.join('')}</div>`;
@@ -1793,6 +1800,36 @@ https://share.google/EKtUDPReA8dCuWp4z`;
   } else {
     _fallbackCopy(text);
   }
+}
+
+function getOrderCopyPaymentMethods(order) {
+  const specificMethods = [];
+  const fallbackMethods = [];
+  const addMethod = method => {
+    const normalized = normalizePaymentMethod(method || '');
+    if (!normalized || isCashPaymentMethod(normalized)) return;
+    const label = formatOrderCopyPaymentMethod(normalized);
+    if (!label || isGenericOrderCopyPaymentMethod(label)) return;
+    const config = typeof findPaymentMethodConfigByLabel === 'function' ? findPaymentMethodConfigByLabel(normalized) : null;
+    const methodType = String(config?.method_type || '').trim().toLowerCase();
+    const target = (methodType && methodType !== 'cash') || config ? specificMethods : fallbackMethods;
+    if (!target.includes(label)) target.push(label);
+  };
+  (order?.clientPayments || []).forEach(payment => addMethod(payment?.method));
+  addMethod(order?.paymentMethod);
+  return specificMethods.length ? specificMethods : fallbackMethods;
+}
+
+function formatOrderCopyPaymentMethod(method) {
+  return String(method || '')
+    .trim()
+    .replace(/^[^\p{L}\p{N}]+/u, '')
+    .trim();
+}
+
+function isGenericOrderCopyPaymentMethod(method) {
+  const normalized = String(method || '').trim().toLowerCase();
+  return ['карта', 'card', 'картой', 'безнал', 'безналичный расчет', 'безналичный расчёт'].includes(normalized);
 }
 
 function sumCashClientPayments(payments) {
