@@ -533,11 +533,20 @@ function setupOrderActions() {
   updateOrdersBackTopbar();
   updateOrdersFiltersDropdown();
   const el = document.getElementById('orders-actions');
+  if (!el) return;
+  const filterButton = `
+    <button class="btn-secondary orders-filter-toggle" id="orders-filter-toggle"
+      onclick="toggleOrdersFilters()" title="Фильтры" aria-label="Фильтры">
+      <i data-lucide="list-filter" style="width:16px;height:16px;"></i>
+    </button>
+  `;
   if (canCreateOrder()) {
-    el.innerHTML = `<button class="btn-primary" onclick="openOrderModal(null)">+ Добавить запись</button>`;
+    el.innerHTML = `${filterButton}<button class="btn-primary orders-add-btn" onclick="openOrderModal(null)">+ Добавить</button>`;
   } else {
-    el.innerHTML = '';
+    el.innerHTML = filterButton;
   }
+  initIcons();
+  updateOrdersFiltersDropdown();
 }
 
 function updateOrdersBackTopbar() {
@@ -547,10 +556,10 @@ function updateOrdersBackTopbar() {
 
   const isSpecialist = currentRole !== 'owner' && currentRole !== 'manager';
   const shouldShow = Boolean(currentMonthFilter) || isSpecialist;
-  topbar.style.display = 'flex';
+  topbar.style.display = shouldShow ? 'flex' : 'none';
   topbar.classList.toggle('orders-topbar-without-back', !shouldShow);
   label.textContent = 'Назад';
-  const backBtn = topbar.querySelector('.back-btn:not(.orders-filter-toggle)');
+  const backBtn = topbar.querySelector('.back-btn');
   if (backBtn) backBtn.style.display = shouldShow ? 'flex' : 'none';
 }
 

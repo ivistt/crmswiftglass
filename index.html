@@ -130,23 +130,8 @@
 
   <!-- TOP BAR -->
   <div class="topbar">
-    <div style="display:flex;align-items:center;gap:16px;">
-      <div class="topbar-logo" onclick="goHome()">
-        <img src="images/logo.svg" data-theme-logo="main" alt="SwiftGlass" style="height:28px;width:auto;">
-      </div>
-    </div>
-    <div class="topbar-right">
-      <button class="refresh-btn theme-toggle-btn" id="theme-toggle-btn" onclick="toggleTheme()" title="Переключить тему">
-        <i data-lucide="moon" style="width:15px;height:15px;"></i>
-      </button>
-      <button class="refresh-btn" id="refresh-btn" onclick="refreshOrders()" title="Обновить данные из базы">
-        <i data-lucide="refresh-cw" style="width:15px;height:15px;"></i>
-      </button>
-      <span class="role-badge" id="role-badge"></span>
-      <button class="logout-btn" style="display:flex;align-items:center;gap:5px;" onclick="doLogout()">
-        <i data-lucide="log-out" style="width:13px;height:13px;"></i>
-        Выйти
-      </button>
+    <div class="topbar-logo" onclick="goHome()">
+      <img src="images/logo.svg" data-theme-logo="main" alt="SwiftGlass" style="height:28px;width:auto;">
     </div>
   </div>
 
@@ -175,6 +160,10 @@
     <button class="nav-item" id="nav-workers" onclick="navTo('workers')">
       <span class="nav-icon ico"><i data-lucide="hard-hat" style="width:20px;height:20px;"></i></span>
       <span class="nav-label">Команда</span>
+    </button>
+    <button class="nav-item" id="nav-settings" onclick="navTo('settings')">
+      <span class="nav-icon ico"><i data-lucide="settings" style="width:20px;height:20px;"></i></span>
+      <span class="nav-label">Настройки</span>
     </button>
   </nav>
 
@@ -224,11 +213,6 @@
         <button class="back-btn" onclick="goBackFromOrdersList()" style="display:flex;align-items:center;gap:6px;">
           <i data-lucide="arrow-left" style="width:14px;height:14px;"></i>
           <span id="orders-back-label">Назад</span>
-        </button>
-        <button class="back-btn orders-filter-toggle" id="orders-filter-toggle"
-          onclick="toggleOrdersFilters()" title="Фильтры" aria-label="Фильтры"
-          style="display:flex;align-items:center;justify-content:center;gap:0;margin-left:auto;width:38px;height:38px;padding:0;">
-          <i data-lucide="list-filter" style="width:14px;height:14px;"></i>
         </button>
       </div>
       <div class="page-header">

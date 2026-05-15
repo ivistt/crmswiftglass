@@ -203,6 +203,7 @@ function updateNavbarVisibility() {
 
   const navCash    = document.getElementById('nav-cash');
   const navProfile = document.getElementById('nav-profile');
+  const navSettings = document.getElementById('nav-settings');
 
   if (currentRole === 'owner') {
     // Владелец: Главная + Записи (без клиентов и команды)
@@ -212,31 +213,34 @@ function updateNavbarVisibility() {
     if (navProfile) navProfile.style.display = 'none';
     if (navClients) navClients.style.display = 'none';
     if (navWorkers) navWorkers.style.display = 'none';
+    if (navSettings) navSettings.style.display = '';
     document.getElementById('app')?.classList.remove('no-navbar');
   } else if (currentRole === 'manager') {
     // Менеджер: Записи
     if (bottomNav)  bottomNav.style.display  = '';
-    if (navHome)    navHome.style.display    = canViewDashboard() ? '' : 'none';
+    if (navHome)    navHome.style.display    = '';
     if (navCash)    navCash.style.display    = (typeof canAccessPersonalCash === 'function' && canAccessPersonalCash()) ? '' : 'none';
     if (navProfile) navProfile.style.display = '';
     if (navClients) navClients.style.display = canViewClients() ? '' : 'none';
     if (navWorkers) navWorkers.style.display = canViewWorkers() ? '' : 'none';
+    if (navSettings) navSettings.style.display = '';
     document.getElementById('app')?.classList.remove('no-navbar');
   } else {
     // Специалисты: показываем только то, что реально разрешено
     if (navClients) navClients.style.display = canViewClients() ? '' : 'none';
     if (navWorkers) navWorkers.style.display = canViewWorkers() ? '' : 'none';
     if (bottomNav) bottomNav.style.display = '';
-    if (navHome)   navHome.style.display   = canViewDashboard() ? '' : 'none';
+    if (navHome)   navHome.style.display   = '';
     if (navCash)   navCash.style.display   = (typeof canAccessPersonalCash === 'function' && canAccessPersonalCash()) ? '' : 'none';
     if (navProfile) navProfile.style.display = '';
+    if (navSettings) navSettings.style.display = '';
     document.getElementById('app')?.classList.remove('no-navbar');
   }
 }
 
 function setActiveNav(name) {
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-  const map = { home: 'nav-home', months: 'nav-orders', orders: 'nav-orders', clients: 'nav-clients', workers: 'nav-workers', cash: 'nav-cash', profile: 'nav-profile', 'owner-today': 'nav-home', calendar: 'nav-home' };
+  const map = { home: 'nav-home', months: 'nav-orders', orders: 'nav-orders', clients: 'nav-clients', workers: 'nav-workers', cash: 'nav-cash', profile: 'nav-profile', 'owner-settings': 'nav-settings', settings: 'nav-settings', 'owner-today': 'nav-home', calendar: 'nav-home' };
   const id = map[name];
   if (id) { const el = document.getElementById(id); if (el) el.classList.add('active'); }
 }
@@ -248,12 +252,23 @@ function navTo(section) {
   else if (section === 'workers') { openWorkersScreen(); }
   else if (section === 'cash') { openCashScreen(); }
   else if (section === 'profile') { openProfileScreen(); }
+  else if (section === 'settings') { openSettingsScreen(); }
 }
 
 function openFinanceScreen() {
   if (!canViewFinance()) return;
   renderFinance();
   showScreen('finance');
+}
+
+function openSettingsScreen() {
+  renderSettingsScreen();
+  showScreen('owner-settings');
+  setActiveNav('settings');
+}
+
+function openOwnerSettingsScreen() {
+  openSettingsScreen();
 }
 
 async function openOwnerCashScreen() {
@@ -279,12 +294,6 @@ async function openOwnerSalaryScreen() {
 
 async function openOwnerPaymentsScreen() {
   return openOwnerCashScreen();
-}
-
-function openOwnerSettingsScreen() {
-  if (currentRole !== 'owner') return;
-  renderOwnerSettingsScreen();
-  showScreen('owner-settings');
 }
 
 function openOwnerTodayScreen() {
@@ -814,6 +823,7 @@ function openScreenByName(name) {
     if (target === 'owner-salary') return openOwnerSalaryScreen();
     if (target === 'owner-payments') return openOwnerPaymentsScreen();
     if (target === 'owner-settings') return openOwnerSettingsScreen();
+    if (target === 'settings') return openSettingsScreen();
     if (target === 'owner-today') return openOwnerTodayScreen();
     if (target === 'calendar') return openCalendarScreen();
     if (target === 'car-directory') return openCarDirectoryScreen();
@@ -3434,6 +3444,11 @@ async function openWorkersScreen() {
   showScreen('workers');
 }
 
+function renderSettingsScreen() {
+  if (currentRole === 'owner') return renderOwnerSettingsScreen();
+  return renderUserSettingsScreen();
+}
+
 function renderOwnerSettingsScreen() {
   const container = document.getElementById('owner-settings-content');
   if (!container) return;
@@ -3461,6 +3476,43 @@ function renderOwnerSettingsScreen() {
       </div>
     </div>
     ${typeof renderOwnerSystemBannerControls === 'function' ? renderOwnerSystemBannerControls() : ''}
+  `;
+  initIcons();
+}
+
+function renderUserSettingsScreen() {
+  const container = document.getElementById('owner-settings-content');
+  if (!container) return;
+  const isDark = getCurrentTheme() === 'dark';
+  container.innerHTML = `
+    <div class="settings-user-shell">
+      <div class="settings-user-logo">
+        <img src="${isDark ? 'images/logo.svg' : 'images/logo-d.svg'}" data-theme-logo="main" alt="SwiftGlass">
+      </div>
+      <div class="settings-user-actions">
+        <div class="settings-user-section">
+          <div class="settings-user-section-title">Тема</div>
+          <div class="settings-theme-toggle">
+            <button class="${isDark ? '' : 'active'}" onclick="applyTheme('light'); renderUserSettingsScreen();">
+              <i data-lucide="sun" style="width:16px;height:16px;"></i>
+              Светлая
+            </button>
+            <button class="${isDark ? 'active' : ''}" onclick="applyTheme('dark'); renderUserSettingsScreen();">
+              <i data-lucide="moon" style="width:16px;height:16px;"></i>
+              Темная
+            </button>
+          </div>
+        </div>
+        <button class="settings-action-row" onclick="refreshOrders()">
+          <span><i data-lucide="refresh-cw" style="width:18px;height:18px;"></i></span>
+          <strong>Обновить из базы данных</strong>
+        </button>
+        <button class="settings-action-row danger" onclick="doLogout()">
+          <span><i data-lucide="log-out" style="width:18px;height:18px;"></i></span>
+          <strong>Выйти</strong>
+        </button>
+      </div>
+    </div>
   `;
   initIcons();
 }
