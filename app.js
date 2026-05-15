@@ -3449,11 +3449,49 @@ function renderSettingsScreen() {
   return renderUserSettingsScreen();
 }
 
+function renderSettingsQuickActions(options = {}) {
+  const isDark = getCurrentTheme() === 'dark';
+  const logo = options.logo ? `
+    <div class="settings-user-logo">
+      <img src="${isDark ? 'images/logo.svg' : 'images/logo-d.svg'}" data-theme-logo="main" alt="SwiftGlass">
+    </div>
+  ` : '';
+  return `
+    ${logo}
+    <div class="settings-user-actions">
+      <div class="settings-user-section">
+        <div class="settings-user-section-title">Тема</div>
+        <div class="settings-theme-toggle">
+          <button class="${isDark ? '' : 'active'}" onclick="applyTheme('light'); renderSettingsScreen();">
+            <i data-lucide="sun" style="width:16px;height:16px;"></i>
+            Светлая
+          </button>
+          <button class="${isDark ? 'active' : ''}" onclick="applyTheme('dark'); renderSettingsScreen();">
+            <i data-lucide="moon" style="width:16px;height:16px;"></i>
+            Темная
+          </button>
+        </div>
+      </div>
+      <button class="settings-action-row" onclick="refreshOrders()">
+        <span><i data-lucide="refresh-cw" style="width:18px;height:18px;"></i></span>
+        <strong>Обновить из базы данных</strong>
+      </button>
+      <button class="settings-action-row danger" onclick="doLogout()">
+        <span><i data-lucide="log-out" style="width:18px;height:18px;"></i></span>
+        <strong>Выйти</strong>
+      </button>
+    </div>
+  `;
+}
+
 function renderOwnerSettingsScreen() {
   const container = document.getElementById('owner-settings-content');
   if (!container) return;
   const ownerWorker = (workers || []).find(worker => worker.name === currentWorkerName) || null;
   container.innerHTML = `
+    <div class="settings-owner-quick-actions">
+      ${renderSettingsQuickActions()}
+    </div>
     <div class="owner-settings-profile-grid">
       <div class="owner-settings-profile-item">
         <div class="owner-settings-profile-label">Имя</div>
@@ -3483,35 +3521,9 @@ function renderOwnerSettingsScreen() {
 function renderUserSettingsScreen() {
   const container = document.getElementById('owner-settings-content');
   if (!container) return;
-  const isDark = getCurrentTheme() === 'dark';
   container.innerHTML = `
     <div class="settings-user-shell">
-      <div class="settings-user-logo">
-        <img src="${isDark ? 'images/logo.svg' : 'images/logo-d.svg'}" data-theme-logo="main" alt="SwiftGlass">
-      </div>
-      <div class="settings-user-actions">
-        <div class="settings-user-section">
-          <div class="settings-user-section-title">Тема</div>
-          <div class="settings-theme-toggle">
-            <button class="${isDark ? '' : 'active'}" onclick="applyTheme('light'); renderUserSettingsScreen();">
-              <i data-lucide="sun" style="width:16px;height:16px;"></i>
-              Светлая
-            </button>
-            <button class="${isDark ? 'active' : ''}" onclick="applyTheme('dark'); renderUserSettingsScreen();">
-              <i data-lucide="moon" style="width:16px;height:16px;"></i>
-              Темная
-            </button>
-          </div>
-        </div>
-        <button class="settings-action-row" onclick="refreshOrders()">
-          <span><i data-lucide="refresh-cw" style="width:18px;height:18px;"></i></span>
-          <strong>Обновить из базы данных</strong>
-        </button>
-        <button class="settings-action-row danger" onclick="doLogout()">
-          <span><i data-lucide="log-out" style="width:18px;height:18px;"></i></span>
-          <strong>Выйти</strong>
-        </button>
-      </div>
+      ${renderSettingsQuickActions({ logo: true })}
     </div>
   `;
   initIcons();

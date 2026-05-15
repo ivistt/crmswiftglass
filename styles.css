@@ -989,6 +989,14 @@ body {
   margin-bottom: 16px;
 }
 
+#owner-today-content .filters-bar {
+  flex-direction: row;
+}
+
+#owner-today-content .filters-bar .form-input {
+  flex: 1 1 auto;
+}
+
 .orders-filters-dropdown {
   display: none;
   padding: 12px;
@@ -1039,8 +1047,8 @@ body {
   display: flex;
   gap: 6px;
   padding-bottom: 16px;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 16px;
+  border-bottom: none;
+  margin-bottom: 0;
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -1089,6 +1097,7 @@ body {
 .order-card:active { transform: scale(0.99); }
 
 .order-card-state-selection {
+  padding: 7px 7px 6px;
   background: var(--surface2);
 }
 .order-card-state-selection:hover {
@@ -2270,6 +2279,7 @@ input[type="datetime-local"] {
   .orders-tab { font-size: 11px; padding: 7px 12px; }
 
   .order-card { padding: 14px 16px; }
+  .order-card-state-selection { padding: 6px; }
   .order-card-top {
     align-items: flex-start;
   }
@@ -3557,6 +3567,10 @@ input[type="datetime-local"] {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+.settings-owner-quick-actions {
+  max-width: 420px;
+  margin: 0 auto 18px;
 }
 .settings-user-section {
   padding: 12px;

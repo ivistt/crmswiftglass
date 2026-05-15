@@ -2184,32 +2184,42 @@ async function rememberCarDirectoryFromOrder(order) {
   const eurocode = String(order?.code || '').trim();
   if (!model || typeof sbUpsertCarDirectory !== 'function') return;
 
+  const normalize = value => String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const modelKey = normalize(model);
+  const existing = [...(Array.isArray(carDirectory) ? carDirectory : []), ...(Array.isArray(refCars) ? refCars : [])]
+    .find(item => normalize(item?.model) === modelKey);
+  if (existing && (!eurocode || String(existing.eurocode || '').trim() === eurocode)) return;
+
   try {
-    const saved = await sbUpsertCarDirectory(model, eurocode);
+    const saved = await sbUpsertCarDirectory(existing?.model || model, eurocode || existing?.eurocode || '');
     if (!Array.isArray(carDirectory)) return;
 
     const savedId = saved?.id;
+    const savedModel = saved?.model || existing?.model || model;
+    const savedEurocode = saved?.eurocode || eurocode || existing?.eurocode || '';
+    const savedModelKey = normalize(savedModel);
     const idx = carDirectory.findIndex(item =>
       (savedId && item.id === savedId) ||
-      String(item.model || '').trim().toLowerCase() === model.toLowerCase()
+      normalize(item.model) === savedModelKey
     );
-    const nextRow = saved || { model, eurocode };
+    const nextRow = { ...(saved || {}), model: savedModel, eurocode: savedEurocode };
     if (idx !== -1) {
-      carDirectory[idx] = { ...carDirectory[idx], ...nextRow, model, eurocode };
+      carDirectory[idx] = { ...carDirectory[idx], ...nextRow };
     } else {
       carDirectory.push(nextRow);
     }
     if (Array.isArray(refCars)) {
       const refIdx = refCars.findIndex(item =>
         (savedId && item.id === savedId) ||
-        String(item.model || '').trim().toLowerCase() === model.toLowerCase()
+        normalize(item.model) === savedModelKey
       );
       if (refIdx !== -1) {
-        refCars[refIdx] = { ...refCars[refIdx], ...nextRow, model, eurocode };
+        refCars[refIdx] = { ...refCars[refIdx], ...nextRow };
       } else {
         refCars.push(nextRow);
       }
     }
+    populateCarDatalist();
   } catch (e) {
     console.warn('Failed to remember car directory row:', e);
   }
