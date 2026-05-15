@@ -91,6 +91,9 @@ function renderClients() {
 
 function getOrderDebtLeft(order) {
   if (!isOrderFinanciallyActive(order)) return 0;
+  const paymentStatus = String(order?.paymentStatus || '').trim();
+  if (paymentStatus === 'Оплачено' || paymentStatus === 'Рассчитано') return 0;
+  if (typeof getEffectivePaymentStatus === 'function' && getEffectivePaymentStatus(order) === 'Оплачено') return 0;
   return Math.max(0, getOrderClientTotalAmount(order) - getOrderClientPaidAmount(order));
 }
 
