@@ -1327,6 +1327,51 @@ function ensureBuiltInDropshippers(rows = []) {
   return list;
 }
 
+function getDropshipperCashWorkerRecord(dropshipperName) {
+  const name = String(dropshipperName || '').trim();
+  if (!name) return null;
+  const row = (refDropshippers || []).find(item => String(item?.name || '').trim() === name) || null;
+  const linkedWorkerId = String(row?.worker_id || '').trim();
+  if (linkedWorkerId) {
+    return getWorkerRecordById(linkedWorkerId);
+  }
+  const linkedWorkerName = String(row?.worker_name || '').trim();
+  if (linkedWorkerName) {
+    return getWorkerRecordByName(linkedWorkerName);
+  }
+  return (workers || []).find(worker => {
+    const labels = [worker?.name, worker?.alias].filter(Boolean).map(value => String(value).trim().toLowerCase());
+    const target = name.toLowerCase();
+    if (labels.includes(target)) return true;
+    const targetSymbol = Array.from(name)[0] || '';
+    if (!targetSymbol || !labels.some(label => Array.from(label)[0] === targetSymbol.toLowerCase())) return false;
+    const targetTokens = target.replace(/[^a-z0-9а-яіїєґ\s]/gi, ' ').split(/\s+/).filter(token => token.length > 1);
+    return labels.some(label => {
+      const tokens = label.replace(/[^a-z0-9а-яіїєґ\s]/gi, ' ').split(/\s+/).filter(token => token.length > 1);
+      return tokens.some(token => targetTokens.includes(token));
+    });
+  }) || null;
+}
+
+function getCashRunningBalanceMap(log = [], amountGetter = entry => Number(entry?.amount) || 0) {
+  const map = new Map();
+  let balance = 0;
+  [...(log || [])]
+    .filter(entry => !String(entry?.deleted_at || '').trim())
+    .sort((a, b) => {
+      const at = new Date(a?.created_at || a?.fop_date || 0).getTime();
+      const bt = new Date(b?.created_at || b?.fop_date || 0).getTime();
+      if (at !== bt) return at - bt;
+      return String(a?.id || '').localeCompare(String(b?.id || ''));
+    })
+    .forEach(entry => {
+      balance += Number(amountGetter(entry)) || 0;
+      const id = String(entry?.id || '').trim();
+      if (id) map.set(id, balance);
+    });
+  return map;
+}
+
 // ── MAPPERS ──────────────────────────────────────────────────
 
 function rowToOrder(r) {
@@ -2500,14 +2545,21 @@ function buildOrderPaymentCashEntryPayload({ order, payment, paymentType = 'clie
   const method = normalizePaymentMethod(payment?.method || '');
   if (!amount || !method) return null;
 
-  const route = getPaymentCashRoute(method, fallbackWorkerName || order?.responsible || '');
-  const signedAmount = paymentType === 'supplier' ? -amount : amount;
+  let routeFallbackWorkerName = fallbackWorkerName || order?.responsible || '';
+  if (paymentType === 'dropshipper' && isCashPaymentMethod(method)) {
+    const dropshipperWorker = getDropshipperCashWorkerRecord(order?.dropshipper);
+    routeFallbackWorkerName = dropshipperWorker?.name || routeFallbackWorkerName;
+  }
+  const route = getPaymentCashRoute(method, routeFallbackWorkerName);
+  const signedAmount = paymentType === 'supplier' || paymentType === 'dropshipper' ? -amount : amount;
   const orderId = order?.id || '—';
   const paymentDate = payment?.date || order?.date || '';
   const dateLabel = paymentDate ? formatDate(paymentDate) : '—';
   const clientLabel = order?.client || '—';
   const carLabel = order?.car || order?.client || '—';
-  const actionLabel = paymentType === 'supplier' ? 'Оплата поставщику' : 'Оплата клиента';
+  const actionLabel = paymentType === 'supplier'
+    ? 'Оплата поставщику'
+    : (paymentType === 'dropshipper' ? 'Выплата дропшипперу' : 'Оплата клиента');
   const payload = {
     worker_name: route.workerName,
     cash_owner: route.workerName,

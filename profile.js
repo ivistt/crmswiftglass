@@ -853,6 +853,9 @@ function renderCashSection(log, balance, today, options = {}) {
   const pendingEntries = options.pendingEntries || [];
   const balanceColor = balance >= 0 ? 'var(--accent)' : '#ef4444';
   const filteredLog = _filterCashLogByComment(log, cashSearchQuery);
+  const balanceMap = typeof getCashRunningBalanceMap === 'function'
+    ? getCashRunningBalanceMap(log)
+    : new Map();
 
   // Разделяем лог на сегодня и архив
   const todayLog   = filteredLog.filter(e => _cashEntryDate(e) === today);
@@ -863,11 +866,11 @@ function renderCashSection(log, balance, today, options = {}) {
   const todayColor   = todayBalance >= 0 ? 'var(--accent)' : '#ef4444';
 
   const todayRowsHtml = todayLog.length
-    ? todayLog.map(e => _cashEntryRow(e)).join('')
+    ? todayLog.map(e => _cashEntryRow(e, balanceMap)).join('')
     : '<div style="text-align:center;color:var(--text3);font-size:13px;padding:10px 0;">Сегодня записей нет</div>';
 
   // ── Архив (группировка: год → месяц → день) ──
-  const archiveHtml = _buildCashArchive(archiveLog, options.archiveKeyPrefix || options.account || 'cash');
+  const archiveHtml = _buildCashArchive(archiveLog, options.archiveKeyPrefix || options.account || 'cash', balanceMap);
 
   return '<div class="profile-today-card" style="margin-top:12px;">'
 
@@ -990,10 +993,16 @@ function _cashEntryDate(e) {
   return new Date(e.created_at).toISOString().slice(0, 10);
 }
 
+function _formatCashAmountWithBalance(amount, balance, currency = '\u20B4') {
+  const sign = amount >= 0 ? '+' : '';
+  const amountText = sign + amount.toLocaleString('ru') + ' ' + currency;
+  if (!Number.isFinite(Number(balance))) return amountText;
+  return amountText + ' (' + Number(balance).toLocaleString('ru') + ')';
+}
+
 // Одна строка записи кассы
-function _cashEntryRow(e) {
+function _cashEntryRow(e, balanceMap = null) {
   const amt   = Number(e.amount);
-  const sign  = amt >= 0 ? '+' : '';
   const color = amt >= 0 ? 'var(--accent)' : '#ef4444';
   const dt    = new Date(e.created_at);
   const time  = dt.toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' });
@@ -1023,7 +1032,7 @@ function _cashEntryRow(e) {
     + '<div style="font-size:11px;color:var(--text3);margin-top:2px;">' + time + (displayMeta ? ' · ' + escapeHtml(displayMeta) : '') + '</div>'
     + '</div>'
     + '<div style="font-size:15px;font-weight:800;color:' + color + ';white-space:nowrap;margin-left:12px;">'
-    + sign + amt.toLocaleString('ru') + ' \u20B4</div>'
+    + _formatCashAmountWithBalance(amt, balanceMap?.get?.(String(e.id)), '\u20B4') + '</div>'
     + '</div>';
 }
 
@@ -1170,7 +1179,7 @@ function _buildCurrencyCashArchive(log) {
 }
 
 // Строит архив: год → месяц → день (все сворачиваемые)
-function _buildCashArchive(log, keyPrefix = 'cash') {
+function _buildCashArchive(log, keyPrefix = 'cash', balanceMap = null) {
   if (!log.length) return '';
 
   const MONTH_NAMES = ['Январь','Февраль','Март','Апрель','Май','Июнь',
@@ -1213,7 +1222,7 @@ function _buildCashArchive(log, keyPrefix = 'cash') {
         const dayKey   = keyPrefix + '-day-' + day;
         const [dy, dm, dd] = day.split('-');
 
-        const rowsHtml = entries.map(e => _cashEntryRow(e)).join('');
+        const rowsHtml = entries.map(e => _cashEntryRow(e, balanceMap)).join('');
 
         return '<div style="border-bottom:1px solid var(--border);">'
           // День — заголовок

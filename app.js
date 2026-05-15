@@ -1499,6 +1499,12 @@ function escapeOwnerCashJsString(value) {
   return String(value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 
+function formatOwnerCashAmountWithBalance(amount, balance, currency = '₴') {
+  const amountText = (amount >= 0 ? '+' : '') + Number(amount || 0).toLocaleString('ru') + ' ' + currency;
+  if (!Number.isFinite(Number(balance))) return amountText;
+  return amountText + ' (' + Number(balance).toLocaleString('ru') + ')';
+}
+
 function setOwnerCashSelectedWorker(workerName) {
   ownerCashSelectedWorker = workerName || '';
   openOwnerCashHistoryModal(ownerCashSelectedWorker);
@@ -2171,6 +2177,9 @@ function renderOwnerEmployeeCashHistory(workerName, logs) {
   const confirmedRows = getOwnerCashBalanceLogs()
     .filter(entry => workerDescriptor ? workerDescriptor.matches(entry) : getCashEntryOwner(entry) === workerName);
   const total = confirmedRows.reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
+  const balanceMap = typeof getCashRunningBalanceMap === 'function'
+    ? getCashRunningBalanceMap(confirmedRows)
+    : new Map();
   const workerKey = getOwnerCashSafeKey(workerName);
 
   if (!rows.length) {
@@ -2244,7 +2253,7 @@ function renderOwnerEmployeeCashHistory(workerName, logs) {
               </div>
               <div class="owner-cash-entry-actions">
                 ${isPendingConfirm ? `<button class="btn-primary" style="min-height:34px;padding:0 12px;border-radius:8px;font-size:12px;font-weight:800;" onclick="event.stopPropagation(); confirmOwnerCashEntry('${escapeOwnerCashJsString(entry.id)}')">Подтвердить</button>` : ''}
-                <div class="owner-cash-entry-amount" style="color:${amount >= 0 ? 'var(--accent)' : '#ef4444'};">${amount.toLocaleString('ru')} ₴</div>
+                <div class="owner-cash-entry-amount" style="color:${amount >= 0 ? 'var(--accent)' : '#ef4444'};">${formatOwnerCashAmountWithBalance(amount, balanceMap.get(String(entry.id)), '₴')}</div>
                 ${isCurrency ? '' : `<button class="icon-btn" title="Редактировать" onclick="event.stopPropagation(); openOwnerCashEntryModal('${escapeAttr(entry.id)}')">${icon('pencil')}</button>`}
                 <button class="icon-btn icon-action-danger" title="Удалить" onclick="event.stopPropagation(); deleteOwnerCashEntry('${escapeAttr(entry.id)}')">${icon('trash-2')}</button>
               </div>
@@ -2323,6 +2332,9 @@ function renderOwnerEmployeeFopCashHistory(logs) {
     .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
 
   const total = rows.reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
+  const balanceMap = typeof getCashRunningBalanceMap === 'function'
+    ? getCashRunningBalanceMap(rows)
+    : new Map();
   const workerKey = getOwnerCashSafeKey('oleg-fop');
 
   if (!rows.length) {
@@ -2381,7 +2393,7 @@ function renderOwnerEmployeeFopCashHistory(logs) {
                 <div class="owner-cash-entry-meta">${time ? escapeHtml(time) : '—'} ${renderOwnerCashEntryConfirmBadge(entry)}</div>
               </div>
               <div style="display:flex;align-items:center;gap:8px;">
-                <div class="owner-cash-entry-amount" style="color:${amount >= 0 ? 'var(--accent)' : '#ef4444'};">${amount.toLocaleString('ru')} ₴</div>
+                <div class="owner-cash-entry-amount" style="color:${amount >= 0 ? 'var(--accent)' : '#ef4444'};">${formatOwnerCashAmountWithBalance(amount, balanceMap.get(String(entry.id)), '₴')}</div>
                 <button class="icon-btn icon-action-danger" title="Удалить" onclick="event.stopPropagation(); deleteOwnerCashEntry('${escapeAttr(entry.id)}')">${icon('trash-2')}</button>
               </div>
             </div>
