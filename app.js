@@ -218,7 +218,7 @@ function updateNavbarVisibility() {
   } else if (currentRole === 'manager') {
     // Менеджер: Записи
     if (bottomNav)  bottomNav.style.display  = '';
-    if (navHome)    navHome.style.display    = '';
+    if (navHome)    navHome.style.display    = canViewDashboard() ? '' : 'none';
     if (navCash)    navCash.style.display    = (typeof canAccessPersonalCash === 'function' && canAccessPersonalCash()) ? '' : 'none';
     if (navProfile) navProfile.style.display = '';
     if (navClients) navClients.style.display = canViewClients() ? '' : 'none';
@@ -230,7 +230,7 @@ function updateNavbarVisibility() {
     if (navClients) navClients.style.display = canViewClients() ? '' : 'none';
     if (navWorkers) navWorkers.style.display = canViewWorkers() ? '' : 'none';
     if (bottomNav) bottomNav.style.display = '';
-    if (navHome)   navHome.style.display   = '';
+    if (navHome)   navHome.style.display   = canViewDashboard() ? '' : 'none';
     if (navCash)   navCash.style.display   = (typeof canAccessPersonalCash === 'function' && canAccessPersonalCash()) ? '' : 'none';
     if (navProfile) navProfile.style.display = '';
     if (navSettings) navSettings.style.display = '';
