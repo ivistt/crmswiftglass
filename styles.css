@@ -1016,7 +1016,7 @@ body {
   border: 1.5px solid var(--border2);
   background: var(--surface);
   font-family: 'Manrope', sans-serif;
-  font-size: 14px;
+  font-size: 10px;
   color: var(--text);
   outline: none;
   transition: border-color 0.15s, box-shadow 0.15s;
@@ -1331,13 +1331,14 @@ body {
 }
 
 .order-id {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 800;
   color: #000;
   font-family: 'JetBrains Mono', monospace;
   background: var(--accent);
-  padding: 2px 7px;
-  border-radius: 5px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  white-space: nowrap;
 }
 
 .order-name {
@@ -2269,8 +2270,8 @@ input[type="datetime-local"] {
   .page-title { font-size: 19px; }
 
   .filters-bar { gap: 8px; }
-  .filter-input { font-size: 14px; }
-  .filter-select { font-size: 14px; }
+  .filter-input { font-size: 10px; }
+  .filter-select { font-size: 10px; }
 
   .btn-primary, .btn-secondary, .btn-danger { font-size: 13px; padding: 10px 14px; }
   .back-btn { font-size: 12px; }
