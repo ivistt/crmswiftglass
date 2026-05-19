@@ -718,18 +718,23 @@ function refreshActiveOrdersViews() {
 }
 
 async function refreshOrders() {
-  const btn = document.getElementById('refresh-btn');
+  const refreshButtons = Array.from(document.querySelectorAll('#refresh-btn, #nav-refresh'));
+  const setRefreshButtonIcon = (btn, iconName) => {
+    if (!btn) return;
+    const size = btn.id === 'nav-refresh' ? 20 : 15;
+    btn.innerHTML = `<i data-lucide="${iconName}" style="width:${size}px;height:${size}px;"></i>`;
+  };
   const beforeSignature = getOrdersDataSignature();
   const beforeCashSignature = currentRole === 'owner'
     ? JSON.stringify((window.allCashLog || []).slice().sort((a, b) => String(a.id || a.created_at).localeCompare(String(b.id || b.created_at))))
     : '';
 
-  if (btn) {
+  refreshButtons.forEach(btn => {
     btn.disabled = true;
     btn.dataset.state = 'loading';
-    btn.innerHTML = '<i data-lucide="loader" style="width:15px;height:15px;"></i>';
-    initIcons();
-  }
+    setRefreshButtonIcon(btn, 'loader');
+  });
+  initIcons();
 
   try {
     orders = await sbFetchOrders();
@@ -743,22 +748,22 @@ async function refreshOrders() {
     refreshActiveOrdersViews();
     showToast(unchanged ? 'Данные актуальны: изменений в базе нет' : 'Данные из базы обновлены ✓');
 
-    if (btn) {
+    refreshButtons.forEach(btn => {
       btn.dataset.state = unchanged ? 'unchanged' : 'updated';
-      btn.innerHTML = unchanged
-        ? '<i data-lucide="check" style="width:15px;height:15px;"></i>'
-        : '<i data-lucide="refresh-cw" style="width:15px;height:15px;"></i>';
-      initIcons();
-      setTimeout(() => {
+      setRefreshButtonIcon(btn, unchanged ? 'check' : 'refresh-cw');
+    });
+    initIcons();
+    setTimeout(() => {
+      refreshButtons.forEach(btn => {
         btn.dataset.state = '';
-        btn.innerHTML = '<i data-lucide="refresh-cw" style="width:15px;height:15px;"></i>';
-        initIcons();
-      }, 1800);
-    }
+        setRefreshButtonIcon(btn, 'refresh-cw');
+      });
+      initIcons();
+    }, 1800);
   } catch (e) {
     showToast('Ошибка обновления: ' + e.message, 'error');
   } finally {
-    if (btn) btn.disabled = false;
+    refreshButtons.forEach(btn => { btn.disabled = false; });
   }
 }
 
