@@ -791,19 +791,35 @@ async function sbFetchCashLog(workerName, deletedMode = 'active') {
     || workerName
     || ''
   ).trim();
-  const res = await fetch(
-    `${WORKER_URL}/api/cash?worker=${encodeURIComponent(resolvedWorkerName)}&deleted=${encodeURIComponent(mode)}`,
-    { headers: getHeaders() }
-  );
-  if (!res.ok) await throwApiError(res);
-  return res.json();
+  const pageSize = 1000;
+  const allRows = [];
+  for (let offset = 0; ; offset += pageSize) {
+    const res = await fetch(
+      `${WORKER_URL}/api/cash?worker=${encodeURIComponent(resolvedWorkerName)}&deleted=${encodeURIComponent(mode)}&offset=${offset}&limit=${pageSize}`,
+      { headers: getHeaders() }
+    );
+    if (!res.ok) await throwApiError(res);
+    const rows = await res.json();
+    const page = Array.isArray(rows) ? rows : [];
+    allRows.push(...page);
+    if (page.length < pageSize) break;
+  }
+  return allRows;
 }
 
 async function sbFetchAllCashLog(deletedMode = 'active') {
   const mode = deletedMode === 'only' ? 'only' : deletedMode === 'all' ? 'all' : 'active';
-  const res = await fetch(`${WORKER_URL}/api/cash/all?deleted=${encodeURIComponent(mode)}`, { headers: getHeaders() });
-  if (!res.ok) await throwApiError(res);
-  return res.json();
+  const pageSize = 1000;
+  const allRows = [];
+  for (let offset = 0; ; offset += pageSize) {
+    const res = await fetch(`${WORKER_URL}/api/cash/all?deleted=${encodeURIComponent(mode)}&offset=${offset}&limit=${pageSize}`, { headers: getHeaders() });
+    if (!res.ok) await throwApiError(res);
+    const rows = await res.json();
+    const page = Array.isArray(rows) ? rows : [];
+    allRows.push(...page);
+    if (page.length < pageSize) break;
+  }
+  return allRows;
 }
 
 async function sbInsertCashEntry(entry) {

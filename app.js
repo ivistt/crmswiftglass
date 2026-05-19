@@ -1165,7 +1165,8 @@ function getOwnerCashWorkerDescriptors() {
   };
 
   (workers || [])
-    .filter(w => w.systemRole === 'senior' || w.systemRole === 'extra')
+    .filter(w => String(w?.name || '').trim())
+    .filter(w => String(w?.systemRole || w?.system_role || '').trim() !== 'owner')
     .forEach(w => addDescriptor({ workerId: w.id, workerName: w.name }));
 
   (typeof getPaymentMethods === 'function' ? getPaymentMethods() : [])
