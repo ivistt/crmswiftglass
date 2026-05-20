@@ -540,7 +540,7 @@ async function sbUpdateOrder(o) {
   return rows[0] ? rowToOrder(rows[0]) : o;
 }
 
-async function sbSaveOrderWithCash(o, { isNew = false, cashEntries = [], rollbackOrder = null } = {}) {
+async function sbSaveOrderWithCash(o, { isNew = false, cashEntries = [], rollbackOrder = null, syncPaymentTypes = null } = {}) {
   const res = await fetch(`${WORKER_URL}/api/orders/save-with-cash`, {
     method: 'POST',
     headers: getHeaders(),
@@ -549,6 +549,7 @@ async function sbSaveOrderWithCash(o, { isNew = false, cashEntries = [], rollbac
       order: orderToRowSparse(o),
       rollback_order: rollbackOrder ? orderToRowSparse(rollbackOrder) : null,
       cash_entries: cashEntries,
+      sync_payment_types: Array.isArray(syncPaymentTypes) ? syncPaymentTypes : null,
     }),
   });
   if (!res.ok) await throwApiError(res);

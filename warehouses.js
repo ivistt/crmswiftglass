@@ -1358,6 +1358,7 @@ async function saveDropshipperPayment() {
         isNew: false,
         cashEntries: [],
         rollbackOrder: item.originalOrder,
+        syncPaymentTypes: ['dropshipper'],
       })).order;
       const idx = orders.findIndex(o => o.id === item.originalOrder.id);
       if (idx !== -1) orders[idx] = saved || item.nextOrder;
@@ -1440,7 +1441,15 @@ async function saveDropshipperAdjustment() {
         adjustment,
       ],
     };
-    const saved = await sbUpdateOrder(nextOrder);
+    const saved = (await sbSaveOrderWithCash({
+      id: targetOrder.id,
+      dropshipperPayments: nextOrder.dropshipperPayments,
+    }, {
+      isNew: false,
+      cashEntries: [],
+      rollbackOrder: targetOrder,
+      syncPaymentTypes: ['dropshipper'],
+    })).order;
     const idx = orders.findIndex(o => o.id === targetOrder.id);
     if (idx !== -1) orders[idx] = saved || nextOrder;
 
