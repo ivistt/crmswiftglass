@@ -2539,6 +2539,7 @@ input[type="datetime-local"] {
 }
 .owner-cash-history-card {
   margin-bottom: 12px;
+  overflow: visible;
 }
 .owner-cash-history-title {
   display: flex;
@@ -2577,6 +2578,61 @@ input[type="datetime-local"] {
   flex: 0 0 auto;
   min-width: 0;
   flex-wrap: wrap;
+}
+.owner-cash-action-dropdown {
+  position: relative;
+  z-index: 2;
+}
+.owner-cash-action-dropdown.active {
+  z-index: 70;
+}
+.owner-cash-action-trigger {
+  color: var(--accent);
+  border-color: rgba(0, 229, 160, 0.35);
+  background: rgba(0, 229, 160, 0.12);
+}
+.owner-cash-action-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  display: none;
+  min-width: 156px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.owner-cash-action-menu.active {
+  display: grid;
+  gap: 4px;
+}
+.owner-cash-action-item {
+  width: 100%;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text2);
+  font-size: 13px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+.owner-cash-action-item:hover {
+  background: var(--surface2);
+  color: var(--text);
+}
+.owner-cash-action-item.danger {
+  color: var(--red);
+}
+.owner-cash-action-item.danger:hover {
+  background: rgba(255, 92, 106, 0.12);
 }
 .owner-cash-entry-meta {
   margin-top: 2px;

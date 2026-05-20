@@ -1492,7 +1492,7 @@ function getOwnerCashEntryTime(entry) {
 function getOrderIdFromCashEntry(entry) {
   const directId = String(entry?.order_id || '').trim();
   if (directId) return directId;
-  const sourceKey = String(entry?.fop_source_key || entry?.source_id || '').trim();
+  const sourceKey = String(entry?.source_key || entry?.fop_source_key || entry?.source_id || '').trim();
   const match = sourceKey.match(/^order:([^|]+)/);
   return match ? String(match[1] || '').trim() : '';
 }
@@ -1520,6 +1520,63 @@ function formatOwnerCashAmountWithBalance(amount, balance, currency = '₴') {
   if (!Number.isFinite(Number(balance))) return amountText;
   return amountText + ' (' + Number(balance).toLocaleString('ru') + ')';
 }
+
+function canReverseOwnerCashEntry(entry) {
+  if (!entry || String(entry.deleted_at || '').trim()) return false;
+  const status = String(entry.ledger_status || 'posted');
+  if (status === 'voided' || status === 'reversed' || status === 'corrected') return false;
+  if (String(entry.source_type || '') === 'reversal') return false;
+  if (String(entry.reversal_of || '').trim()) return false;
+  return true;
+}
+
+function canCorrectOwnerCashEntry(entry) {
+  if (!canReverseOwnerCashEntry(entry)) return false;
+  if (String(entry.ledger_status || 'posted') !== 'posted') return false;
+  if (String(entry.source_type || '') === 'correction') return false;
+  if (String(entry.correction_of || '').trim()) return false;
+  return true;
+}
+
+function closeOwnerCashActionMenus() {
+  document.querySelectorAll('.owner-cash-action-menu.active').forEach(menu => menu.classList.remove('active'));
+  document.querySelectorAll('.owner-cash-action-dropdown.active').forEach(dropdown => dropdown.classList.remove('active'));
+}
+
+function toggleOwnerCashActionMenu(entryId, event) {
+  event?.stopPropagation?.();
+  const menu = Array.from(document.querySelectorAll('.owner-cash-action-menu'))
+    .find(item => item.dataset.ownerCashActionMenu === String(entryId));
+  if (!menu) return;
+  const dropdown = menu.closest('.owner-cash-action-dropdown');
+  const isOpen = menu.classList.contains('active');
+  closeOwnerCashActionMenus();
+  if (!isOpen) {
+    menu.classList.add('active');
+    dropdown?.classList.add('active');
+  }
+}
+
+function renderOwnerCashEntryActionMenu(entry, options = {}) {
+  if (!entry?.id) return '';
+  const canReverse = canReverseOwnerCashEntry(entry);
+  const canEdit = options.edit !== false && canCorrectOwnerCashEntry(entry);
+  const expenseOnly = options.expenseOnly === true;
+  if (!canEdit && !canReverse) return '';
+  const id = escapeAttr(entry.id);
+  const editOptions = expenseOnly ? ', { expenseOnly: true }' : '';
+  return `
+    <div class="owner-cash-action-dropdown" onclick="event.stopPropagation();">
+      <button class="icon-btn owner-cash-action-trigger" title="Действия" onclick="toggleOwnerCashActionMenu('${id}', event)">${icon('chevron-down')}</button>
+      <div class="owner-cash-action-menu" data-owner-cash-action-menu="${id}">
+        ${canEdit ? `<button class="owner-cash-action-item" onclick="event.stopPropagation(); closeOwnerCashActionMenus(); openOwnerCashEntryModal('${id}'${editOptions})">${icon('pencil')} <span>Исправить</span></button>` : ''}
+        ${canReverse ? `<button class="owner-cash-action-item danger" onclick="event.stopPropagation(); closeOwnerCashActionMenus(); reverseOwnerCashEntry('${id}')">${icon('x')} <span>Отменить</span></button>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+document.addEventListener('click', closeOwnerCashActionMenus);
 
 function setOwnerCashSelectedWorker(workerName) {
   ownerCashSelectedWorker = workerName || '';
@@ -1784,7 +1841,7 @@ async function saveOwnerCashEntry() {
 
   try {
     if (id) {
-      await sbUpdateCashEntry(id, {
+      await sbCorrectCashEntry(id, {
         worker_name: workerName,
         amount,
         comment: finalComment,
@@ -1793,6 +1850,7 @@ async function saveOwnerCashEntry() {
         source_type: isExpense ? 'expense' : 'manual',
         expense_category: expenseCategory || null,
         warehouse_name: expenseWarehouse || null,
+        reason: comment,
       });
     } else {
       await sbInsertCashEntry({
@@ -1899,8 +1957,7 @@ function renderOwnerEmployeeExpenseHistory(workerName, logs) {
               </div>
               <div style="display:flex;align-items:center;gap:8px;">
                 <div class="owner-cash-entry-amount" style="color:#ef4444;">${amount.toLocaleString('ru')} ₴</div>
-                <button class="icon-btn" title="Редактировать" onclick="event.stopPropagation(); openOwnerCashEntryModal('${escapeAttr(entry.id)}', { expenseOnly: true })">${icon('pencil')}</button>
-                <button class="icon-btn icon-action-danger" title="Удалить" onclick="event.stopPropagation(); deleteOwnerCashEntry('${escapeAttr(entry.id)}')">${icon('trash-2')}</button>
+                ${renderOwnerCashEntryActionMenu(entry, { expenseOnly: true })}
               </div>
             </div>
           `;
@@ -2035,6 +2092,40 @@ async function deleteOwnerCashEntry(id) {
     showToast(hardDelete ? 'Запись кассы удалена безвозвратно' : 'Запись кассы перемещена в удаленные');
   } catch (e) {
     showToast('Ошибка удаления кассы: ' + e.message, 'error');
+  }
+}
+
+async function reverseOwnerCashEntry(id) {
+  if (currentRole !== 'owner' || !id) return;
+  const entry = (window.allCashLog || []).find(item => String(item.id) === String(id));
+  if (!canReverseOwnerCashEntry(entry)) {
+    showToast('Эту запись уже нельзя отменить', 'error');
+    return;
+  }
+  const amount = Number(entry?.amount) || 0;
+  const reason = window.prompt(`Причина отмены записи ${amount.toLocaleString('ru')} ₴`);
+  if (reason === null) return;
+  const cleanReason = String(reason || '').trim();
+  if (!cleanReason) {
+    showToast('Укажите причину отмены', 'error');
+    return;
+  }
+
+  try {
+    await sbReverseCashEntry(id, cleanReason);
+    await refreshOwnerCashState();
+    renderOwnerCashScreen();
+    renderOwnerExpensesScreen();
+    if (document.getElementById('owner-cash-history-modal')?.classList.contains('active') && ownerCashSelectedWorker) {
+      openOwnerCashHistoryModal(ownerCashSelectedWorker);
+    }
+    if (document.getElementById('owner-expense-history-modal')?.classList.contains('active') && ownerExpenseSelectedWorker) {
+      openOwnerExpenseHistoryModal(ownerExpenseSelectedWorker);
+    }
+    renderHome();
+    showToast('Запись отменена обратной проводкой ✓');
+  } catch (e) {
+    showToast('Ошибка отмены кассы: ' + e.message, 'error');
   }
 }
 
@@ -2270,8 +2361,7 @@ function renderOwnerEmployeeCashHistory(workerName, logs) {
               <div class="owner-cash-entry-actions">
                 ${isPendingConfirm ? `<button class="btn-primary" style="min-height:34px;padding:0 12px;border-radius:8px;font-size:12px;font-weight:800;" onclick="event.stopPropagation(); confirmOwnerCashEntry('${escapeOwnerCashJsString(entry.id)}')">Подтвердить</button>` : ''}
                 <div class="owner-cash-entry-amount" style="color:${amount >= 0 ? 'var(--accent)' : '#ef4444'};">${formatOwnerCashAmountWithBalance(amount, balanceMap.get(String(entry.id)), '₴')}</div>
-                ${isCurrency ? '' : `<button class="icon-btn" title="Редактировать" onclick="event.stopPropagation(); openOwnerCashEntryModal('${escapeAttr(entry.id)}')">${icon('pencil')}</button>`}
-                <button class="icon-btn icon-action-danger" title="Удалить" onclick="event.stopPropagation(); deleteOwnerCashEntry('${escapeAttr(entry.id)}')">${icon('trash-2')}</button>
+                ${renderOwnerCashEntryActionMenu(entry, { edit: !isCurrency })}
               </div>
             </div>
           `;
@@ -2410,7 +2500,7 @@ function renderOwnerEmployeeFopCashHistory(logs) {
               </div>
               <div style="display:flex;align-items:center;gap:8px;">
                 <div class="owner-cash-entry-amount" style="color:${amount >= 0 ? 'var(--accent)' : '#ef4444'};">${formatOwnerCashAmountWithBalance(amount, balanceMap.get(String(entry.id)), '₴')}</div>
-                <button class="icon-btn icon-action-danger" title="Удалить" onclick="event.stopPropagation(); deleteOwnerCashEntry('${escapeAttr(entry.id)}')">${icon('trash-2')}</button>
+                ${renderOwnerCashEntryActionMenu(entry, { edit: false })}
               </div>
             </div>
           `;
@@ -2530,7 +2620,7 @@ function renderOwnerEmployeeCurrencyCashHistory(workerKey, logs) {
               </div>
               <div style="display:flex;align-items:center;gap:8px;">
                 <div class="owner-cash-entry-amount" style="color:${Number(parsed?.usdAmount || 0) >= 0 ? 'var(--accent)' : '#ef4444'};">${Number(parsed?.usdAmount || 0) >= 0 ? '+' : ''}${Number(parsed?.usdAmount || 0).toLocaleString('ru')} $</div>
-                <button class="icon-btn icon-action-danger" title="Удалить" onclick="event.stopPropagation(); deleteOwnerCashEntry('${escapeAttr(entry.id)}')">${icon('trash-2')}</button>
+                ${renderOwnerCashEntryActionMenu(entry, { edit: false })}
               </div>
             </div>
           `;

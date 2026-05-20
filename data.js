@@ -801,7 +801,7 @@ async function sbFetchCashLog(workerName, deletedMode = 'active') {
     );
     if (!res.ok) await throwApiError(res);
     const rows = await res.json();
-    const page = Array.isArray(rows) ? rows : [];
+    const page = (Array.isArray(rows) ? rows : []).filter(entry => String(entry?.ledger_status || 'posted') !== 'voided');
     allRows.push(...page);
     if (page.length < pageSize) break;
   }
@@ -816,7 +816,7 @@ async function sbFetchAllCashLog(deletedMode = 'active') {
     const res = await fetch(`${WORKER_URL}/api/cash/all?deleted=${encodeURIComponent(mode)}&offset=${offset}&limit=${pageSize}`, { headers: getHeaders() });
     if (!res.ok) await throwApiError(res);
     const rows = await res.json();
-    const page = Array.isArray(rows) ? rows : [];
+    const page = (Array.isArray(rows) ? rows : []).filter(entry => String(entry?.ledger_status || 'posted') !== 'voided');
     allRows.push(...page);
     if (page.length < pageSize) break;
   }
@@ -843,6 +843,26 @@ async function sbUpdateCashEntry(id, updates) {
   if (!res.ok) await throwApiError(res);
   const rows = await res.json();
   return rows[0];
+}
+
+async function sbReverseCashEntry(id, reason) {
+  const res = await fetch(`${WORKER_URL}/api/cash/${encodeURIComponent(id)}/reverse`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ reason }),
+  });
+  if (!res.ok) await throwApiError(res);
+  return res.json();
+}
+
+async function sbCorrectCashEntry(id, updates) {
+  const res = await fetch(`${WORKER_URL}/api/cash/${encodeURIComponent(id)}/correct`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(updates || {}),
+  });
+  if (!res.ok) await throwApiError(res);
+  return res.json();
 }
 
 async function sbDeleteCashEntry(id) {
@@ -2445,6 +2465,8 @@ function getCashEntrySourceLabel(entry) {
   if (sourceType === 'expense') return 'Расход';
   if (sourceType === 'dropshipper') return 'Дроп';
   if (sourceType === 'exchange') return 'Обмен';
+  if (sourceType === 'reversal') return 'Отмена';
+  if (sourceType === 'correction') return 'Коррекция';
   if (sourceType === 'manual') return 'Ручная';
   if (orderId) return `Заказ ${orderId}`;
   return '';
@@ -2459,6 +2481,7 @@ function getCashEntryTagLabels(entry, options = {}) {
   const sourceLabel = getCashEntrySourceLabel(entry);
   const expenseCategory = String(entry?.expense_category || '').trim();
   const warehouseName = String(entry?.warehouse_name || '').trim();
+  const ledgerStatus = String(entry?.ledger_status || '').trim().toLowerCase();
 
   if (includeOwner && owner) {
     tags.push(`Касса: ${getWorkerDisplayName(owner) || owner}`);
@@ -2469,6 +2492,8 @@ function getCashEntryTagLabels(entry, options = {}) {
 
   if (paymentMethod) tags.push(paymentMethod);
   if (includeSource && sourceLabel) tags.push(sourceLabel);
+  if (ledgerStatus === 'corrected') tags.push('Исправлено');
+  if (ledgerStatus === 'reversed') tags.push('Отменено');
   if (expenseCategory) tags.push(expenseCategory);
   if (warehouseName && expenseCategory !== 'Заправка') tags.push(`Склад ${warehouseName}`);
 
