@@ -703,11 +703,11 @@ function renderOrderCardLayout(order, context = {}) {
 function orderHasDebtTabFinancialMeaning(order) {
   if (!order || order.isCancelled || isOrderDeleted(order)) return false;
   if (!order.workerDone) return false;
-  const hasDebt = ['Не оплачено', 'Частично'].includes(getEffectivePaymentStatus(order));
-  if (!hasDebt) return false;
-  if (order.onlySale) return true;
-  const hasGlass = (Number(order?.income) || 0) > 0 || (Number(order?.purchase) || 0) > 0;
-  return hasGlass;
+  const total = typeof getOrderClientTotalAmount === 'function'
+    ? getOrderClientTotalAmount(order)
+    : getOrderClientTotal(order);
+  const paid = getOrderClientPaidAmount(order);
+  return total > 0 && Math.max(0, total - paid) > 0;
 }
 
 function renderManagerOrderCardMeta(order) {
