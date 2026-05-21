@@ -1559,7 +1559,9 @@ async function saveCashEntry() {
           return;
         }
       } else {
-        const currentCashBalance = calcCashBalance((workerCashLog || []).filter(item => !isFopCashEntry(item)));
+        const currentCashBalance = calcCashBalance((workerCashLog || [])
+          .filter(item => !isFopCashEntry(item))
+          .filter(item => !isPendingPersonalConfirmableCashEntry(item)));
         if (uahAmount > currentCashBalance) {
           showToast('Недостаточно гривны в кассе', 'error');
           return;
