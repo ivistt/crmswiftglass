@@ -2588,6 +2588,9 @@ function buildOrderPaymentCashEntryPayload({ order, payment, paymentType = 'clie
   if (!amount || !method) return null;
 
   let routeFallbackWorkerName = fallbackWorkerName || order?.responsible || '';
+  if (isCashPaymentMethod(method) && payment?.cashWorker) {
+    routeFallbackWorkerName = String(payment.cashWorker || '').trim() || routeFallbackWorkerName;
+  }
   if (paymentType === 'dropshipper' && isCashPaymentMethod(method)) {
     const dropshipperWorker = getDropshipperCashWorkerRecord(order?.dropshipper);
     routeFallbackWorkerName = dropshipperWorker?.name || routeFallbackWorkerName;

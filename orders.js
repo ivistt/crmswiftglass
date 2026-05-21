@@ -2230,6 +2230,7 @@ function populateRefSelects() {
     supplierMethodSel.innerHTML = paymentOptionsHtml;
     if (cur) supplierMethodSel.value = cur;
   }
+  updateQuickCashWorkerSelectors();
 
   // Услуги — чекбоксы
   const svcBox = document.getElementById('service-type-checkboxes');
@@ -2331,7 +2332,10 @@ function populateRefSelects() {
   if (respSel) {
     refreshResponsibleOptions();
     // При смене ответственного — подставляем помощника
-    respSel.onchange = () => applyAssistantForResponsible(respSel.value);
+    respSel.onchange = () => {
+      applyAssistantForResponsible(respSel.value);
+      updateQuickCashWorkerSelectors();
+    };
   }
 
   const managerSel = document.getElementById('f-manager');
@@ -2388,6 +2392,55 @@ function populateOrderWorkerFilter() {
   sel.innerHTML = '<option value="">Все сотрудники</option>' +
     (workers || []).map(w => `<option value="${escapeAttr(w.name)}">${escapeHtml(getWorkerDisplayName(w.name))}</option>`).join('');
   if (cur) sel.value = cur;
+}
+
+function getQuickCashWorkerOptionsHtml(selected = '') {
+  return (workers || [])
+    .filter(worker => {
+      const role = String(worker?.systemRole || worker?.system_role || '').trim();
+      const permissions = typeof resolveWorkerPermissionState === 'function'
+        ? resolveWorkerPermissionState(worker)
+        : (worker?.permissions || {});
+      return ['owner', 'manager', 'senior', 'extra'].includes(role)
+        || permissions.personal_cash_view === true
+        || permissions.cash_add_entries === true;
+    })
+    .map(worker => {
+      const name = String(worker?.name || '').trim();
+      if (!name) return '';
+      const label = getWorkerDisplayName(name) || name;
+      return `<option value="${escapeAttr(name)}" ${name === selected ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+    })
+    .filter(Boolean)
+    .join('');
+}
+
+function updateQuickCashWorkerSelectors() {
+  const controls = [
+    {
+      methodEl: document.getElementById('f-payment-method'),
+      groupEl: document.getElementById('f-new-payment-cash-worker-group'),
+      selectEl: document.getElementById('f-new-payment-cash-worker'),
+    },
+    {
+      methodEl: document.getElementById('f-new-supplier-payment-method'),
+      groupEl: document.getElementById('f-new-supplier-cash-worker-group'),
+      selectEl: document.getElementById('f-new-supplier-cash-worker'),
+    },
+  ];
+  const fallbackWorker = String(document.getElementById('f-responsible')?.value || currentWorkerName || '').trim();
+  controls.forEach(({ methodEl, groupEl, selectEl }) => {
+    if (!groupEl || !selectEl) return;
+    const show = currentRole === 'owner' && isCashPaymentMethod(normalizePaymentMethod(methodEl?.value || ''));
+    groupEl.style.display = show ? '' : 'none';
+    if (!show) {
+      selectEl.value = '';
+      return;
+    }
+    const selected = selectEl.value || fallbackWorker;
+    selectEl.innerHTML = '<option value="">— выбрать —</option>' + getQuickCashWorkerOptionsHtml(selected);
+    if (selected) selectEl.value = selected;
+  });
 }
 
 let currentClientPayments = [];
@@ -2513,16 +2566,21 @@ async function addClientPayment() {
   const amtEl = document.getElementById('f-new-payment-amount');
   const dateEl = document.getElementById('f-new-payment-date');
   const methodEl = document.getElementById('f-payment-method');
+  const cashWorkerEl = document.getElementById('f-new-payment-cash-worker');
   const addBtn = document.getElementById('add-client-payment-btn');
   const amount = Number(amtEl.value);
   if (!amount || amount <= 0) return showToast('Введите сумму оплаты', 'error');
   const date = dateEl.value || todayStr();
   const method = normalizePaymentMethod(methodEl?.value || '');
   if (!method) return showToast('Выберите способ оплаты', 'error');
+  const cashWorker = currentRole === 'owner' && isCashPaymentMethod(method)
+    ? String(cashWorkerEl?.value || '').trim()
+    : '';
+  if (currentRole === 'owner' && isCashPaymentMethod(method) && !cashWorker) return showToast('Выберите кассу', 'error');
 
   const nextClientPayments = [
     ...JSON.parse(JSON.stringify(currentClientPayments || [])),
-    { amount, date, method, timestamp: new Date().toISOString() },
+    { amount, date, method, cashWorker: cashWorker || undefined, timestamp: new Date().toISOString() },
   ];
   if (addBtn) addBtn.disabled = true;
   try {
@@ -2548,16 +2606,21 @@ async function addSupplierPayment() {
   const amtEl = document.getElementById('f-new-supplier-payment-amount');
   const dateEl = document.getElementById('f-new-supplier-payment-date');
   const methodEl = document.getElementById('f-new-supplier-payment-method');
+  const cashWorkerEl = document.getElementById('f-new-supplier-cash-worker');
   const addBtn = document.getElementById('add-supplier-payment-btn');
   const amount = Number(amtEl.value);
   if (!amount || amount <= 0) return showToast('Введите сумму поставщику', 'error');
   const date = dateEl.value || todayStr();
   const method = normalizePaymentMethod(methodEl?.value || '');
   if (!method) return showToast('Выберите способ оплаты', 'error');
+  const cashWorker = currentRole === 'owner' && isCashPaymentMethod(method)
+    ? String(cashWorkerEl?.value || '').trim()
+    : '';
+  if (currentRole === 'owner' && isCashPaymentMethod(method) && !cashWorker) return showToast('Выберите кассу', 'error');
 
   const nextSupplierPayments = [
     ...JSON.parse(JSON.stringify(currentSupplierPayments || [])),
-    { amount, date, method, timestamp: new Date().toISOString() },
+    { amount, date, method, cashWorker: cashWorker || undefined, timestamp: new Date().toISOString() },
   ];
   if (addBtn) addBtn.disabled = true;
   try {

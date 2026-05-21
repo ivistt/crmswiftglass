@@ -962,9 +962,13 @@
                 </div>
                 <div style="min-width:0;">
                   <label class="form-label" style="font-size:11px;">Способ оплаты</label>
-                  <select class="form-select" id="f-new-supplier-payment-method">
+                  <select class="form-select" id="f-new-supplier-payment-method" onchange="updateQuickCashWorkerSelectors()">
                     <option value="">— выбрать —</option>
                   </select>
+                </div>
+                <div id="f-new-supplier-cash-worker-group" style="min-width:0;display:none;">
+                  <label class="form-label" style="font-size:11px;">Касса</label>
+                  <select class="form-select" id="f-new-supplier-cash-worker"></select>
                 </div>
                 <div style="display:flex;align-items:end;min-width:0;">
                   <button type="button" class="btn-secondary" id="add-supplier-payment-btn" style="width:100%;height:44px;padding:0 16px;font-weight:800;" onclick="addSupplierPayment()">Добавить</button>
@@ -1013,9 +1017,13 @@
                 </div>
                 <div style="min-width:0;">
                   <label class="form-label" style="font-size:11px;">Способ оплаты</label>
-                  <select class="form-select" id="f-payment-method">
+                  <select class="form-select" id="f-payment-method" onchange="updateQuickCashWorkerSelectors()">
                     <option value="">— выбрать —</option>
                   </select>
+                </div>
+                <div id="f-new-payment-cash-worker-group" style="min-width:0;display:none;">
+                  <label class="form-label" style="font-size:11px;">Касса</label>
+                  <select class="form-select" id="f-new-payment-cash-worker"></select>
                 </div>
                 <div style="display:flex;align-items:end;min-width:0;">
                   <button type="button" class="btn-secondary" id="add-client-payment-btn" style="width:100%;height:44px;padding:0 16px;font-weight:800;" onclick="addClientPayment()">Добавить</button>
