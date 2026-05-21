@@ -2706,6 +2706,28 @@ function updateQuickCashWorkerSelectors() {
 let currentClientPayments = [];
 let currentSupplierPayments = [];
 
+function getOrderPaymentCashRecipient(order, payment, paymentType = 'client') {
+  const method = normalizePaymentMethod(payment?.method || '');
+  if (!method) return '';
+  let fallbackWorker = String(payment?.cashWorker || order?.responsible || currentWorkerName || '').trim();
+  if (paymentType === 'dropshipper' && isCashPaymentMethod(method) && typeof getDropshipperCashWorkerRecord === 'function') {
+    const dropshipperWorker = getDropshipperCashWorkerRecord(order?.dropshipper);
+    fallbackWorker = String(dropshipperWorker?.name || fallbackWorker || '').trim();
+  }
+  if (typeof getPaymentCashRoute === 'function') {
+    const route = getPaymentCashRoute(method, fallbackWorker);
+    return String(route?.workerName || fallbackWorker || '').trim();
+  }
+  return fallbackWorker;
+}
+
+function renderOrderPaymentRecipientLine(payment, paymentType = 'client') {
+  const order = editingOrderId ? (orders.find(item => item.id === editingOrderId) || { id: editingOrderId }) : null;
+  const recipient = getOrderPaymentCashRecipient(order, payment, paymentType);
+  if (!recipient) return '';
+  return `<div style="font-size:11px;color:var(--text3);margin-top:2px;">Касса: ${escapeHtml(getWorkerDisplayName(recipient) || recipient)}</div>`;
+}
+
 function resetOrdersFilters() {
   ordersFiltersOpen = true;
   orderDateFilterExact = '';
@@ -2745,6 +2767,7 @@ function renderClientPayments() {
         <div style="font-size:13px;font-weight:700;color:var(--text2);">${Number(p.amount).toLocaleString('ru')} ₴</div>
         <div style="font-size:11px;color:var(--text3);">${formatDate(p.date)}</div>
         ${p.method ? `<div style="font-size:11px;color:var(--text3);margin-top:2px;">${escapeHtml(normalizePaymentMethod(p.method))}</div>` : ''}
+        ${renderOrderPaymentRecipientLine(p, 'client')}
       </div>
       ${canManagePayments && canRemovePayments ? `
         <button type="button" class="icon-btn" style="width:20px;height:20px;" onclick="removeClientPayment(${idx})">
@@ -2771,6 +2794,7 @@ function renderSupplierPayments() {
         <div style="font-size:13px;font-weight:700;color:var(--text2);">${Number(p.amount).toLocaleString('ru')} ₴</div>
         <div style="font-size:11px;color:var(--text3);">${formatDate(p.date)}</div>
         ${p.method ? `<div style="font-size:11px;color:var(--text3);margin-top:2px;">${escapeHtml(normalizePaymentMethod(p.method))}</div>` : ''}
+        ${renderOrderPaymentRecipientLine(p, 'supplier')}
       </div>
       ${canManagePayments && canRemovePayments ? `
         <button type="button" class="icon-btn" style="width:20px;height:20px;" onclick="removeSupplierPayment(${idx})">
