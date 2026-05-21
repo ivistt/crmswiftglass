@@ -1900,25 +1900,6 @@ function getRemovedOrderPaymentsDelta(oldPayments = [], newPayments = []) {
   return removed;
 }
 
-function getRemovedOrderPaymentsDelta(oldPayments = [], newPayments = []) {
-  const seen = new Map();
-  (newPayments || []).forEach(payment => {
-    const key = getOrderPaymentSignature(payment);
-    seen.set(key, (seen.get(key) || 0) + 1);
-  });
-  const removed = [];
-  (oldPayments || []).forEach(payment => {
-    const key = getOrderPaymentSignature(payment);
-    const left = seen.get(key) || 0;
-    if (left > 0) {
-      seen.set(key, left - 1);
-      return;
-    }
-    removed.push(payment);
-  });
-  return removed;
-}
-
 function getCurrentCashWorkerNameForOrder(order = null) {
   const currentWorkerRecord = (workers || []).find(worker =>
     worker && (worker.name === currentWorkerName || worker.alias === currentWorkerName)
