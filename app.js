@@ -1249,6 +1249,10 @@ function getOwnerCashLogs(confirmFilter = ownerCashConfirmFilter) {
     .filter(entry => entry?.manual_payment !== true)
     .filter(entry => workerDescriptors.some(item => item.matches(entry)))
     .filter(entry => {
+      if (!isCurrencyCashEntry(entry)) return true;
+      return isCurrencyCashTransferEntry(entry);
+    })
+    .filter(entry => {
       const account = getCashEntryAccountType(entry);
       return !!account && account !== 'currency';
     })
