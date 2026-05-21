@@ -12,6 +12,30 @@ let orderDateFilterExact = '';
 let orderDateFilterFrom = '';
 let orderDateFilterTo = '';
 const deletingOrderIds = new Set();
+window.__financeAuditDevEnabled = window.__financeAuditDevEnabled === true;
+
+function isFinanceAuditDevEnabled() {
+  return window.__financeAuditDevEnabled === true;
+}
+
+function enableFinanceAuditDevMode() {
+  window.__financeAuditDevEnabled = true;
+  console.info('[finance] dev mode enabled: финансовый путь заказа включен');
+  if (currentOrderDetailId) openOrderDetail(currentOrderDetailId);
+  return 'finance dev enabled';
+}
+
+try {
+  Object.defineProperty(window, 'dev', {
+    configurable: true,
+    get() {
+      return enableFinanceAuditDevMode();
+    },
+  });
+} catch (e) {
+  console.warn('[finance] Не удалось установить dev shortcut', e);
+}
+
 const DEFAULT_SERVICE_TYPE_OPTIONS = [
   { group: 'Монтаж', name: 'Монтаж лобового', rate: 400, salaryCategory: 'mount' },
   { group: 'Монтаж', name: 'Монтаж бокового', rate: 300, salaryCategory: 'mount' },
@@ -488,7 +512,7 @@ async function confirmSeniorOrderAmounts(orderId) {
   }
 
   try {
-    const saved = (await sbSaveOrderWithCash({
+    const saveResult = await sbSaveOrderWithCash({
           ...updatedOrder,
           clientPayments: nextClientPayments,
           supplierPayments: nextSupplierPayments,
@@ -498,7 +522,9 @@ async function confirmSeniorOrderAmounts(orderId) {
           isNew: false,
           cashEntries: [],
           rollbackOrder: order,
-        })).order;
+        });
+    logFinanceDebug('quick amounts save', saveResult);
+    const saved = saveResult.order;
     if (checkEl) checkEl.value = '';
     if (debtEl) debtEl.value = '';
     await refreshCashStateAfterServerSave();
@@ -1389,6 +1415,226 @@ function renderOrderPaymentsForDetail(payments, emptyLabel) {
     + '</div>';
 }
 
+function getOrderFinanceCashEntries(order) {
+  const orderId = String(order?.id || '').trim();
+  if (!orderId) return [];
+  const logs = [
+    ...(Array.isArray(window.allCashLog) ? window.allCashLog : []),
+    ...(Array.isArray(window.workerCashLog) ? window.workerCashLog : []),
+  ];
+  const seen = new Set();
+  return logs.filter(entry => {
+    const id = String(entry?.id || '');
+    if (id && seen.has(id)) return false;
+    const source = String(entry?.source_key || entry?.fop_source_key || entry?.source_id || '');
+    const comment = String(entry?.comment || '');
+    const matches = String(entry?.order_id || '') === orderId
+      || source.startsWith(`order:${orderId}`)
+      || comment.includes(orderId);
+    if (matches && id) seen.add(id);
+    return matches;
+  });
+}
+
+function isActiveFinanceLedgerEntry(entry) {
+  if (!entry || String(entry.deleted_at || '').trim()) return false;
+  const status = String(entry.ledger_status || 'posted').trim().toLowerCase();
+  return status !== 'voided' && status !== 'reversed';
+}
+
+function ensureUniqueOrderFinanceSourceKeys(rows = []) {
+  const seen = new Map();
+  return (rows || []).map(row => {
+    const baseKey = String(row?.sourceKey || '').trim();
+    if (!baseKey) return row;
+    const nextCount = (seen.get(baseKey) || 0) + 1;
+    seen.set(baseKey, nextCount);
+    if (nextCount === 1) return row;
+    return {
+      ...row,
+      sourceKey: `${baseKey}|seq:${nextCount}`,
+      reason: `${row.reason}, дубль ${nextCount}`,
+    };
+  });
+}
+
+function getExpectedOrderFinanceRows(order) {
+  const rows = [];
+  const addRows = (payments, paymentType) => {
+    (payments || []).forEach(payment => {
+      if (payment?.adjustment === true) return;
+      const method = normalizePaymentMethod(payment?.method || '');
+      const amount = Number(payment?.amount) || 0;
+      if (!method || !amount) return;
+      const signedAmount = paymentType === 'supplier' || paymentType === 'dropshipper' ? -amount : amount;
+      const sourceKey = buildPaymentSourceKey(order?.id || '', method, paymentType, payment);
+      let fallbackWorker = currentRole === 'owner'
+        ? (payment?.cashWorker || order?.responsible || currentWorkerName || '')
+        : (currentWorkerName || order?.responsible || '');
+      if (paymentType === 'dropshipper' && isCashPaymentMethod(method) && typeof getDropshipperCashWorkerRecord === 'function') {
+        const dropshipperWorker = getDropshipperCashWorkerRecord(order?.dropshipper);
+        fallbackWorker = dropshipperWorker?.name || fallbackWorker;
+      }
+      const route = typeof getPaymentCashRoute === 'function'
+        ? getPaymentCashRoute(method, fallbackWorker)
+        : { workerName: fallbackWorker, cashAccount: 'cash', requiresConfirmation: !isCashPaymentMethod(method) };
+      rows.push({
+        paymentType,
+        label: paymentType === 'supplier' ? 'Поставщик' : (paymentType === 'dropshipper' ? 'Дропшиппер' : 'Клиент'),
+        method,
+        amount: signedAmount,
+        date: payment?.date || order?.date || '',
+        sourceKey,
+        cashOwner: route.workerName || fallbackWorker || '',
+        account: route.cashAccount || 'cash',
+        requiresConfirmation: route.requiresConfirmation === true,
+        reason: isCashPaymentMethod(method) && payment?.cashWorker
+          ? 'кассу выбрал владелец'
+          : (paymentType === 'dropshipper' && isCashPaymentMethod(method) ? 'касса дропшиппера' : 'маршрут способа оплаты'),
+      });
+    });
+  };
+  addRows(order?.clientPayments || [], 'client');
+  addRows(order?.supplierPayments || [], 'supplier');
+  addRows(order?.dropshipperPayments || [], 'dropshipper');
+  return ensureUniqueOrderFinanceSourceKeys(rows);
+}
+
+function renderOrderFinanceAudit(order) {
+  if (!isFinanceAuditDevEnabled()) return '';
+  const hasLoadedCashLog = (Array.isArray(window.allCashLog) && window.allCashLog.length > 0) || window.__orderFinanceAuditCashLoaded === true;
+  if (!hasLoadedCashLog) {
+    return `
+      <div class="detail-section" id="order-finance-audit">
+        <div class="detail-section-title">${icon('receipt')} Финансовый путь</div>
+        <div class="finance-audit-empty">Загружаю кассовые записи по заказу</div>
+      </div>
+    `;
+  }
+  const entries = getOrderFinanceCashEntries(order);
+  const expected = getExpectedOrderFinanceRows(order);
+  const activeBySource = new Map();
+  entries.filter(isActiveFinanceLedgerEntry).forEach(entry => {
+    const key = String(entry?.source_key || entry?.fop_source_key || entry?.source_id || '').trim();
+    if (!key) return;
+    const list = activeBySource.get(key) || [];
+    list.push(entry);
+    activeBySource.set(key, list);
+  });
+
+  const issues = [];
+  expected.forEach(row => {
+    const matches = activeBySource.get(row.sourceKey) || [];
+    if (!matches.length) issues.push(`Нет кассовой записи: ${row.label} ${row.amount.toLocaleString('ru')} ₴`);
+    if (matches.length > 1) issues.push(`Дубль source_key: ${row.sourceKey}`);
+    matches.forEach(entry => {
+      const actualAmount = Number(entry.amount) || 0;
+      const actualOwner = getCashEntryOwner(entry);
+      if (actualAmount !== row.amount) issues.push(`Сумма не совпадает: ${row.sourceKey}`);
+      if (row.cashOwner && actualOwner && actualOwner !== row.cashOwner) issues.push(`Касса не совпадает: ${row.sourceKey}`);
+    });
+  });
+
+  const duplicateActual = new Map();
+  entries.filter(isActiveFinanceLedgerEntry).forEach(entry => {
+    const key = String(entry?.source_key || entry?.fop_source_key || '').trim();
+    if (!key) return;
+    duplicateActual.set(key, (duplicateActual.get(key) || 0) + 1);
+  });
+  duplicateActual.forEach((count, key) => {
+    if (count > 1 && !issues.some(text => text.includes(key))) issues.push(`Активный дубль: ${key}`);
+  });
+
+  if (issues.length && typeof console !== 'undefined') {
+    const orderId = String(order?.id || '').trim();
+    window.__orderFinanceAuditIssueCache = window.__orderFinanceAuditIssueCache || {};
+    const signature = issues.join('|');
+    if (window.__orderFinanceAuditIssueCache[orderId] !== signature) {
+      window.__orderFinanceAuditIssueCache[orderId] = signature;
+      console.warn('[finance][order-detail]', {
+        orderId,
+        issues,
+        expected,
+        cashEntries: entries,
+      });
+    }
+  }
+
+  const expectedHtml = expected.length
+    ? expected.map(row => {
+        const matches = activeBySource.get(row.sourceKey) || [];
+        const status = matches.length === 1 ? 'ok' : (matches.length > 1 ? 'warn' : 'bad');
+        const statusText = matches.length === 1 ? 'найдено' : (matches.length > 1 ? `${matches.length} дубля` : 'нет записи');
+        return `
+          <div class="finance-audit-row ${status}">
+            <div>
+              <div class="finance-audit-title">${escapeHtml(row.label)} · ${escapeHtml(row.method)} · ${row.amount.toLocaleString('ru')} ₴</div>
+              <div class="finance-audit-meta">Касса: ${escapeHtml(getWorkerDisplayName(row.cashOwner) || row.cashOwner || '—')} · ${escapeHtml(row.reason)} · ${formatDate(row.date)}</div>
+              <div class="finance-audit-key">${escapeHtml(row.sourceKey)}</div>
+            </div>
+            <div class="finance-audit-status">${statusText}</div>
+          </div>
+        `;
+      }).join('')
+    : '<div class="finance-audit-empty">Быстрых оплат в заказе нет</div>';
+
+  const actualHtml = entries.length
+    ? entries
+        .slice()
+        .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
+        .map(entry => {
+          const status = String(entry.ledger_status || 'posted');
+          const amount = Number(entry.amount) || 0;
+          const source = String(entry.source_key || entry.fop_source_key || entry.source_id || '').trim();
+          return `
+            <div class="finance-audit-entry">
+              <div>
+                <div class="finance-audit-title">${amount >= 0 ? '+' : ''}${amount.toLocaleString('ru')} ₴ · ${escapeHtml(getWorkerDisplayName(getCashEntryOwner(entry)) || getCashEntryOwner(entry) || '—')}</div>
+                <div class="finance-audit-meta">${escapeHtml(getCashEntrySourceLabel(entry) || entry.source_type || 'Запись')} · ${escapeHtml(status)} · ${escapeHtml(getCashEntryApprovalStatus(entry))}</div>
+                <div class="finance-audit-key">${escapeHtml(source || 'без source_key')}</div>
+              </div>
+            </div>
+          `;
+        }).join('')
+    : '<div class="finance-audit-empty">Кассовых записей по заказу пока не найдено</div>';
+
+  return `
+    <div class="detail-section" id="order-finance-audit">
+      <div class="detail-section-title">${icon('receipt')} Финансовый путь</div>
+      ${issues.length ? `
+        <div class="finance-audit-warning">
+          ${issues.map(issue => `<div>${escapeHtml(issue)}</div>`).join('')}
+        </div>
+      ` : '<div class="finance-audit-ok">Проблем по быстрым оплатам не видно</div>'}
+      <div class="finance-audit-grid">
+        <div>
+          <div class="finance-audit-heading">Ожидаемый путь</div>
+          ${expectedHtml}
+        </div>
+        <div>
+          <div class="finance-audit-heading">Фактические записи кассы</div>
+          ${actualHtml}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function ensureOrderFinanceAuditLoaded(orderId) {
+  if (!isFinanceAuditDevEnabled() || currentRole !== 'owner') return;
+  if (Array.isArray(window.allCashLog) && window.allCashLog.length) {
+    window.__orderFinanceAuditCashLoaded = true;
+    return;
+  }
+  try {
+    window.allCashLog = await sbFetchAllCashLog();
+    window.__orderFinanceAuditCashLoaded = true;
+    if (currentOrderDetailId === orderId) openOrderDetail(orderId);
+  } catch (e) {
+    console.warn('[finance] Не удалось загрузить кассу для финансового пути заказа', e);
+  }
+}
+
 // ---------- ДЕТАЛЬНЫЙ ЭКРАН ЗАКАЗА ----------
 function openOrderDetail(id) {
   const o = orders.find(x => x.id === id);
@@ -1557,10 +1803,12 @@ function openOrderDetail(id) {
         </div>
       </div>
     </div>
+    ${renderOrderFinanceAudit(o)}
     `}
   `;
 
   showScreen('order-detail');
+  ensureOrderFinanceAuditLoaded(o.id);
 }
 
 // ---------- УДАЛЕНИЕ ----------
@@ -2415,6 +2663,18 @@ function getQuickCashWorkerOptionsHtml(selected = '') {
     .join('');
 }
 
+function logFinanceDebug(context, result) {
+  const rows = Array.isArray(result?.financeDebug) ? result.financeDebug : [];
+  if (!rows.length || typeof console === 'undefined') return;
+  const orderId = result?.order?.id || editingOrderId || '';
+  console.groupCollapsed(`[finance] ${context}${orderId ? ` · ${orderId}` : ''}`);
+  rows.forEach(row => {
+    const level = ['duplicate-voided', 'entry-voided', 'payment-skipped'].includes(row?.type) ? 'warn' : 'log';
+    (console[level] || console.log)(row);
+  });
+  console.groupEnd();
+}
+
 function updateQuickCashWorkerSelectors() {
   const controls = [
     {
@@ -2714,11 +2974,13 @@ async function persistImmediateOrderPaymentsUpdate({
     check: confirmedSupplierPaid,
   };
 
-  const saved = (await sbSaveOrderWithCash(paymentPatchOrder, {
+  const saveResult = await sbSaveOrderWithCash(paymentPatchOrder, {
     isNew: false,
     cashEntries: [],
     rollbackOrder: existingOrder,
-  })).order;
+  });
+  logFinanceDebug('immediate payment save', saveResult);
+  const saved = saveResult.order;
   const refreshedOrder = await refreshImmediatePaymentState(editingOrderId, {
     refreshCash: true,
   });
@@ -4026,6 +4288,7 @@ async function saveOrder() {
             rollbackOrder: existingOrder,
           });
     const saved = result.order;
+    logFinanceDebug(isNew ? 'order create' : 'order save', result);
 
     await rememberCarDirectoryFromOrder(saved);
     try {

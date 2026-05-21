@@ -557,6 +557,7 @@ async function sbSaveOrderWithCash(o, { isNew = false, cashEntries = [], rollbac
   return {
     order: body?.order ? rowToOrder(body.order) : o,
     cashEntries: Array.isArray(body?.cash_entries) ? body.cash_entries : [],
+    financeDebug: Array.isArray(body?.finance_debug) ? body.finance_debug : [],
   };
 }
 
