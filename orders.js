@@ -474,12 +474,14 @@ async function confirmSeniorOrderAmounts(orderId) {
   const nextClientPayments = Array.isArray(order.clientPayments)
     ? JSON.parse(JSON.stringify(order.clientPayments))
     : [];
+  const quickCashWorker = String(order.responsible || currentWorkerName || '').trim();
 
   if (newSupplierPaymentAmount > 0) {
     nextSupplierPayments.push({
       amount: newSupplierPaymentAmount,
       date: todayStr(),
       method: quickPaymentMethod,
+      cashWorker: quickCashWorker || undefined,
       timestamp: new Date().toISOString(),
     });
   }
@@ -489,6 +491,7 @@ async function confirmSeniorOrderAmounts(orderId) {
       amount: newClientPaymentAmount,
       date: todayStr(),
       method: quickPaymentMethod,
+      cashWorker: quickCashWorker || undefined,
       timestamp: new Date().toISOString(),
     });
   }
@@ -2709,7 +2712,9 @@ let currentSupplierPayments = [];
 function getOrderPaymentCashRecipient(order, payment, paymentType = 'client') {
   const method = normalizePaymentMethod(payment?.method || '');
   if (!method) return '';
-  let fallbackWorker = String(payment?.cashWorker || order?.responsible || currentWorkerName || '').trim();
+  const savedCashWorker = String(payment?.cashWorker || '').trim();
+  if (savedCashWorker) return savedCashWorker;
+  let fallbackWorker = String(order?.responsible || currentWorkerName || '').trim();
   if (paymentType === 'dropshipper' && isCashPaymentMethod(method) && typeof getDropshipperCashWorkerRecord === 'function') {
     const dropshipperWorker = getDropshipperCashWorkerRecord(order?.dropshipper);
     fallbackWorker = String(dropshipperWorker?.name || fallbackWorker || '').trim();
@@ -2861,10 +2866,13 @@ async function addClientPayment() {
     ? String(cashWorkerEl?.value || '').trim()
     : '';
   if (currentRole === 'owner' && isCashPaymentMethod(method) && !cashWorker) return showToast('Выберите кассу', 'error');
+  const resolvedCashWorker = isCashPaymentMethod(method)
+    ? (cashWorker || String(getOrderDraftFromForm(orders.find(item => item.id === editingOrderId) || null)?.responsible || currentWorkerName || '').trim())
+    : '';
 
   const nextClientPayments = [
     ...JSON.parse(JSON.stringify(currentClientPayments || [])),
-    { amount, date, method, cashWorker: cashWorker || undefined, timestamp: new Date().toISOString() },
+    { amount, date, method, cashWorker: resolvedCashWorker || undefined, timestamp: new Date().toISOString() },
   ];
   if (addBtn) addBtn.disabled = true;
   try {
@@ -2901,10 +2909,13 @@ async function addSupplierPayment() {
     ? String(cashWorkerEl?.value || '').trim()
     : '';
   if (currentRole === 'owner' && isCashPaymentMethod(method) && !cashWorker) return showToast('Выберите кассу', 'error');
+  const resolvedCashWorker = isCashPaymentMethod(method)
+    ? (cashWorker || String(getOrderDraftFromForm(orders.find(item => item.id === editingOrderId) || null)?.responsible || currentWorkerName || '').trim())
+    : '';
 
   const nextSupplierPayments = [
     ...JSON.parse(JSON.stringify(currentSupplierPayments || [])),
-    { amount, date, method, cashWorker: cashWorker || undefined, timestamp: new Date().toISOString() },
+    { amount, date, method, cashWorker: resolvedCashWorker || undefined, timestamp: new Date().toISOString() },
   ];
   if (addBtn) addBtn.disabled = true;
   try {
