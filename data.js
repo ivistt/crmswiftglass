@@ -2420,6 +2420,10 @@ function getPaymentMethodFromSourceKey(sourceKey) {
   }
 }
 
+function getCashEntrySourceKey(entry) {
+  return String(entry?.source_key || entry?.fop_source_key || entry?.source_id || '').trim();
+}
+
 function getCashEntryAccountType(entry) {
   return String(entry?.account_type || entry?.cash_account || 'cash').trim().toLowerCase();
 }
@@ -2428,7 +2432,7 @@ function getCashEntryPaymentMethod(entry) {
   return normalizePaymentMethod(
     entry?.payment_method
     || entry?.manual_payment_method
-    || getPaymentMethodFromSourceKey(entry?.fop_source_key)
+    || getPaymentMethodFromSourceKey(getCashEntrySourceKey(entry))
     || ''
   );
 }
@@ -2524,7 +2528,7 @@ function isOrderPaymentConfirmed(order, payment, paymentType = 'client') {
   if (!isConfirmablePaymentMethod(method)) return true;
   const sourceKey = buildPaymentSourceKey(order?.id || '', method, paymentType, payment);
   return Array.isArray(window.allCashLog) && window.allCashLog.some(entry =>
-    String(entry?.fop_source_key || '') === sourceKey && entry?.fop_confirmed === true
+    getCashEntrySourceKey(entry) === sourceKey && entry?.fop_confirmed === true
   );
 }
 
@@ -2533,7 +2537,7 @@ function getOrderPaymentCashEntry(order, payment, paymentType = 'client') {
   if (!method || !isConfirmablePaymentMethod(method)) return null;
   const sourceKey = buildPaymentSourceKey(order?.id || '', method, paymentType, payment);
   return Array.isArray(window.allCashLog)
-    ? (window.allCashLog.find(entry => String(entry?.fop_source_key || '') === sourceKey) || null)
+    ? (window.allCashLog.find(entry => getCashEntrySourceKey(entry) === sourceKey) || null)
     : null;
 }
 

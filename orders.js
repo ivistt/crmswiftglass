@@ -1429,7 +1429,9 @@ function getOrderFinanceCashEntries(order) {
   return logs.filter(entry => {
     const id = String(entry?.id || '');
     if (id && seen.has(id)) return false;
-    const source = String(entry?.source_key || entry?.fop_source_key || entry?.source_id || '');
+    const source = typeof getCashEntrySourceKey === 'function'
+      ? getCashEntrySourceKey(entry)
+      : String(entry?.source_key || entry?.fop_source_key || entry?.source_id || '');
     const comment = String(entry?.comment || '');
     const matches = String(entry?.order_id || '') === orderId
       || source.startsWith(`order:${orderId}`)
@@ -1516,7 +1518,9 @@ function renderOrderFinanceAudit(order) {
   const expected = getExpectedOrderFinanceRows(order);
   const activeBySource = new Map();
   entries.filter(isActiveFinanceLedgerEntry).forEach(entry => {
-    const key = String(entry?.source_key || entry?.fop_source_key || entry?.source_id || '').trim();
+    const key = typeof getCashEntrySourceKey === 'function'
+      ? getCashEntrySourceKey(entry)
+      : String(entry?.source_key || entry?.fop_source_key || entry?.source_id || '').trim();
     if (!key) return;
     const list = activeBySource.get(key) || [];
     list.push(entry);
@@ -1538,7 +1542,9 @@ function renderOrderFinanceAudit(order) {
 
   const duplicateActual = new Map();
   entries.filter(isActiveFinanceLedgerEntry).forEach(entry => {
-    const key = String(entry?.source_key || entry?.fop_source_key || '').trim();
+    const key = typeof getCashEntrySourceKey === 'function'
+      ? getCashEntrySourceKey(entry)
+      : String(entry?.source_key || entry?.fop_source_key || '').trim();
     if (!key) return;
     duplicateActual.set(key, (duplicateActual.get(key) || 0) + 1);
   });
@@ -1586,7 +1592,9 @@ function renderOrderFinanceAudit(order) {
         .map(entry => {
           const status = String(entry.ledger_status || 'posted');
           const amount = Number(entry.amount) || 0;
-          const source = String(entry.source_key || entry.fop_source_key || entry.source_id || '').trim();
+          const source = typeof getCashEntrySourceKey === 'function'
+            ? getCashEntrySourceKey(entry)
+            : String(entry.source_key || entry.fop_source_key || entry.source_id || '').trim();
           return `
             <div class="finance-audit-entry">
               <div>
