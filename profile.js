@@ -888,7 +888,7 @@ function renderCashSection(log, balance, today, options = {}) {
     + '</div>'
 
     + '<div style="margin-bottom:14px;">'
-    + '<input class="form-input" type="text" placeholder="Поиск по комментарию..." value="' + escapeHtml(cashSearchQuery) + '" oninput="setCashSearchQuery(this.value)">'
+    + '<input class="form-input" type="text" placeholder="Поиск по комментарию или сумме..." value="' + escapeHtml(cashSearchQuery) + '" onkeydown="if(event.key === \'Enter\') setCashSearchQuery(this.value)">'
     + '</div>'
 
     + (pendingEntries.length ? renderFopPendingEntries(pendingEntries, options) : '')

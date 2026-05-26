@@ -3548,7 +3548,7 @@ function renderOwnerCashScreen() {
       </div>
       <div style="padding:12px 16px 0;">${filtersHtml}</div>
       <div style="padding:12px 16px 0;">
-        <input class="form-input" type="text" inputmode="search" placeholder="Поиск по сумме или комментарию..." value="${escapeAttr(ownerCashSearchQuery)}" oninput="setOwnerCashSearchQuery(this.value)">
+        <input class="form-input" type="text" inputmode="search" placeholder="Поиск по сумме или комментарию..." value="${escapeAttr(ownerCashSearchQuery)}" onkeydown="if(event.key === 'Enter') setOwnerCashSearchQuery(this.value)">
       </div>
       <div style="padding:12px 16px 0;">${searchResultsHtml}</div>
       <div style="padding:12px 16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;">
