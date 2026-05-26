@@ -1501,7 +1501,6 @@ function rowToOrder(r) {
     onlySale:        r.only_sale || false,
     reworkData:      r.rework_data || {},
     priorityTask:    !!r.rework_data?.priorityTask,
-    siteLead:        !!r.rework_data?.siteLead,
     clientPayments:  r.client_payments || [],
     supplierPayments:r.supplier_payments || [],
     deletedAt:       r.deleted_at || '',
@@ -1513,8 +1512,6 @@ function orderToRow(o) {
   const reworkData = { ...(o.reworkData || {}) };
   if (o.priorityTask) reworkData.priorityTask = true;
   else delete reworkData.priorityTask;
-  if (o.siteLead) reworkData.siteLead = true;
-  else delete reworkData.siteLead;
   return {
     id:               o.id,
     date:             o.date,
@@ -2173,17 +2170,12 @@ function isOrderDeleted(order) {
   return !!String(order?.deletedAt || '').trim();
 }
 
-function isSiteLeadOrder(order) {
-  return !!(order?.siteLead || order?.reworkData?.siteLead);
-}
-
 function isOrderFinanciallyActive(order) {
   return !!order && order.inWork === true && !order.isCancelled && !isOrderDeleted(order);
 }
 
 function getOrderCardStateClass(order) {
   if (!order) return '';
-  if (isSiteLeadOrder(order) && !order.workerDone) return 'order-card-state-site-lead';
   if (order.priorityTask && !order.workerDone) return 'order-card-state-priority';
   if (order.isCancelled) return 'order-card-state-cancelled';
   if (order.ownWarehouse && !order.workerDone) return 'order-card-state-own-warehouse';

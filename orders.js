@@ -1112,10 +1112,9 @@ function renderOrderStatusBadges(o) {
   } else if (o.isCancelled) {
     badges.push('<span class="status-badge" style="background:var(--red,#DC2626);color:#fff;">Отменен</span>');
   } else {
-    if (isSiteLeadOrder(o) && !o.workerDone) badges.push('<span class="status-badge status-site-lead">Заявка с сайта</span>');
     if (o.ownWarehouse && !o.workerDone) badges.push('<span class="status-badge status-own-warehouse">Наш склад</span>');
     if (o.callStatus && !o.workerDone) badges.push('<span class="status-badge status-call">Прозвон</span>');
-    if (!isSiteLeadOrder(o) && !o.callStatus && !o.inWork && !o.ownWarehouse && !o.workerDone) badges.push('<span class="status-badge status-selection">Подборка</span>');
+    if (!o.callStatus && !o.inWork && !o.ownWarehouse && !o.workerDone) badges.push('<span class="status-badge status-selection">Подборка</span>');
     if (o.inWork && !o.workerDone) badges.push('<span class="status-badge" style="background:#F59E0B;color:#fff;">В работе</span>');
     if (o.workerDone) badges.push('<span class="status-badge status-done">✓ Выполнен</span>');
   }
@@ -1345,10 +1344,8 @@ function renderOrders() {
       list = list.filter(o => !isOrderDeleted(o)).filter(_isCallOrderVisibleInCurrentContext);
     } else if (currentOrderTab === 'ownWarehouse') {
       list = list.filter(o => !isOrderDeleted(o) && o.ownWarehouse && !o.workerDone && !o.isCancelled);
-    } else if (currentOrderTab === 'siteLeads') {
-      list = list.filter(o => !isOrderDeleted(o) && isSiteLeadOrder(o) && !o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'selection') {
-      list = list.filter(o => !isOrderDeleted(o) && !isSiteLeadOrder(o) && !o.callStatus && !o.inWork && !o.ownWarehouse && !o.workerDone && !o.isCancelled);
+      list = list.filter(o => !isOrderDeleted(o) && !o.callStatus && !o.inWork && !o.ownWarehouse && !o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'done') {
       list = list.filter(o => !isOrderDeleted(o) && o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'debt') {
@@ -3397,9 +3394,7 @@ function getOrderDraftFromForm(baseOrder = null) {
   order.inWork = document.getElementById('f-order-status')?.value === 'inWork';
   order.ownWarehouse = document.getElementById('f-order-status')?.value === 'ownWarehouse';
   order.isCancelled = document.getElementById('f-order-status')?.value === 'cancelled';
-  order.siteLead = false;
   order.reworkData = { ...(baseOrder?.reworkData || {}), priorityTask: order.priorityTask };
-  delete order.reworkData.siteLead;
   return order;
 }
 
@@ -4277,14 +4272,12 @@ async function saveOrder() {
     payoutMoldingResp:     getN('f-payout-molding-resp'),
     payoutMoldingAssist:   getN('f-payout-molding-assist'),
     onlySale:        document.getElementById('f-only-sale')?.checked || false,
-    siteLead: false,
     reworkData: { ...(existingOrder?.reworkData || {}), priorityTask: (currentRole === 'owner' || currentRole === 'manager')
       ? (document.getElementById('f-priority-task')?.checked || false)
       : !!existingOrder?.priorityTask },
     clientPayments: currentClientPayments,
     supplierPayments: currentSupplierPayments,
   };
-  delete data.reworkData.siteLead;
 
   if (!validateOrderRequiredFields(data)) return;
   if (!validateCustomServiceMountAmount(data)) return;
@@ -4637,10 +4630,8 @@ function renderOrdersForMonth(ym) {
       list = list.filter(o => !isOrderDeleted(o)).filter(_isCallOrderVisibleInCurrentContext);
     } else if (currentOrderTab === 'ownWarehouse') {
       list = list.filter(o => !isOrderDeleted(o) && o.ownWarehouse && !o.workerDone && !o.isCancelled);
-    } else if (currentOrderTab === 'siteLeads') {
-      list = list.filter(o => !isOrderDeleted(o) && isSiteLeadOrder(o) && !o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'selection') {
-      list = list.filter(o => !isOrderDeleted(o) && !isSiteLeadOrder(o) && !o.callStatus && !o.inWork && !o.ownWarehouse && !o.workerDone && !o.isCancelled);
+      list = list.filter(o => !isOrderDeleted(o) && !o.callStatus && !o.inWork && !o.ownWarehouse && !o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'done') {
       list = list.filter(o => !isOrderDeleted(o) && o.workerDone && !o.isCancelled);
     } else if (currentOrderTab === 'debt') {
@@ -4877,7 +4868,6 @@ function initOrderTabs() {
         <button class="orders-tab" id="tab-done"      onclick="setOrderTab('done')">Выполненные</button>
         <button class="orders-tab" id="tab-debt"      onclick="setOrderTab('debt')">Долг</button>
         <button class="orders-tab" id="tab-cancelled" onclick="setOrderTab('cancelled')">Отмененные</button>
-        <button class="orders-tab" id="tab-siteLeads" onclick="setOrderTab('siteLeads')">Заявки с сайта</button>
         <button class="orders-tab" id="tab-deleted" onclick="setOrderTab('deleted')">Удаленные</button>
       `;
     }
