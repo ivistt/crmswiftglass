@@ -1142,6 +1142,14 @@ body {
 .order-card-state-priority:hover {
   border-color: rgba(249, 115, 22, 0.52);
 }
+.order-card-state-site-lead {
+  background: linear-gradient(0deg, rgba(14, 165, 233, 0.08), rgba(14, 165, 233, 0.08)), var(--surface);
+  border-color: rgba(14, 165, 233, 0.24);
+}
+.order-card-state-site-lead:hover {
+  background: linear-gradient(0deg, rgba(14, 165, 233, 0.12), rgba(14, 165, 233, 0.12)), var(--surface);
+  border-color: rgba(14, 165, 233, 0.34);
+}
 .order-card-state-planner {
   background: linear-gradient(0deg, rgba(0, 229, 160, 0.08), rgba(0, 229, 160, 0.08)), var(--surface);
   border-color: rgba(0, 229, 160, 0.22);
@@ -1704,6 +1712,7 @@ body {
 .status-selection { background: var(--surface3); color: var(--text2); }
 .status-default  { background: var(--surface3); color: var(--text2); }
 .status-priority { background: rgba(249,115,22,0.18); color: #ea580c; }
+.status-site-lead { background: rgba(14,165,233,0.16); color: #0284c7; }
 
 .mount-yes  { background: var(--blue-dim); color: var(--blue); }
 .mount-no   { background: var(--surface3); color: var(--text3); }
