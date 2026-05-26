@@ -9,6 +9,7 @@ let ownerCashSelectedWorker = '';
 let ownerExpenseSelectedWorker = '';
 let ownerCashCurrencyView = 'uah';
 let ownerCashConfirmFilter = 'all';
+let ownerCashSearchQuery = '';
 // Legacy bucket name used in historical cash rows.
 const OWNER_PENDING_CASH_WORKER_NAME = 'Карты владельца';
 let calendarCursorDate = new Date();
@@ -1482,6 +1483,38 @@ function getOwnerCurrentCashTotal() {
   return getOwnerCashBalanceLogs().reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
 }
 
+function normalizeCashSearchNumber(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const compact = raw.replace(/\s+/g, '').replace(',', '.');
+  if (!/^[+-]?\d+(?:\.\d+)?$/.test(compact)) return null;
+  const amount = Number(compact);
+  return Number.isFinite(amount) ? amount : null;
+}
+
+function cashEntryMatchesOwnerSearch(entry, query, options = {}) {
+  const normalized = String(query || '').trim().toLowerCase();
+  if (!normalized) return true;
+  const amountQuery = normalizeCashSearchNumber(normalized);
+  if (amountQuery !== null) {
+    const amount = options.currency === 'usd'
+      ? Number(parseCurrencyCashEntry(entry)?.usdAmount || 0)
+      : Number(entry?.amount || 0);
+    return Math.abs(amount) === Math.abs(amountQuery);
+  }
+  const text = [
+    getCashEntrySearchText(entry),
+    getWorkerDisplayName(getCashEntryOwner(entry)) || getCashEntryOwner(entry),
+    getOwnerCashWorkerDescriptorByEntry(entry)?.label || '',
+  ].join(' ').toLowerCase();
+  return normalized.split(/\s+/).filter(Boolean).every(word => text.includes(word));
+}
+
+function setOwnerCashSearchQuery(value) {
+  ownerCashSearchQuery = String(value || '');
+  renderOwnerCashScreen();
+}
+
 function getOwnerCashSafeKey(value) {
   return btoa(unescape(encodeURIComponent(String(value || '')))).replace(/[^a-zA-Z0-9]/g, '');
 }
@@ -1575,6 +1608,63 @@ function renderOwnerCashEntryActionMenu(entry, options = {}) {
       <div class="owner-cash-action-menu" data-owner-cash-action-menu="${id}">
         ${canEdit ? `<button class="owner-cash-action-item" onclick="event.stopPropagation(); closeOwnerCashActionMenus(); openOwnerCashEntryModal('${id}'${editOptions})">${icon('pencil')} <span>Исправить</span></button>` : ''}
         ${canReverse ? `<button class="owner-cash-action-item danger" onclick="event.stopPropagation(); closeOwnerCashActionMenus(); reverseOwnerCashEntry('${id}')">${icon('x')} <span>Отменить</span></button>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+function renderOwnerCashSearchResults(logs = [], options = {}) {
+  const query = String(ownerCashSearchQuery || '').trim();
+  if (!query) return '';
+  const isCurrency = options.currency === 'usd';
+  const matches = (logs || [])
+    .filter(entry => cashEntryMatchesOwnerSearch(entry, query, { currency: options.currency }))
+    .slice()
+    .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+
+  const rowsHtml = matches.length
+    ? matches.slice(0, 80).map(entry => {
+        const parsed = isCurrency ? parseCurrencyCashEntry(entry) : null;
+        const amount = isCurrency ? Number(parsed?.usdAmount || 0) : Number(entry.amount) || 0;
+        const symbol = isCurrency ? '$' : '₴';
+        const owner = getOwnerCashWorkerDescriptorByEntry(entry)?.label
+          || getWorkerDisplayName(getCashEntryOwner(entry))
+          || getCashEntryOwner(entry)
+          || '—';
+        const comment = getCashEntryDisplayComment(entry) || 'Без комментария';
+        const meta = [
+          _ownerCashEntryDate(entry) ? formatDate(_ownerCashEntryDate(entry)) : '',
+          getOwnerCashEntryTime(entry),
+          getCashEntryApprovalStatus(entry),
+        ].filter(Boolean).join(' · ');
+        const linkedOrderId = getOrderIdFromCashEntry(entry);
+        return `
+          <div class="owner-cash-entry-row" ${linkedOrderId ? `onclick="openOrderFromCashEntry('${escapeAttr(entry.id)}', event)" style="cursor:pointer;"` : ''}>
+            <div class="owner-cash-entry-main">
+              <div class="owner-cash-entry-comment">${escapeHtml(owner)} · ${escapeHtml(comment)}</div>
+              ${renderOwnerCashEntryTags(entry, { includeOwner: false })}
+              <div class="owner-cash-entry-meta">${escapeHtml(meta || '—')}</div>
+            </div>
+            <div class="owner-cash-entry-actions">
+              <div class="owner-cash-entry-amount" style="color:${amount >= 0 ? 'var(--accent)' : '#ef4444'};">${amount >= 0 ? '+' : ''}${amount.toLocaleString('ru')} ${symbol}</div>
+              ${renderOwnerCashEntryActionMenu(entry, { edit: !isCurrency })}
+            </div>
+          </div>
+        `;
+      }).join('')
+    : `<div style="font-size:13px;color:var(--text3);padding:12px;">По запросу "${escapeHtml(query)}" записей не найдено</div>`;
+
+  return `
+    <div class="fin-month-card owner-cash-history-card" style="margin-bottom:12px;">
+      <div class="owner-cash-history-title">
+        <div>
+          <div class="fin-month-name">Результаты поиска</div>
+          <div class="fin-month-sub">${matches.length.toLocaleString('ru')} зап.</div>
+        </div>
+      </div>
+      <div style="padding:0 12px 12px;">
+        ${rowsHtml}
+        ${matches.length > 80 ? `<div style="font-size:12px;color:var(--text3);padding:10px 0;">Показаны первые 80 записей</div>` : ''}
       </div>
     </div>
   `;
@@ -3416,6 +3506,8 @@ function renderOwnerCashScreen() {
   const isUahView = ownerCashCurrencyView !== 'usd';
   const total = isUahView ? currentCashTotal : currentCurrencyTotal;
   const rows = isUahView ? currentCashRows : currentCurrencyRows;
+  const searchLogs = isUahView ? getOwnerCashLogs(ownerCashConfirmFilter) : currencyLogs;
+  const searchResultsHtml = renderOwnerCashSearchResults(searchLogs, { currency: isUahView ? 'uah' : 'usd' });
   const filtersHtml = isUahView ? `
     <div class="owner-cash-confirm-filters">
       <button class="orders-tab ${ownerCashConfirmFilter === 'all' ? 'active' : ''}" onclick="setOwnerCashConfirmFilter('all')">Все</button>
@@ -3455,6 +3547,10 @@ function renderOwnerCashScreen() {
         </div>
       </div>
       <div style="padding:12px 16px 0;">${filtersHtml}</div>
+      <div style="padding:12px 16px 0;">
+        <input class="form-input" type="text" inputmode="search" placeholder="Поиск по сумме или комментарию..." value="${escapeAttr(ownerCashSearchQuery)}" oninput="setOwnerCashSearchQuery(this.value)">
+      </div>
+      <div style="padding:12px 16px 0;">${searchResultsHtml}</div>
       <div style="padding:12px 16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;">
         ${rowsHtml}
       </div>

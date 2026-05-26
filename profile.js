@@ -980,6 +980,12 @@ function setCashSearchQuery(value) {
 function _filterCashLogByComment(log, query) {
   const normalized = (query || '').trim().toLowerCase();
   if (!normalized) return log || [];
+  const amountQuery = typeof normalizeCashSearchNumber === 'function'
+    ? normalizeCashSearchNumber(normalized)
+    : (/^[+-]?\d+(?:[.,]\d+)?$/.test(normalized.replace(/\s+/g, '')) ? Number(normalized.replace(/\s+/g, '').replace(',', '.')) : null);
+  if (amountQuery !== null && Number.isFinite(amountQuery)) {
+    return (log || []).filter(e => Math.abs(Number(e?.amount || 0)) === Math.abs(amountQuery));
+  }
   const words = normalized.split(/\s+/).filter(Boolean);
   return (log || []).filter(e => {
     const comment = String(getCashEntrySearchText(e) || '').toLowerCase();
