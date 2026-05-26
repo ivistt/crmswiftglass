@@ -1471,16 +1471,14 @@ function getExpectedOrderFinanceRows(order) {
       if (!method || !amount) return;
       const signedAmount = paymentType === 'supplier' || paymentType === 'dropshipper' ? -amount : amount;
       const sourceKey = buildPaymentSourceKey(order?.id || '', method, paymentType, payment);
-      let fallbackWorker = currentRole === 'owner'
+      const fallbackWorker = currentRole === 'owner'
         ? (payment?.cashWorker || order?.responsible || currentWorkerName || '')
         : (currentWorkerName || order?.responsible || '');
-      if (paymentType === 'dropshipper' && isCashPaymentMethod(method) && typeof getDropshipperCashWorkerRecord === 'function') {
-        const dropshipperWorker = getDropshipperCashWorkerRecord(order?.dropshipper);
-        fallbackWorker = dropshipperWorker?.name || fallbackWorker;
-      }
-      const route = typeof getPaymentCashRoute === 'function'
-        ? getPaymentCashRoute(method, fallbackWorker)
-        : { workerName: fallbackWorker, cashAccount: 'cash', requiresConfirmation: !isCashPaymentMethod(method) };
+      const route = typeof resolveOrderPaymentCashRoute === 'function'
+        ? resolveOrderPaymentCashRoute({ order, payment, paymentType, method, fallbackWorkerName: fallbackWorker })
+        : (typeof getPaymentCashRoute === 'function'
+          ? getPaymentCashRoute(method, fallbackWorker)
+          : { workerName: fallbackWorker, cashAccount: 'cash', requiresConfirmation: !isCashPaymentMethod(method), reason: 'payment method route' });
       rows.push({
         paymentType,
         label: paymentType === 'supplier' ? 'Поставщик' : (paymentType === 'dropshipper' ? 'Дропшиппер' : 'Клиент'),
@@ -1491,9 +1489,9 @@ function getExpectedOrderFinanceRows(order) {
         cashOwner: route.workerName || fallbackWorker || '',
         account: route.cashAccount || 'cash',
         requiresConfirmation: route.requiresConfirmation === true,
-        reason: isCashPaymentMethod(method) && payment?.cashWorker
+        reason: route.reason === 'selected cash worker'
           ? 'кассу выбрал владелец'
-          : (paymentType === 'dropshipper' && isCashPaymentMethod(method) ? 'касса дропшиппера' : 'маршрут способа оплаты'),
+          : (route.reason === 'dropshipper cash worker' ? 'касса дропшиппера' : 'маршрут способа оплаты'),
       });
     });
   };
@@ -2712,17 +2710,13 @@ let currentSupplierPayments = [];
 function getOrderPaymentCashRecipient(order, payment, paymentType = 'client') {
   const method = normalizePaymentMethod(payment?.method || '');
   if (!method) return '';
-  const savedCashWorker = String(payment?.cashWorker || '').trim();
-  if (savedCashWorker) return savedCashWorker;
-  let fallbackWorker = String(order?.responsible || currentWorkerName || '').trim();
-  if (paymentType === 'dropshipper' && isCashPaymentMethod(method) && typeof getDropshipperCashWorkerRecord === 'function') {
-    const dropshipperWorker = getDropshipperCashWorkerRecord(order?.dropshipper);
-    fallbackWorker = String(dropshipperWorker?.name || fallbackWorker || '').trim();
-  }
-  if (typeof getPaymentCashRoute === 'function') {
-    const route = getPaymentCashRoute(method, fallbackWorker);
+  const fallbackWorker = String(order?.responsible || currentWorkerName || '').trim();
+  if (typeof resolveOrderPaymentCashRoute === 'function') {
+    const route = resolveOrderPaymentCashRoute({ order, payment, paymentType, method, fallbackWorkerName: fallbackWorker });
     return String(route?.workerName || fallbackWorker || '').trim();
   }
+  const savedCashWorker = String(payment?.cashWorker || '').trim();
+  if (savedCashWorker) return savedCashWorker;
   return fallbackWorker;
 }
 

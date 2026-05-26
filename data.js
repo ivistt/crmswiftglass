@@ -2583,20 +2583,40 @@ function getPaymentCashRoute(method, fallbackWorkerName = '') {
   };
 }
 
+function resolveOrderPaymentCashRoute({ order = null, payment = null, paymentType = 'client', method = '', fallbackWorkerName = '' } = {}) {
+  const normalized = normalizePaymentMethod(method || payment?.method || '');
+  let routeFallbackWorkerName = String(fallbackWorkerName || order?.responsible || currentWorkerName || '').trim();
+  let reason = 'payment method route';
+
+  if (isCashPaymentMethod(normalized) && payment?.cashWorker) {
+    routeFallbackWorkerName = String(payment.cashWorker || '').trim() || routeFallbackWorkerName;
+    reason = 'selected cash worker';
+  }
+
+  if (paymentType === 'dropshipper' && isCashPaymentMethod(normalized) && typeof getDropshipperCashWorkerRecord === 'function') {
+    const dropshipperWorker = getDropshipperCashWorkerRecord(order?.dropshipper);
+    if (dropshipperWorker?.name) {
+      routeFallbackWorkerName = String(dropshipperWorker.name || '').trim() || routeFallbackWorkerName;
+      reason = 'dropshipper cash worker';
+    }
+  }
+
+  const route = getPaymentCashRoute(normalized, routeFallbackWorkerName);
+  return {
+    ...route,
+    method: normalized,
+    paymentType,
+    routeFallbackWorkerName,
+    reason,
+  };
+}
+
 function buildOrderPaymentCashEntryPayload({ order, payment, paymentType = 'client', fallbackWorkerName = '' }) {
   const amount = Number(payment?.amount) || 0;
   const method = normalizePaymentMethod(payment?.method || '');
   if (!amount || !method) return null;
 
-  let routeFallbackWorkerName = fallbackWorkerName || order?.responsible || '';
-  if (isCashPaymentMethod(method) && payment?.cashWorker) {
-    routeFallbackWorkerName = String(payment.cashWorker || '').trim() || routeFallbackWorkerName;
-  }
-  if (paymentType === 'dropshipper' && isCashPaymentMethod(method)) {
-    const dropshipperWorker = getDropshipperCashWorkerRecord(order?.dropshipper);
-    routeFallbackWorkerName = dropshipperWorker?.name || routeFallbackWorkerName;
-  }
-  const route = getPaymentCashRoute(method, routeFallbackWorkerName);
+  const route = resolveOrderPaymentCashRoute({ order, payment, paymentType, method, fallbackWorkerName });
   const signedAmount = paymentType === 'supplier' || paymentType === 'dropshipper' ? -amount : amount;
   const orderId = order?.id || '—';
   const paymentDate = payment?.date || order?.date || '';
