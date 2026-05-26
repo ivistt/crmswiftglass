@@ -208,6 +208,7 @@ function canCurrentUserRemoveOrderPayments() {
 
 function canCurrentUserEditOrderServices(order) {
   if (currentRole === 'owner' || currentRole === 'manager') return true;
+  if (!order && canCreateOrder()) return true;
   if (!order || !currentUserCanActAsSenior()) return false;
   if (order.responsible !== currentWorkerName) return false;
   if (!currentUserHasPermission('order_services_edit', currentUserCanActAsSenior())) return false;
@@ -2631,7 +2632,7 @@ function updateOrderServiceTypeAccess() {
   const section = document.getElementById('order-service-type-section');
   if (!section) return;
   const existingOrder = editingOrderId ? orders.find(item => item.id === editingOrderId) : null;
-  const canSeeServicesInOrderForm = currentRole === 'owner' || currentRole === 'manager' || currentUserCanActAsSenior();
+  const canSeeServicesInOrderForm = canUseFullOrderForm(existingOrder) || currentUserCanActAsSenior();
   const canEditServicesInOrderForm = canCurrentUserEditOrderServices(existingOrder);
   section.dataset.orderModalPanel = canSeeServicesInOrderForm ? 'work' : 'hidden';
   section.style.display = canSeeServicesInOrderForm
@@ -3096,11 +3097,11 @@ async function openOrderModal(id) {
 
   populateRefSelects();
   populateClientDatalist();
-  setOrderModalPanel((currentRole === 'owner' || currentRole === 'manager') ? 'order' : 'work');
+  setOrderModalPanel(canUseFullOrderForm(accessOrder) ? 'order' : 'work');
 
   const cancelWrap = document.getElementById('cancel-toggle-wrap');
   if (cancelWrap) {
-    cancelWrap.style.display = (currentRole === 'owner' || currentRole === 'manager') ? 'inline-flex' : 'none';
+    cancelWrap.style.display = canUseFullOrderForm(accessOrder) ? 'inline-flex' : 'none';
   }
 
   if (id) {
@@ -3350,6 +3351,12 @@ function setOrderModalPanel(panel) {
     btn.classList.toggle('active', btn.dataset.orderModalTab === nextPanel);
   });
   updateOrderModalAccess(editingOrderId ? orders.find(item => item.id === editingOrderId) : null);
+}
+
+function canUseFullOrderForm(order = null) {
+  if (currentRole === 'owner' || currentRole === 'manager') return true;
+  const isNewOrder = !editingOrderId && !order;
+  return isNewOrder && canCreateOrder();
 }
 
 function setElementDisabledState(el, disabled) {
@@ -3649,7 +3656,7 @@ function renderOrderSummary(order = null) {
 }
 
 function updateOrderModalTabsAccess(order = null) {
-  const isPrivileged = currentRole === 'owner' || currentRole === 'manager';
+  const isPrivileged = canUseFullOrderForm(order);
   const orderTabBtn = document.querySelector('[data-order-modal-tab="order"]');
   const workTabBtn = document.querySelector('[data-order-modal-tab="work"]');
   const financeTabBtn = document.querySelector('[data-order-modal-tab="finance"]');
@@ -3667,7 +3674,7 @@ function updateOrderModalTabsAccess(order = null) {
 function updateOrderModalAccess(order = null) {
   const existingOrder = order || (editingOrderId ? orders.find(item => item.id === editingOrderId) : null);
   const draftOrder = getOrderDraftFromForm(existingOrder);
-  const isPrivileged = currentRole === 'owner' || currentRole === 'manager';
+  const isPrivileged = canUseFullOrderForm(existingOrder);
   const canManagePayments = canCurrentUserManageOrderPayments(draftOrder);
   const canEditServices = canCurrentUserEditOrderServices(existingOrder);
   const currentWorker = typeof getCurrentWorkerRecord === 'function' ? getCurrentWorkerRecord() : null;
@@ -4065,7 +4072,7 @@ function setPriceFieldsLocked(locked) {
     if (id === 'f-debt-date' && currentRole === 'senior') return;
     if (id === 'f-check' && currentRole === 'senior') return;
 
-    const forceUnlock = (currentRole === 'owner' || currentRole === 'manager' || currentRole === 'extra');
+    const forceUnlock = (currentRole === 'owner' || currentRole === 'manager' || currentRole === 'extra' || (!editingOrderId && canCreateOrder()));
     if (locked && !forceUnlock) {
       el.setAttribute('readonly', 'true');
       el.setAttribute('disabled', 'true');
@@ -4139,7 +4146,7 @@ function recalcTotal(mode = 'init') {
 
 function validateOrderRequiredFields(data) {
   const status = document.getElementById('f-order-status')?.value || '';
-  const serviceTypeRequired = !data.onlySale && currentRole !== 'owner' && currentRole !== 'manager';
+  const serviceTypeRequired = !data.onlySale && !canUseFullOrderForm(editingOrderId ? orders.find(o => o.id === editingOrderId) : null);
   const missing = [];
 
   if (status === '') {
@@ -4191,6 +4198,7 @@ async function saveOrder() {
 
   const isNew = !editingOrderId;
   const existingOrder = isNew ? null : orders.find(o => o.id === editingOrderId);
+  const canUseFullSave = canUseFullOrderForm(existingOrder);
 
   recalcMargin();
 
@@ -4223,7 +4231,7 @@ async function saveOrder() {
     tatuDoneBy:      document.getElementById('f-tatu-status')?.checked ? (existingOrder?.tatuDoneBy || document.getElementById('f-tatu-responsible')?.value || currentWorkerName || '') : '',
     toningDone:      document.getElementById('f-toning-status')?.checked || false,
     toningDoneBy:    document.getElementById('f-toning-status')?.checked ? (existingOrder?.toningDoneBy || document.getElementById('f-toning-responsible')?.value || currentWorkerName || '') : '',
-    priorityTask:    (currentRole === 'owner' || currentRole === 'manager')
+    priorityTask:    canUseFullSave
       ? (document.getElementById('f-priority-task')?.checked || false)
       : !!existingOrder?.priorityTask,
     delivery:        getN('f-delivery'),
@@ -4245,24 +4253,24 @@ async function saveOrder() {
     dropshipperPayout: getN('f-payout-dropshipper'),
     dropshipperPayments: existingOrder ? (existingOrder.dropshipperPayments || []) : [],
     statusDone:      existingOrder ? existingOrder.statusDone : false,
-    inWork:          (currentRole === 'owner' || currentRole === 'manager')
+    inWork:          canUseFullSave
       ? (document.getElementById('f-order-status')?.value === 'inWork')
       : (existingOrder ? existingOrder.inWork : false),
-    callStatus:      (currentRole === 'owner' || currentRole === 'manager')
+    callStatus:      canUseFullSave
       ? (document.getElementById('f-order-status')?.value === 'call')
       : (existingOrder ? !!existingOrder.callStatus : false),
-    ownWarehouse:    (currentRole === 'owner' || currentRole === 'manager')
+    ownWarehouse:    canUseFullSave
       ? (document.getElementById('f-order-status')?.value === 'ownWarehouse')
       : (existingOrder ? !!existingOrder.ownWarehouse : false),
-    isCancelled:     (currentRole === 'owner' || currentRole === 'manager')
+    isCancelled:     canUseFullSave
       ? (document.getElementById('f-order-status')?.value === 'cancelled')
       : (existingOrder ? !!existingOrder.isCancelled : false),
     workerDone:      isNew ? false : (orders.find(x => x.id === editingOrderId)?.workerDone || false),
     assistant:       document.getElementById('f-assistant')?.value || '',
     extraAssistant:  document.getElementById('f-extra-assistant')?.value || '',
     manager:         document.getElementById('f-manager')?.value || '',
-    priceLocked:     (currentRole === 'senior') ? true : (existingOrder ? existingOrder.priceLocked : false),
-    toningExternal:  existingOrder ? !!existingOrder.toningExternal : false,
+    priceLocked:     (currentRole === 'senior' && !canUseFullSave) ? true : (existingOrder ? existingOrder.priceLocked : false),
+    toningExternal:  canUseFullSave ? (document.getElementById('f-toning-external')?.checked || false) : (existingOrder ? !!existingOrder.toningExternal : false),
     marginTotal:     getN('f-margin-total'),
     payoutDropshipper:     getN('f-payout-dropshipper'),
     payoutManagerGlass:    getN('f-payout-manager-glass'),
@@ -4274,7 +4282,7 @@ async function saveOrder() {
     payoutMoldingResp:     getN('f-payout-molding-resp'),
     payoutMoldingAssist:   getN('f-payout-molding-assist'),
     onlySale:        document.getElementById('f-only-sale')?.checked || false,
-    reworkData: { ...(existingOrder?.reworkData || {}), priorityTask: (currentRole === 'owner' || currentRole === 'manager')
+    reworkData: { ...(existingOrder?.reworkData || {}), priorityTask: canUseFullSave
       ? (document.getElementById('f-priority-task')?.checked || false)
       : !!existingOrder?.priorityTask },
     clientPayments: currentClientPayments,
