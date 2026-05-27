@@ -617,7 +617,7 @@ function renderOwnerSalaryEntryRow(entry, { showWorker = false, showEdit = false
           <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
             <span style="font-size:13px;font-weight:900;color:${amount >= 0 ? 'var(--accent)' : '#ef4444'};white-space:nowrap;">${amount.toLocaleString('ru')} ₴</span>
         ${canEdit ? `<button class="icon-btn" title="Редактировать" onclick="event.stopPropagation(); editPendingSalaryEntry('${entry.id}')" style="width:28px;height:28px;border-radius:7px;"><i data-lucide="pencil" style="width:12px;height:12px;"></i></button>` : ''}
-        ${canDelete ? `<button class="icon-btn icon-action-danger" title="Удалить" onclick="event.stopPropagation(); deleteSalaryEntry('${entry.id}')" style="width:28px;height:28px;border-radius:7px;"><i data-lucide="trash-2" style="width:12px;height:12px;"></i></button>` : ''}
+        ${canDelete ? `<button class="icon-btn icon-action-danger" title="Отменить" onclick="event.stopPropagation(); deleteSalaryEntry('${entry.id}')" style="width:28px;height:28px;border-radius:7px;"><i data-lucide="x" style="width:12px;height:12px;"></i></button>` : ''}
       </div>
     </div>
   </div>`;
@@ -880,8 +880,8 @@ function renderOwnerPendingSalaryPanel() {
             <button class="icon-btn" title="Редактировать начисление" onclick="event.stopPropagation(); editPendingSalaryEntry('${entry.id}')" style="width:28px;height:28px;border-radius:7px;">
               <i data-lucide="pencil" style="width:12px;height:12px;"></i>
             </button>
-            <button class="icon-btn icon-action-danger" title="Удалить начисление" onclick="event.stopPropagation(); deleteSalaryEntry('${entry.id}')" style="width:28px;height:28px;border-radius:7px;">
-              <i data-lucide="trash-2" style="width:12px;height:12px;"></i>
+            <button class="icon-btn icon-action-danger" title="Отменить начисление" onclick="event.stopPropagation(); deleteSalaryEntry('${entry.id}')" style="width:28px;height:28px;border-radius:7px;">
+              <i data-lucide="x" style="width:12px;height:12px;"></i>
             </button>
           </div>
         </div>
@@ -934,8 +934,8 @@ function renderOwnerManualSalaryPanel() {
             <button class="icon-btn" title="Редактировать" onclick="event.stopPropagation(); startEditManualSalary('${entry.id}')" style="width:28px;height:28px;border-radius:7px;">
               <i data-lucide="pencil" style="width:12px;height:12px;"></i>
             </button>
-            <button class="icon-btn icon-action-danger" title="Удалить" onclick="event.stopPropagation(); deleteSalaryEntry('${entry.id}')" style="width:28px;height:28px;border-radius:7px;">
-              <i data-lucide="trash-2" style="width:12px;height:12px;"></i>
+            <button class="icon-btn icon-action-danger" title="Отменить" onclick="event.stopPropagation(); deleteSalaryEntry('${entry.id}')" style="width:28px;height:28px;border-radius:7px;">
+              <i data-lucide="x" style="width:12px;height:12px;"></i>
             </button>
           </div>
         </div>
@@ -1152,6 +1152,65 @@ function cancelEditManualSalary() {
   fillManualSalaryForm(null);
 }
 
+function buildSalaryCorrectionOrderId(entry, action = 'Коррекция') {
+  const base = String(entry?.order_id || entry?.id || '').trim();
+  return `${action} ЗП${base ? ` · ${base}` : ''}`;
+}
+
+async function refreshSalaryStateAfterOwnerChange() {
+  try {
+    allSalaries = await sbFetchAllSalaries();
+  } catch (e) {
+    console.warn('Failed to refresh owner salaries:', e);
+  }
+  if (currentRole !== 'owner' && currentWorkerName) {
+    try {
+      workerSalaries = await sbFetchWorkerSalaries(currentWorkerName);
+    } catch (e) {
+      console.warn('Failed to refresh worker salaries:', e);
+    }
+  }
+  rerenderOwnerSalaryViews();
+  if (document.getElementById('screen-profile')?.classList.contains('active')) {
+    renderProfile();
+  }
+  renderHome();
+}
+
+async function addSalaryCorrectionEntry(entry, nextAmount, reason) {
+  if (!entry) throw new Error('Запись ЗП не найдена');
+  const currentAmount = Number(entry.amount) || 0;
+  const amount = Number(nextAmount) || 0;
+  const delta = amount - currentAmount;
+  if (!delta) return null;
+  return sbInsertWorkerSalary({
+    worker_name: entry.worker_name,
+    worker_id: entry.worker_id || getWorkerIdByName(entry.worker_name),
+    date: getLocalDateString(),
+    amount: delta,
+    order_id: buildSalaryCorrectionOrderId(entry, 'Коррекция'),
+    entry_type: 'manual',
+    comment: reason || `Коррекция ЗП: было ${currentAmount.toLocaleString('ru')} ₴, стало ${amount.toLocaleString('ru')} ₴`,
+    created_by: currentWorkerName || 'owner',
+  });
+}
+
+async function addSalaryReversalEntry(entry, reason = 'Отмена записи ЗП') {
+  if (!entry) throw new Error('Запись ЗП не найдена');
+  const amount = Number(entry.amount) || 0;
+  if (!amount) return null;
+  return sbInsertWorkerSalary({
+    worker_name: entry.worker_name,
+    worker_id: entry.worker_id || getWorkerIdByName(entry.worker_name),
+    date: getLocalDateString(),
+    amount: -amount,
+    order_id: buildSalaryCorrectionOrderId(entry, 'Отмена'),
+    entry_type: 'manual',
+    comment: `${reason}: ${entry.comment || entry.order_id || entry.id || ''}`.trim(),
+    created_by: currentWorkerName || 'owner',
+  });
+}
+
 async function saveOwnerManualSalary() {
   if (currentRole !== 'owner') return;
   const workerName = document.getElementById('manual-salary-worker')?.value || '';
@@ -1179,18 +1238,16 @@ async function saveOwnerManualSalary() {
   };
 
   try {
-    const saved = editingManualSalaryId
-      ? await sbUpdateWorkerSalary(editingManualSalaryId, payload)
-      : await sbInsertWorkerSalary(payload);
     if (editingManualSalaryId) {
-      const idx = allSalaries.findIndex(row => row.id === editingManualSalaryId);
-      if (idx !== -1) allSalaries[idx] = { ...allSalaries[idx], ...saved };
-    } else if (saved) {
+      const entry = (allSalaries || []).find(row => row.id === editingManualSalaryId);
+      if (!entry) throw new Error('Запись ЗП не найдена');
+      await addSalaryCorrectionEntry(entry, amount, comment);
+    } else {
+      const saved = await sbInsertWorkerSalary(payload);
       allSalaries.unshift(saved);
     }
     editingManualSalaryId = '';
-    rerenderOwnerSalaryViews();
-    renderHome();
+    await refreshSalaryStateAfterOwnerChange();
     showToast('Ручная запись ЗП сохранена ✓');
   } catch (e) {
     showToast('Ошибка: ' + e.message, 'error');
@@ -1226,15 +1283,9 @@ async function editPendingSalaryEntry(id) {
   }
 
   try {
-    const updated = await sbUpdateWorkerSalary(id, {
-      amount,
-      comment: cleanComment,
-    });
-    const idx = allSalaries.findIndex(row => row.id === id);
-    if (idx !== -1) allSalaries[idx] = { ...allSalaries[idx], ...updated };
-    rerenderOwnerSalaryViews();
-    renderHome();
-    showToast('Начисление обновлено ✓');
+    await addSalaryCorrectionEntry(entry, amount, cleanComment);
+    await refreshSalaryStateAfterOwnerChange();
+    showToast('Коррекция ЗП добавлена ✓');
   } catch (e) {
     showToast('Ошибка: ' + e.message, 'error');
   }
@@ -1259,17 +1310,12 @@ async function saveEditSalary(id, ym) {
   if (saveBtn) saveBtn.disabled = true;
 
   try {
-    const updated = await sbUpdateWorkerSalary(id, amount);
-    const idx = allSalaries.findIndex(s => s.id === id);
-    if (idx !== -1) allSalaries[idx].amount = amount;
-
-    // Обновляем отображение без перерисовки всего экрана
-    document.getElementById('sal-display-' + id).textContent = amount.toLocaleString('ru') + ' ₴';
-    document.getElementById('sal-display-' + id).style.display = '';
-    document.getElementById('sal-edit-btn-' + id).style.display = '';
-    input.style.display = 'none';
-    if (saveBtn) { saveBtn.disabled = false; saveBtn.style.display = 'none'; }
-    showToast('Сохранено ✓');
+    const entry = (allSalaries || []).find(s => s.id === id);
+    await addSalaryCorrectionEntry(entry, amount, 'Коррекция ЗП владельцем');
+    await refreshSalaryStateAfterOwnerChange();
+    const salEl = document.getElementById('fin-salaries-' + ym);
+    if (salEl) { salEl.innerHTML = renderSalaryRowsCompact(ym); initIcons(); }
+    showToast('Коррекция ЗП добавлена ✓');
   } catch(e) {
     showToast('Ошибка: ' + e.message, 'error');
     if (saveBtn) saveBtn.disabled = false;
@@ -1320,16 +1366,15 @@ async function deleteSalaryEntry(id, ym) {
     showToast('Архивную запись ЗП удалять нельзя', 'error');
     return;
   }
-  if (!confirm('Удалить запись о зарплате?')) return;
+  if (!confirm('Отменить запись ЗП корректирующей записью? Исходная запись останется в истории.')) return;
   try {
-    await sbDeleteWorkerSalary(id);
-    allSalaries = allSalaries.filter(s => s.id !== id);
+    await addSalaryReversalEntry(entry);
     // Обновляем компактный блок зарплат в карточке месяца
     const salEl = document.getElementById('fin-salaries-' + ym);
     if (salEl) { salEl.innerHTML = renderSalaryRowsCompact(ym); initIcons(); }
     // Если открыт детальный экран — перерисовываем его тоже
-    rerenderOwnerSalaryViews();
-    showToast('Удалено');
+    await refreshSalaryStateAfterOwnerChange();
+    showToast('Добавлена отмена ЗП ✓');
   } catch(e) {
     showToast('Ошибка: ' + e.message, 'error');
   }
