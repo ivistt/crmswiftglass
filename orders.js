@@ -740,12 +740,13 @@ function renderOrderCardLayout(order, context = {}) {
 
 function orderHasDebtTabFinancialMeaning(order) {
   if (!order || order.isCancelled || isOrderDeleted(order)) return false;
-  if (!order.workerDone) return false;
   const total = typeof getOrderClientTotalAmount === 'function'
     ? getOrderClientTotalAmount(order)
     : getOrderClientTotal(order);
   const paid = getOrderClientPaidAmount(order);
-  return total > 0 && Math.max(0, total - paid) > 0;
+  const left = Math.max(0, total - paid);
+  if (total <= 0 || left <= 0) return false;
+  return !!order.workerDone || paid > 0;
 }
 
 function renderManagerOrderCardMeta(order) {

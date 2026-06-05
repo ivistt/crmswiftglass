@@ -2246,6 +2246,14 @@ body {
   border-radius: 8px;
 }
 
+.supplier-expense-panel {
+  padding: 16px;
+  margin-bottom: 16px;
+  border: 2px solid #f59e0b;
+  border-radius: 12px;
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.12);
+}
+
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .form-grid.col-3 { grid-template-columns: 1fr 1fr 1fr; }
 .form-grid.col-1 { grid-template-columns: 1fr; }

@@ -941,15 +941,17 @@
 
             <!-- ГРУППА 2: Стекло/Поставщик -->
             <div class="form-group span-full" style="background:var(--surface3); padding:16px; border-radius:12px; border:1px solid var(--border);">
-              <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:12px;text-transform:uppercase;">Расход поставщику</div>
-              <div class="form-grid" style="margin-bottom:16px;">
-                <div class="form-group">
-                  <label class="form-label">Сумма покупки стекла</label>
-                  <input class="form-input" type="text" inputmode="numeric" id="f-purchase" placeholder="0" oninput="recalcMargin()">
-                </div>
-                <div class="form-group">
-                  <label class="form-label">Сумма продажи стекла</label>
-                  <input class="form-input" type="text" inputmode="numeric" id="f-income" placeholder="0" oninput="recalcMargin()">
+              <div class="supplier-expense-panel">
+                <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:12px;text-transform:uppercase;">Расход поставщику</div>
+                <div class="form-grid">
+                  <div class="form-group">
+                    <label class="form-label">Сумма покупки стекла</label>
+                    <input class="form-input" type="text" inputmode="numeric" id="f-purchase" placeholder="0" oninput="recalcMargin()">
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label">Сумма продажи стекла</label>
+                    <input class="form-input" type="text" inputmode="numeric" id="f-income" placeholder="0" oninput="recalcMargin()">
+                  </div>
                 </div>
               </div>
               <div id="supplier-payments-list" style="margin-bottom:12px;display:flex;flex-direction:column;gap:8px;"></div>
