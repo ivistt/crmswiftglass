@@ -13,6 +13,7 @@ const WORKER_PERMISSION_PRESETS = {
     orders_delete: true,
     clients_view: true,
     workers_view: true,
+    car_directory_view: true,
     warehouses_view: true,
     dropshippers_manage: true,
     calendar_view: true,
@@ -39,6 +40,7 @@ const WORKER_PERMISSION_PRESETS = {
     orders_delete: false,
     clients_view: true,
     workers_view: false,
+    car_directory_view: false,
     warehouses_view: true,
     dropshippers_manage: false,
     calendar_view: false,
@@ -65,6 +67,7 @@ const WORKER_PERMISSION_PRESETS = {
     orders_delete: false,
     clients_view: false,
     workers_view: false,
+    car_directory_view: false,
     warehouses_view: false,
     dropshippers_manage: false,
     calendar_view: false,
@@ -91,6 +94,7 @@ const WORKER_PERMISSION_PRESETS = {
     orders_delete: false,
     clients_view: false,
     workers_view: false,
+    car_directory_view: false,
     warehouses_view: false,
     dropshippers_manage: false,
     calendar_view: false,
@@ -117,6 +121,7 @@ const WORKER_PERMISSION_PRESETS = {
     orders_delete: false,
     clients_view: false,
     workers_view: false,
+    car_directory_view: false,
     warehouses_view: false,
     dropshippers_manage: false,
     calendar_view: false,
@@ -504,7 +509,7 @@ function getOrderSpecialServiceAssignedWorker(order, type) {
 }
 
 function currentUserHasAnyDashboardPermission() {
-  return ['orders_create', 'clients_view', 'workers_view', 'warehouses_view', 'dropshippers_manage', 'groups_view', 'calendar_view', 'finance_view', 'owner_cash_view', 'owner_expenses_view', 'owner_payments_view']
+  return ['orders_create', 'clients_view', 'workers_view', 'car_directory_view', 'warehouses_view', 'dropshippers_manage', 'groups_view', 'calendar_view', 'finance_view', 'owner_cash_view', 'owner_expenses_view', 'owner_payments_view']
     .some(key => currentUserHasPermission(key));
 }
 
@@ -2709,6 +2714,7 @@ function canEditPrice(order) {
 }
 function canViewClients()  { return currentRole === 'owner' || currentUserHasPermission('clients_view', currentRole === 'manager'); }
 function canViewWorkers()  { return currentRole === 'owner' || currentUserHasPermission('workers_view'); }
+function canViewCarDirectory() { return currentRole === 'owner' || currentUserHasPermission('car_directory_view'); }
 function canDeleteOrder()  { return currentRole === 'owner' || currentUserHasPermission('orders_delete', false); }
 function canViewFinance()  { return currentRole === 'owner' || currentUserHasPermission('finance_view'); }
 function canManageDropshippers() { return currentRole === 'owner' || currentUserHasPermission('dropshippers_manage'); }

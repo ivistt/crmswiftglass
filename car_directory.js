@@ -7,6 +7,7 @@ let editingCarDirId = null; // null = новая запись
 // ---------- РЕНДЕР ТАБЛИЦЫ ----------
 function renderCarDirectory() {
   const search = (document.getElementById('filter-car-dir-search')?.value || '').toLowerCase();
+  const canEditEntries = currentRole === 'owner';
 
   let list = [...carDirectory].sort((a, b) => (a.model || '').localeCompare(b.model || '', 'ru'));
 
@@ -46,8 +47,10 @@ function renderCarDirectory() {
             <span class="car-dir-code">${c.eurocode || '—'}</span>
           </div>
           <div class="car-dir-col-actions">
-            <button class="icon-action-btn car-dir-action-btn" title="Редактировать" onclick="openCarDirModal('${c.id}')">${icon('pencil')}</button>
-            <button class="icon-action-btn car-dir-action-btn" title="Удалить" onclick="deleteCarDirEntry('${c.id}')">${icon('trash-2')}</button>
+            ${canEditEntries ? `
+              <button class="icon-action-btn car-dir-action-btn" title="Редактировать" onclick="openCarDirModal('${c.id}')">${icon('pencil')}</button>
+              <button class="icon-action-btn car-dir-action-btn" title="Удалить" onclick="deleteCarDirEntry('${c.id}')">${icon('trash-2')}</button>
+            ` : ''}
           </div>
         </div>
       `).join('')}
@@ -60,6 +63,8 @@ function renderCarDirectory() {
 
 // ---------- МОДАЛ ----------
 function openCarDirModal(id) {
+  if (id && currentRole !== 'owner') return;
+  if (!id && typeof canViewCarDirectory === 'function' && !canViewCarDirectory()) return;
   editingCarDirId = id || null;
 
   const titleEl = document.getElementById('car-dir-modal-title');
@@ -103,6 +108,7 @@ async function saveCarDirEntry() {
 
   try {
     if (editingCarDirId) {
+      if (currentRole !== 'owner') throw new Error('Нет доступа к редактированию');
       const updated = await sbUpdateCarDirectory(editingCarDirId, model, eurocode);
       if (updated) {
         const idx = carDirectory.findIndex(c => String(c.id) === String(editingCarDirId));
@@ -112,6 +118,11 @@ async function saveCarDirEntry() {
     } else {
       const dupe = carDirectory.find(c => c.model.toLowerCase() === model.toLowerCase());
       if (dupe) {
+        if (currentRole !== 'owner') {
+          showToast('Такой автомобиль уже есть в справочнике');
+          closeCarDirModal();
+          return;
+        }
         const updated = await sbUpdateCarDirectory(dupe.id, model, eurocode);
         if (updated) {
           const idx = carDirectory.findIndex(c => c.id === dupe.id);

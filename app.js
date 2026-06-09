@@ -1066,7 +1066,9 @@ function renderHome() {
         <div class="home-card-count" style="font-size:18px;">CRM</div>
       </div>
     `;
+  }
 
+  if (canViewCarDirectory()) {
     container.innerHTML += `
       <div class="home-card" onclick="openCarDirectoryScreen()">
         <div class="home-card-icon-wrap home-card-icon-dim">
@@ -3736,7 +3738,7 @@ async function sendOwnerTelegramTest() {
 }
 
 function openCarDirectoryScreen() {
-  if (currentRole !== 'owner') return;
+  if (!canViewCarDirectory()) return;
   if (typeof renderCarDirectory === 'function') renderCarDirectory();
   showScreen('car-directory');
 }
