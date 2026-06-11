@@ -9,6 +9,7 @@ let assistantWorkerSalaries = [];
 let cashSearchQuery = '';
 let selectedAssistantSalaryName = '';
 let profileSalaryMonthCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+let workAttendanceSaving = false;
 
 function canManageAssistantSalary() {
   return currentRole === 'senior' || currentRole === 'extra';
@@ -428,7 +429,18 @@ function renderWorkerSalarySection({ title, accumulated, todayAmount, todaySumma
 
 function getTodayAttendanceEntry() {
   const today = getLocalDateString();
-  return (workerSalaries || []).find(entry => isWorkAttendanceEntry(entry) && entry.date === today) || null;
+  const todayEntries = (workerSalaries || []).filter(entry => entry?.date === today);
+  const attendanceEntries = todayEntries.filter(entry => isWorkAttendanceEntry(entry));
+  if (!attendanceEntries.length) return null;
+  const activeTotal = todayEntries.reduce((sum, entry) => {
+    const amount = Number(entry?.amount) || 0;
+    const orderId = String(entry?.order_id || '');
+    const comment = String(entry?.comment || '');
+    if (orderId === WORK_ATTENDANCE_ORDER_ID && amount > 0) return sum + amount;
+    if (amount < 0 && orderId.startsWith('Отмена ЗП') && comment.includes('Отмена выхода в работу')) return sum + amount;
+    return sum;
+  }, 0);
+  return activeTotal > 0 ? attendanceEntries[0] : null;
 }
 
 function getTodayAttendanceAmount() {
@@ -440,17 +452,19 @@ function renderWorkAttendanceCard() {
   const amount = Number(getShiftBaseAmount(currentWorkerName)) || 0;
   if (!amount) return '';
   const entry = getTodayAttendanceEntry();
+  const isSaving = workAttendanceSaving;
   return ''
     + '<div style="padding:14px;background:var(--surface2);border-radius:12px;border:1px solid var(--border);">'
     + '<div class="profile-today-label"><i data-lucide="calendar-check" style="width:15px;height:15px;"></i> Смена</div>'
     + '<div style="font-size:12px;color:var(--text3);margin-top:6px;">Ставка за день: ' + amount.toLocaleString('ru') + ' ₴</div>'
-    + '<button class="' + (entry ? 'btn-secondary' : 'btn-primary') + '" style="margin-top:12px;width:100%;min-height:44px;font-weight:800;" onclick="toggleWorkAttendance()">'
-    + (entry ? 'Я на смене ✓' : 'Я на смене')
+    + '<button id="work-attendance-btn" class="' + (entry ? 'btn-secondary' : 'btn-primary') + '" style="margin-top:12px;width:100%;min-height:44px;font-weight:800;" onclick="toggleWorkAttendance()" ' + (isSaving ? 'disabled' : '') + '>'
+    + (isSaving ? 'Сохраняем...' : (entry ? 'Я на смене ✓' : 'Я на смене'))
     + '</button>'
     + '</div>';
 }
 
 async function toggleWorkAttendance() {
+  if (workAttendanceSaving) return;
   const amount = Number(typeof getShiftBaseAmount === 'function' ? getShiftBaseAmount(currentWorkerName) : 0) || 0;
   if (!amount) {
     showToast('Для вас ставка выхода не настроена', 'error');
@@ -458,6 +472,8 @@ async function toggleWorkAttendance() {
   }
   const today = getLocalDateString();
   const existing = getTodayAttendanceEntry();
+  workAttendanceSaving = true;
+  renderProfile();
   try {
     if (existing) {
       await sbDeleteWorkerSalary(existing.id);
@@ -470,12 +486,15 @@ async function toggleWorkAttendance() {
         date: today,
         order_id: WORK_ATTENDANCE_ORDER_ID,
       });
-      if (created) workerSalaries.unshift(created);
+      if (created && !workerSalaries.some(entry => String(entry?.id || '') === String(created.id || ''))) workerSalaries.unshift(created);
       showToast('Смена отмечена ✓');
     }
     renderProfile();
   } catch (e) {
     showToast('Ошибка: ' + e.message, 'error');
+  } finally {
+    workAttendanceSaving = false;
+    renderProfile();
   }
 }
 

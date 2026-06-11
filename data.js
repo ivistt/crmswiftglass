@@ -1992,12 +1992,16 @@ function hasWorkAttendanceForDate(workerName, date, entries = null) {
           ? allSalaries
           : (typeof workerSalaries !== 'undefined' && Array.isArray(workerSalaries) ? workerSalaries : [])
       );
-  return pool.some(entry =>
-    entry?.worker_name === workerName &&
-    entry?.date === date &&
-    entry?.order_id === WORK_ATTENDANCE_ORDER_ID &&
-    Number(entry.amount) > 0
-  );
+  const total = pool.reduce((sum, entry) => {
+    if (entry?.worker_name !== workerName || entry?.date !== date) return sum;
+    const amount = Number(entry.amount) || 0;
+    const orderId = String(entry?.order_id || '');
+    const comment = String(entry?.comment || '');
+    if (orderId === WORK_ATTENDANCE_ORDER_ID && amount > 0) return sum + amount;
+    if (amount < 0 && orderId.startsWith('Отмена ЗП') && comment.includes('Отмена выхода в работу')) return sum + amount;
+    return sum;
+  }, 0);
+  return total > 0;
 }
 
 function calcDailyBaseSalary(workerName, date) {
