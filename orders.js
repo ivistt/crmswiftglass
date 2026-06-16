@@ -1933,6 +1933,31 @@ async function restoreOrder(id, event) {
 }
 
 // ---------- КОПИРОВАНИЕ ДАННЫХ ЗАКАЗА ----------
+let orderCopyModalOrderId = null;
+
+const ORDER_COPY_EXTRA_BLOCKS = [
+  {
+    key: 'corrosion',
+    title: 'Коррозия',
+    text: '*Коррозия*\n\nПосле демонтажа стекла возможно выявление коррозии (ржавчины). Стоимость устранения определяется по факту, в зависимости от степени сложности работ, и оплачивается дополнительно.',
+  },
+  {
+    key: 'projection-toning',
+    title: 'Тонировка для проекции',
+    text: '*Тонировка для проекции*\n\nПосле тонировки работа проекции сохранится. Возможны незначительные изменения яркости и чёткости изображения из-за особенностей плёнки, однако в целом проекция отображается корректно.',
+  },
+  {
+    key: 'site-form',
+    title: 'Заявка на заполнение',
+    text: '*Заявка на заполнение*\n\nЧтобы не уточнять всё по переписке, заполните, пожалуйста, короткую форму заявки:\nhttps://swiftglass.com.ua/form',
+  },
+  {
+    key: 'selection',
+    title: 'Подбор',
+    text: '*Подбор*\n\nДля проверки комплектации и правильного подбора стекла пришлите, пожалуйста:\n• VIN-код автомобиля;\n• фото лобового стекла с улицы в зоне зеркала заднего вида.\n\nПо фото мы определим наличие датчиков, камеры, обогрева и других опций.',
+  },
+];
+
 function copyOrderSummary(id) {
   const o = orders.find(x => x.id === id);
   if (!o) return;
@@ -1970,6 +1995,10 @@ https://share.google/EKtUDPReA8dCuWp4z`;
     return;
   }
 
+  openOrderCopyModal(id);
+}
+
+function buildOrderClientCopyContent(o) {
   const textLines = [];
   const htmlParts = [];
   const fullTotal = getOrderClientTotal(o);
@@ -2055,7 +2084,81 @@ https://share.google/EKtUDPReA8dCuWp4z`;
 
   const text = textLines.join('\n');
   const html = `<div style="font-family:Arial,sans-serif;font-size:16px;line-height:1.45;">${htmlParts.join('')}</div>`;
+  return { text, html };
+}
 
+function renderOrderCopyExtraBlockHtml(text) {
+  return escapeHtml(text)
+    .replace(/\*([^*\n]+)\*/g, '<strong>$1</strong>')
+    .replace(/\n/g, '<br>');
+}
+
+function buildOrderCopyContentWithExtras(order, extraKeys = []) {
+  const base = buildOrderClientCopyContent(order);
+  const selected = new Set(extraKeys || []);
+  const extraBlocks = ORDER_COPY_EXTRA_BLOCKS.filter(block => selected.has(block.key));
+  if (!extraBlocks.length) return base;
+  const extraText = extraBlocks.map(block => block.text).join('\n\n');
+  const extraHtml = extraBlocks
+    .map(block => `<div style="margin-top:18px;">${renderOrderCopyExtraBlockHtml(block.text)}</div>`)
+    .join('');
+  const baseHtml = base.html.endsWith('</div>') ? base.html.slice(0, -6) : base.html;
+  return {
+    text: [base.text, extraText].filter(Boolean).join('\n\n'),
+    html: `${baseHtml}${extraHtml}</div>`,
+  };
+}
+
+function openOrderCopyModal(id) {
+  const order = orders.find(item => item.id === id);
+  if (!order) return;
+  orderCopyModalOrderId = id;
+  const container = document.getElementById('order-copy-options');
+  const modal = document.getElementById('order-copy-modal');
+  if (!container || !modal) {
+    copyOrderClientContent(buildOrderClientCopyContent(order));
+    return;
+  }
+  const base = buildOrderClientCopyContent(order);
+  const basePreview = base.text.split('\n').filter(Boolean).slice(0, 8).join('\n');
+  container.innerHTML = `
+    <label class="order-copy-option">
+      <input type="checkbox" checked disabled>
+      <span>
+        <div class="order-copy-option-title">Данные заказа</div>
+        <div class="order-copy-option-preview">${escapeHtml(basePreview || 'Основная информация заказа')}</div>
+      </span>
+    </label>
+    ${ORDER_COPY_EXTRA_BLOCKS.map(block => `
+      <label class="order-copy-option">
+        <input type="checkbox" value="${escapeAttr(block.key)}" data-order-copy-extra>
+        <span>
+          <div class="order-copy-option-title">${escapeHtml(block.title)}</div>
+          <div class="order-copy-option-preview">${escapeHtml(block.text.replace(/\*/g, '').split('\n').filter(Boolean).slice(1).join('\n'))}</div>
+        </span>
+      </label>
+    `).join('')}
+  `;
+  modal.classList.add('active');
+  initIcons();
+}
+
+function closeOrderCopyModal() {
+  document.getElementById('order-copy-modal')?.classList.remove('active');
+  orderCopyModalOrderId = null;
+}
+
+function copySelectedOrderSummary() {
+  const order = orders.find(item => item.id === orderCopyModalOrderId);
+  if (!order) return;
+  const extraKeys = Array.from(document.querySelectorAll('[data-order-copy-extra]:checked'))
+    .map(input => input.value)
+    .filter(Boolean);
+  copyOrderClientContent(buildOrderCopyContentWithExtras(order, extraKeys));
+  closeOrderCopyModal();
+}
+
+function copyOrderClientContent({ text, html }) {
   if (navigator.clipboard && window.ClipboardItem && navigator.clipboard.write) {
     navigator.clipboard.write([
       new ClipboardItem({

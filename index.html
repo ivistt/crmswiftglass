@@ -649,6 +649,25 @@
   </div>
 </div>
 
+<!-- ==================== ORDER COPY MODAL ==================== -->
+<div class="modal-overlay" id="order-copy-modal">
+  <div class="modal order-copy-modal">
+    <div class="modal-header">
+      <div class="modal-title">Копирование для клиента</div>
+      <button class="modal-close" onclick="closeOrderCopyModal()">
+        <i data-lucide="x" style="width:16px;height:16px;"></i>
+      </button>
+    </div>
+    <div class="modal-body order-copy-modal-body">
+      <div class="order-copy-list" id="order-copy-options"></div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn-secondary" onclick="closeOrderCopyModal()">Отмена</button>
+      <button type="button" class="btn-primary" onclick="copySelectedOrderSummary()">Скопировать</button>
+    </div>
+  </div>
+</div>
+
 <!-- ==================== ORDER MODAL ==================== -->
 <div class="modal-overlay" id="order-modal">
   <div class="modal modal-order">

@@ -2173,6 +2173,50 @@ body {
   color: #050505;
 }
 
+.order-copy-modal {
+  max-width: 560px;
+}
+#order-copy-modal {
+  z-index: 1002;
+}
+.order-copy-modal-body {
+  padding: 18px 24px;
+  overflow: auto;
+}
+.order-copy-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.order-copy-option {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface2);
+  cursor: pointer;
+}
+.order-copy-option input {
+  margin-top: 2px;
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+.order-copy-option-title {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--text);
+}
+.order-copy-option-preview {
+  margin-top: 5px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text3);
+  white-space: pre-line;
+}
+
 .order-modal-tabs {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
