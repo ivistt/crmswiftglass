@@ -1963,6 +1963,18 @@ const ORDER_COPY_EXTRA_BLOCKS = [
   },
 ];
 
+function getOrderCopyExtraBlocks() {
+  const configured = appSettings?.client_copy_fields?.fields;
+  if (!Array.isArray(configured)) return ORDER_COPY_EXTRA_BLOCKS;
+  return configured
+    .map((block, index) => ({
+      key: String(block?.key || `custom-${index + 1}`),
+      title: String(block?.title || '').trim(),
+      text: String(block?.text || '').trim(),
+    }))
+    .filter(block => block.title && block.text);
+}
+
 function copyOrderSummary(id) {
   const o = orders.find(x => x.id === id);
   if (!o) return;
@@ -2101,7 +2113,7 @@ function renderOrderCopyExtraBlockHtml(text) {
 function buildOrderCopyContentWithExtras(order, extraKeys = []) {
   const base = buildOrderClientCopyContent(order);
   const selected = new Set(extraKeys || []);
-  const extraBlocks = ORDER_COPY_EXTRA_BLOCKS.filter(block => selected.has(block.key));
+  const extraBlocks = getOrderCopyExtraBlocks().filter(block => selected.has(block.key));
   if (!extraBlocks.length) return base;
   const extraText = extraBlocks.map(block => block.text).join('\n\n');
   const extraHtml = extraBlocks
@@ -2134,7 +2146,7 @@ function openOrderCopyModal(id) {
         <div class="order-copy-option-preview">${escapeHtml(basePreview || 'Основная информация заказа')}</div>
       </span>
     </label>
-    ${ORDER_COPY_EXTRA_BLOCKS.map(block => `
+    ${getOrderCopyExtraBlocks().map(block => `
       <label class="order-copy-option">
         <input type="checkbox" value="${escapeAttr(block.key)}" data-order-copy-extra>
         <span>
@@ -3220,6 +3232,8 @@ async function openOrderModal(id) {
   if (cancelWrap) {
     cancelWrap.style.display = canUseFullOrderForm(accessOrder) ? 'inline-flex' : 'none';
   }
+  const reminderWrap = document.getElementById('f-reminder-wrap');
+  if (reminderWrap) reminderWrap.style.display = (currentRole === 'owner' || currentRole === 'manager') ? '' : 'none';
 
   if (id) {
     // РЕДАКТИРОВАНИЕ
@@ -3510,6 +3524,7 @@ function getOrderDraftFromForm(baseOrder = null) {
   order.toningDone = order.toningStatus;
   order.toningDoneBy = order.toningStatus ? (baseOrder?.toningDoneBy || order.toningResponsible || currentWorkerName || '') : '';
   order.priorityTask = document.getElementById('f-priority-task')?.checked || false;
+  order.reminder = document.getElementById('f-reminder')?.checked || false;
   order.total = getN('f-total');
   order.income = getN('f-income');
   order.purchase = getN('f-purchase');
@@ -3520,7 +3535,7 @@ function getOrderDraftFromForm(baseOrder = null) {
   order.inWork = document.getElementById('f-order-status')?.value === 'inWork';
   order.ownWarehouse = document.getElementById('f-order-status')?.value === 'ownWarehouse';
   order.isCancelled = document.getElementById('f-order-status')?.value === 'cancelled';
-  order.reworkData = { ...(baseOrder?.reworkData || {}), priorityTask: order.priorityTask };
+  order.reworkData = { ...(baseOrder?.reworkData || {}), priorityTask: order.priorityTask, reminder: order.reminder };
   return order;
 }
 
@@ -3822,7 +3837,7 @@ function updateOrderModalAccess(order = null) {
   const basicFieldIds = [
     'f-date','f-time','f-responsible','f-assistant','f-manager','f-client','f-phone','f-address',
     'f-vin','f-extra-note','f-car','f-code','f-glass-manufacturer','f-new-post','f-warehouse',
-    'f-warehouse-code','f-notes','f-order-status','f-only-sale','f-toning-external','f-priority-task','f-configuration'
+    'f-warehouse-code','f-notes','f-order-status','f-only-sale','f-toning-external','f-priority-task','f-reminder','f-configuration'
   ];
   basicFieldIds.forEach(id => setElementDisabledState(document.getElementById(id), !isPrivileged));
   document.querySelectorAll('#f-configuration-checkboxes input[type="checkbox"]').forEach(input => setElementDisabledState(input, !isPrivileged));
@@ -4083,6 +4098,8 @@ function fillOrderForm(o) {
   if (tonExtEl) tonExtEl.checked = !!o.toningExternal;
   const priorityTaskEl = document.getElementById('f-priority-task');
   if (priorityTaskEl) priorityTaskEl.checked = !!o.priorityTask;
+  const reminderEl = document.getElementById('f-reminder');
+  if (reminderEl) reminderEl.checked = !!o.reminder;
   // услуги — чекбоксы
   const svcHidden = document.getElementById('f-service-type');
   if (svcHidden) {
@@ -4166,6 +4183,8 @@ function clearOrderForm() {
   if (tonExtEl) tonExtEl.checked = false;
   const priorityTaskEl = document.getElementById('f-priority-task');
   if (priorityTaskEl) priorityTaskEl.checked = false;
+  const reminderEl = document.getElementById('f-reminder');
+  if (reminderEl) reminderEl.checked = false;
   const tatuStatusEl = document.getElementById('f-tatu-status');
   if (tatuStatusEl) tatuStatusEl.checked = false;
   const toningStatusEl = document.getElementById('f-toning-status');
@@ -4351,6 +4370,9 @@ async function saveOrder() {
     priorityTask:    canUseFullSave
       ? (document.getElementById('f-priority-task')?.checked || false)
       : !!existingOrder?.priorityTask,
+    reminder:        canUseFullSave
+      ? (document.getElementById('f-reminder')?.checked || false)
+      : !!existingOrder?.reminder,
     delivery:        getN('f-delivery'),
     warehouse:       get('f-warehouse'),
     warehouseCode:   get('f-warehouse-code'),
@@ -4399,12 +4421,31 @@ async function saveOrder() {
     payoutMoldingResp:     getN('f-payout-molding-resp'),
     payoutMoldingAssist:   getN('f-payout-molding-assist'),
     onlySale:        document.getElementById('f-only-sale')?.checked || false,
-    reworkData: { ...(existingOrder?.reworkData || {}), priorityTask: canUseFullSave
-      ? (document.getElementById('f-priority-task')?.checked || false)
-      : !!existingOrder?.priorityTask },
+    reworkData: {
+      ...(existingOrder?.reworkData || {}),
+      priorityTask: canUseFullSave
+        ? (document.getElementById('f-priority-task')?.checked || false)
+        : !!existingOrder?.priorityTask,
+      reminder: canUseFullSave
+        ? (document.getElementById('f-reminder')?.checked || false)
+        : !!existingOrder?.reminder,
+    },
     clientPayments: currentClientPayments,
     supplierPayments: currentSupplierPayments,
   };
+
+  if (existingOrder?.date && data.date && existingOrder.date !== data.date) {
+    const history = Array.isArray(data.reworkData?.rescheduleHistory)
+      ? [...data.reworkData.rescheduleHistory]
+      : [];
+    history.push({
+      from: existingOrder.date,
+      to: data.date,
+      changedAt: new Date().toISOString(),
+      changedBy: currentWorkerName || currentRole || '',
+    });
+    data.reworkData.rescheduleHistory = history.slice(-30);
+  }
 
   if (!validateOrderRequiredFields(data)) return;
   if (!validateCustomServiceMountAmount(data)) return;
@@ -4823,6 +4864,11 @@ async function toggleWorkerDone(orderId) {
     }
     const donePatch = {
       worker_done: true,
+      rework_data: {
+        ...(o.reworkData || {}),
+        completedAt: new Date().toISOString(),
+        completedBy: currentWorkerName || '',
+      },
     };
     if (draftOrder.tatuStatus && canCurrentUserToggleSpecialServiceStatus(draftOrder, 'tatu')) {
       donePatch.tatu_status = true;

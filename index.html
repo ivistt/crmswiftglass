@@ -171,6 +171,26 @@
     <i data-lucide="refresh-cw" style="width:20px;height:20px;"></i>
   </button>
 
+  <div class="owner-dashboard-menu" id="owner-dashboard-menu" style="display:none;">
+    <button class="owner-dashboard-menu-toggle" id="owner-dashboard-menu-toggle" type="button" onclick="toggleOwnerDashboardMenu(event)" aria-label="Быстрые действия" aria-expanded="false">
+      <i data-lucide="menu" style="width:20px;height:20px;"></i>
+    </button>
+    <div class="owner-dashboard-menu-island" id="owner-dashboard-menu-island" role="menu">
+      <button type="button" role="menuitem" onclick="openQuickCopyModal()">
+        <span><i data-lucide="clipboard-copy" style="width:17px;height:17px;"></i></span>
+        <div><strong>Данные для клиента</strong><small>Скопировать готовый текст</small></div>
+      </button>
+      <button type="button" role="menuitem" onclick="openDailyReportModal()">
+        <span><i data-lucide="file-chart-column" style="width:17px;height:17px;"></i></span>
+        <div><strong>Отчёт за день</strong><small>Заказы, деньги и расходы</small></div>
+      </button>
+      <button type="button" role="menuitem" onclick="openRemindersModal()">
+        <span><i data-lucide="bell" style="width:17px;height:17px;"></i></span>
+        <div><strong>Напоминания <em class="owner-menu-count" id="owner-reminders-count"></em></strong><small>Отмеченные заказы</small></div>
+      </button>
+    </div>
+  </div>
+
   <div class="main-content">
 
     <!-- HOME -->
@@ -618,6 +638,21 @@
   </div>
 </div>
 
+<!-- ==================== REMINDERS MODAL ==================== -->
+<div class="modal-overlay" id="reminders-modal">
+  <div class="modal quick-action-modal">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">Напоминания</div>
+        <div class="quick-action-modal-subtitle">Заказы, которые требуют внимания</div>
+      </div>
+      <button class="modal-close" onclick="closeRemindersModal()"><i data-lucide="x" style="width:16px;height:16px;"></i></button>
+    </div>
+    <div class="modal-body"><div class="reminders-list" id="reminders-list"></div></div>
+    <div class="modal-footer"><button type="button" class="btn-secondary" onclick="closeRemindersModal()">Закрыть</button></div>
+  </div>
+</div>
+
 <!-- ==================== CAR DIRECTORY MODAL ==================== -->
 <div class="modal-overlay" id="car-dir-modal">
   <div class="modal" style="max-width:460px;">
@@ -664,6 +699,45 @@
     <div class="modal-footer">
       <button type="button" class="btn-secondary" onclick="closeOrderCopyModal()">Отмена</button>
       <button type="button" class="btn-primary" onclick="copySelectedOrderSummary()">Скопировать</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== OWNER QUICK COPY MODAL ==================== -->
+<div class="modal-overlay" id="quick-copy-modal">
+  <div class="modal quick-action-modal">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">Данные для клиента</div>
+        <div class="quick-action-modal-subtitle">Выберите один или несколько блоков</div>
+      </div>
+      <button class="modal-close" onclick="closeQuickCopyModal()"><i data-lucide="x" style="width:16px;height:16px;"></i></button>
+    </div>
+    <div class="modal-body"><div class="order-copy-list" id="quick-copy-options"></div></div>
+    <div class="modal-footer">
+      <button type="button" class="btn-secondary" onclick="closeQuickCopyModal()">Отмена</button>
+      <button type="button" class="btn-primary" onclick="copyQuickClientData()">Скопировать</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== DAILY REPORT MODAL ==================== -->
+<div class="modal-overlay" id="daily-report-modal">
+  <div class="modal daily-report-modal">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">Отчёт за день</div>
+        <div class="quick-action-modal-subtitle">Сводка по группам, заказам и деньгам</div>
+      </div>
+      <button class="modal-close" onclick="closeDailyReportModal()"><i data-lucide="x" style="width:16px;height:16px;"></i></button>
+    </div>
+    <div class="daily-report-toolbar">
+      <input class="form-input" type="date" id="daily-report-date" onchange="renderDailyReportModal(this.value)">
+    </div>
+    <div class="modal-body daily-report-body" id="daily-report-content"></div>
+    <div class="modal-footer">
+      <button type="button" class="btn-secondary" onclick="closeDailyReportModal()">Закрыть</button>
+      <button type="button" class="btn-primary" onclick="copyDailyReport()"><i data-lucide="copy" style="width:14px;height:14px;"></i> Копировать отчёт</button>
     </div>
   </div>
 </div>
@@ -725,6 +799,12 @@
               <label class="checkbox order-flag-checkbox">
                 <input type="checkbox" id="f-priority-task">
                 <span>🔥 Приоритетная задача</span>
+              </label>
+            </div>
+            <div class="form-group" id="f-reminder-wrap">
+              <label class="checkbox order-flag-checkbox">
+                <input type="checkbox" id="f-reminder">
+                <span>🔔 Напоминание</span>
               </label>
             </div>
           </div>

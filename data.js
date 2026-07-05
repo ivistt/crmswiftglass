@@ -1506,6 +1506,7 @@ function rowToOrder(r) {
     onlySale:        r.only_sale || false,
     reworkData:      r.rework_data || {},
     priorityTask:    !!r.rework_data?.priorityTask,
+    reminder:        !!r.rework_data?.reminder,
     clientPayments:  r.client_payments || [],
     supplierPayments:r.supplier_payments || [],
     deletedAt:       r.deleted_at || '',
@@ -1517,6 +1518,8 @@ function orderToRow(o) {
   const reworkData = { ...(o.reworkData || {}) };
   if (o.priorityTask) reworkData.priorityTask = true;
   else delete reworkData.priorityTask;
+  if (o.reminder) reworkData.reminder = true;
+  else delete reworkData.reminder;
   return {
     id:               o.id,
     date:             o.date,
@@ -1674,6 +1677,7 @@ function orderToRowSparse(o) {
     ['onlySale', 'only_sale'],
     ['reworkData', 'rework_data'],
     ['priorityTask', 'rework_data'],
+    ['reminder', 'rework_data'],
     ['clientPayments', 'client_payments'],
     ['supplierPayments', 'supplier_payments'],
   ];

@@ -790,10 +790,191 @@ function showScreen(name, options = {}) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   const el = document.getElementById('screen-' + name);
   if (el) el.classList.add('active');
+  const ownerMenu = document.getElementById('owner-dashboard-menu');
+  if (ownerMenu) {
+    ownerMenu.style.display = currentRole === 'owner' && name === 'home' ? '' : 'none';
+    ownerMenu.classList.remove('is-open');
+  }
   updateHomeBackLabels();
 
   setActiveNav(name);
   window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function toggleOwnerDashboardMenu(event) {
+  event?.stopPropagation?.();
+  const menu = document.getElementById('owner-dashboard-menu');
+  if (!menu || currentRole !== 'owner') return;
+  const open = menu.classList.toggle('is-open');
+  document.getElementById('owner-dashboard-menu-toggle')?.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+function closeOwnerDashboardMenu() {
+  document.getElementById('owner-dashboard-menu')?.classList.remove('is-open');
+  document.getElementById('owner-dashboard-menu-toggle')?.setAttribute('aria-expanded', 'false');
+}
+
+function getReminderOrders() {
+  return (orders || [])
+    .filter(order => order?.reminder && !order.workerDone && !order.isCancelled && !isOrderDeleted(order))
+    .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')) || String(a.time || '').localeCompare(String(b.time || '')));
+}
+
+function updateOwnerRemindersCount() {
+  const badge = document.getElementById('owner-reminders-count');
+  if (!badge) return;
+  const count = getReminderOrders().length;
+  badge.textContent = count ? String(count) : '';
+  badge.style.display = count ? 'inline-flex' : 'none';
+}
+
+function openRemindersModal() {
+  if (currentRole !== 'owner') return;
+  closeOwnerDashboardMenu();
+  const list = getReminderOrders();
+  const container = document.getElementById('reminders-list');
+  if (!container) return;
+  container.innerHTML = list.length ? list.map(order => `
+    <button type="button" class="reminder-order-card" onclick="openOrderFromReminder('${escapeAttr(order.id)}')">
+      <span class="reminder-order-icon"><i data-lucide="bell-ring" style="width:17px;height:17px;"></i></span>
+      <span class="reminder-order-main">
+        <strong>${escapeHtml(order.id || '—')} · ${escapeHtml(order.car || order.client || 'Без названия')}</strong>
+        <small>${order.client ? escapeHtml(order.client) + ' · ' : ''}${order.phone ? escapeHtml(order.phone) + ' · ' : ''}${escapeHtml(getWorkerDisplayName(order.manager || order.responsible) || 'Без ответственного')}</small>
+      </span>
+      <span class="reminder-order-date"><strong>${order.date ? escapeHtml(formatDate(order.date)) : 'Без даты'}</strong><small>${escapeHtml(order.time || '')}</small></span>
+    </button>
+  `).join('') : '<div class="empty-state"><div class="empty-state-icon"><i data-lucide="bell-off"></i></div><h3>Напоминаний нет</h3><p>Отметьте нужный заказ галочкой «Напоминание»</p></div>';
+  document.getElementById('reminders-modal')?.classList.add('active');
+  initIcons();
+}
+
+function closeRemindersModal() { document.getElementById('reminders-modal')?.classList.remove('active'); }
+
+function openOrderFromReminder(orderId) {
+  closeRemindersModal();
+  openOrderModal(orderId);
+}
+
+document.addEventListener('click', event => {
+  if (!event.target.closest('#owner-dashboard-menu')) closeOwnerDashboardMenu();
+});
+
+function openQuickCopyModal() {
+  if (currentRole !== 'owner') return;
+  closeOwnerDashboardMenu();
+  const fields = typeof getOrderCopyExtraBlocks === 'function' ? getOrderCopyExtraBlocks() : [];
+  const container = document.getElementById('quick-copy-options');
+  if (!container) return;
+  container.innerHTML = fields.length ? fields.map(field => `
+    <label class="order-copy-option">
+      <input type="checkbox" value="${escapeAttr(field.key)}" data-quick-copy-field>
+      <span>
+        <div class="order-copy-option-title">${escapeHtml(field.title)}</div>
+        <div class="order-copy-option-preview">${escapeHtml(field.text.replace(/\*/g, ''))}</div>
+      </span>
+    </label>
+  `).join('') : '<div class="empty-state"><h3>Текстов пока нет</h3><p>Добавьте их в настройках владельца</p></div>';
+  document.getElementById('quick-copy-modal')?.classList.add('active');
+  initIcons();
+}
+
+function closeQuickCopyModal() {
+  document.getElementById('quick-copy-modal')?.classList.remove('active');
+}
+
+function copyQuickClientData() {
+  const selected = new Set(Array.from(document.querySelectorAll('[data-quick-copy-field]:checked')).map(input => input.value));
+  const blocks = (typeof getOrderCopyExtraBlocks === 'function' ? getOrderCopyExtraBlocks() : []).filter(field => selected.has(field.key));
+  if (!blocks.length) return showToast('Выберите хотя бы один блок', 'error');
+  const text = blocks.map(block => block.text).join('\n\n');
+  const html = `<div style="font-family:Arial,sans-serif;font-size:16px;line-height:1.45;">${blocks.map(block => `<div style="margin-bottom:18px;">${renderOrderCopyExtraBlockHtml(block.text)}</div>`).join('')}</div>`;
+  copyOrderClientContent({ text, html });
+  closeQuickCopyModal();
+}
+
+function getDailyReportData(date) {
+  const targetDate = date || getLocalDateString();
+  const scheduled = (orders || []).filter(order => isOrderFinanciallyActive(order) && order.date === targetDate);
+  const completed = scheduled.filter(order => order.workerDone);
+  const unfinished = scheduled.filter(order => !order.workerDone);
+  const tomorrow = new Date(`${targetDate}T12:00:00`);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowKey = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}`;
+  const transferred = (orders || []).filter(order => {
+    const history = order?.reworkData?.rescheduleHistory;
+    return Array.isArray(history) && history.some(item => item?.from === targetDate && item?.to === tomorrowKey);
+  });
+  const groupsMap = new Map();
+  scheduled.forEach(order => {
+    const key = _ownerTodayGroupKey(order);
+    if (!groupsMap.has(key)) groupsMap.set(key, { label: _ownerTodayGroupLabel({ responsible: order.responsible || 'Без ответственного', assistant: order.assistant || '' }), orders: [] });
+    groupsMap.get(key).orders.push(order);
+  });
+  const expenses = (typeof getOwnerExpenseLogs === 'function' ? getOwnerExpenseLogs() : [])
+    .filter(entry => String(entry?.fop_date || _ownerCashEntryDate(entry) || '').slice(0, 10) === targetDate);
+  const expensesTotal = expenses.reduce((sum, entry) => sum + getExpenseCashAmount(entry), 0);
+  const orderValue = completed.reduce((sum, order) => sum + getOrderClientTotalAmount(order), 0);
+  const received = completed.reduce((sum, order) => sum + getOrderClientPaidAmount(order), 0);
+  const supplierCosts = completed.reduce((sum, order) => sum + (Number(order.purchase) || 0), 0);
+  return { targetDate, scheduled, completed, unfinished, transferred, groups: Array.from(groupsMap.values()), expenses, expensesTotal, orderValue, received, supplierCosts, net: received - supplierCosts - expensesTotal };
+}
+
+function openDailyReportModal() {
+  if (currentRole !== 'owner') return;
+  closeOwnerDashboardMenu();
+  const date = getLocalDateString();
+  const input = document.getElementById('daily-report-date');
+  if (input) input.value = date;
+  renderDailyReportModal(date);
+  document.getElementById('daily-report-modal')?.classList.add('active');
+}
+
+function closeDailyReportModal() { document.getElementById('daily-report-modal')?.classList.remove('active'); }
+
+function renderDailyReportModal(date) {
+  const report = getDailyReportData(date);
+  const container = document.getElementById('daily-report-content');
+  if (!container) return;
+  const money = value => `${Number(value || 0).toLocaleString('ru')} ₴`;
+  const renderOrder = order => `<div class="daily-report-order"><span class="daily-report-order-status ${order.workerDone ? 'is-done' : ''}"></span><div><strong>${escapeHtml(order.id || '—')} · ${escapeHtml(order.car || order.client || 'Без названия')}</strong><small>${order.workerDone ? 'Выполнен' : 'Не выполнен'}${order.time ? ' · ' + escapeHtml(order.time) : ''}</small></div><strong>${money(getOrderClientTotalAmount(order))}</strong></div>`;
+  container.innerHTML = `
+    <div class="daily-report-metrics">
+      <div class="daily-report-metric"><span>Заказов</span><strong>${report.scheduled.length}</strong></div>
+      <div class="daily-report-metric is-good"><span>Выполнено</span><strong>${report.completed.length}</strong></div>
+      <div class="daily-report-metric is-bad"><span>Не выполнено</span><strong>${report.unfinished.length}</strong></div>
+      <div class="daily-report-metric"><span>Сумма работ</span><strong>${money(report.orderValue)}</strong></div>
+      <div class="daily-report-metric is-good"><span>Получено</span><strong>${money(report.received)}</strong></div>
+      <div class="daily-report-metric is-bad"><span>Расходы</span><strong>${money(report.expensesTotal + report.supplierCosts)}</strong></div>
+    </div>
+    <div class="daily-report-section"><div class="daily-report-section-title">Группы</div>
+      ${report.groups.length ? report.groups.map(group => `<div class="daily-report-group"><div class="daily-report-group-head"><span>${escapeHtml(group.label)}</span><span>${group.orders.filter(order => order.workerDone).length}/${group.orders.length}</span></div>${group.orders.map(renderOrder).join('')}</div>`).join('') : '<div class="empty-state"><p>Заказов на эту дату нет</p></div>'}
+    </div>
+    ${report.transferred.length ? `<div class="daily-report-section"><div class="daily-report-section-title">Перенесены на завтра · ${report.transferred.length}</div>${report.transferred.map(renderOrder).join('')}</div>` : ''}
+    <div class="daily-report-section"><div class="daily-report-section-title">Финансовый итог</div><div class="daily-report-group"><div class="daily-report-group-head"><span>Получено минус закупки и расходы</span><span style="color:${report.net >= 0 ? 'var(--accent)' : 'var(--red)'}">${money(report.net)}</span></div></div></div>`;
+  initIcons();
+}
+
+function buildDailyReportText(date) {
+  const report = getDailyReportData(date);
+  const money = value => `${Number(value || 0).toLocaleString('ru')} ₴`;
+  const lines = [`ОТЧЁТ ЗА ${formatDate(report.targetDate)}`, '', `Заказов: ${report.scheduled.length}`, `Выполнено: ${report.completed.length}`, `Не выполнено: ${report.unfinished.length}`, `Перенесено на завтра: ${report.transferred.length}`, ''];
+  report.groups.forEach(group => {
+    lines.push(`${group.label} — ${group.orders.filter(order => order.workerDone).length}/${group.orders.length}`);
+    group.orders.forEach(order => lines.push(`${order.workerDone ? '✓' : '○'} ${order.id} · ${order.car || order.client || 'Без названия'} · ${money(getOrderClientTotalAmount(order))}`));
+    lines.push('');
+  });
+  if (report.transferred.length) {
+    lines.push('ПЕРЕНЕСЕНЫ НА ЗАВТРА');
+    report.transferred.forEach(order => lines.push(`→ ${order.id} · ${order.car || order.client || 'Без названия'}`));
+    lines.push('');
+  }
+  lines.push(`Сумма выполненных заказов: ${money(report.orderValue)}`, `Получено: ${money(report.received)}`, `Закупки: ${money(report.supplierCosts)}`, `Прочие расходы: ${money(report.expensesTotal)}`, `Итог: ${money(report.net)}`);
+  return lines.join('\n');
+}
+
+function copyDailyReport() {
+  const date = document.getElementById('daily-report-date')?.value || getLocalDateString();
+  copyOrderClientContent({ text: buildDailyReportText(date), html: `<pre style="white-space:pre-wrap;font-family:Arial,sans-serif">${escapeHtml(buildDailyReportText(date))}</pre>` });
 }
 
 function updateHomeBackLabels() {
@@ -875,6 +1056,7 @@ function renderHome() {
   document.getElementById('screen-home')?.classList.toggle('owner-dashboard-screen', currentRole === 'owner');
 
   const container = document.getElementById('home-cards');
+  updateOwnerRemindersCount();
   container.classList.toggle('owner-dashboard-cards', currentRole === 'owner');
   container.innerHTML = '';
   const dashboardOrdersCount = getHomeDashboardOrdersCount();
@@ -3711,9 +3893,58 @@ function renderOwnerSettingsScreen() {
         </div>
       </div>
     </div>
+    ${renderOwnerCopyFieldsSettings()}
     ${typeof renderOwnerSystemBannerControls === 'function' ? renderOwnerSystemBannerControls() : ''}
   `;
   initIcons();
+}
+
+function renderOwnerCopyFieldsSettings() {
+  const fields = typeof getOrderCopyExtraBlocks === 'function' ? getOrderCopyExtraBlocks() : [];
+  return `
+    <div class="owner-copy-settings">
+      <div class="owner-copy-settings-head">
+        <div><div class="owner-banner-card-title">Данные для клиента</div><div class="owner-banner-card-text">Тексты для быстрого копирования и карточки заказа</div></div>
+        <button type="button" class="btn-secondary" onclick="addOwnerCopyField()"><i data-lucide="plus" style="width:14px;height:14px;"></i> Добавить</button>
+      </div>
+      <div class="owner-copy-settings-list" id="owner-copy-settings-list">
+        ${fields.map(field => renderOwnerCopyFieldEditor(field)).join('')}
+      </div>
+      <div style="display:flex;justify-content:flex-end;margin-top:12px;"><button type="button" class="btn-primary" id="owner-copy-save-btn" onclick="saveOwnerCopyFields()"><i data-lucide="save" style="width:14px;height:14px;"></i> Сохранить тексты</button></div>
+    </div>`;
+}
+
+function renderOwnerCopyFieldEditor(field = {}) {
+  return `<div class="owner-copy-field" data-owner-copy-row data-key="${escapeAttr(field.key || `custom-${Date.now()}`)}"><input class="form-input" data-owner-copy-title value="${escapeAttr(field.title || '')}" placeholder="Название, например: Адрес"><button type="button" class="icon-btn" onclick="this.closest('[data-owner-copy-row]').remove()" title="Удалить"><i data-lucide="trash-2" style="width:15px;height:15px;"></i></button><textarea class="form-input" data-owner-copy-text placeholder="Текст, который будет скопирован">${escapeHtml(field.text || '')}</textarea></div>`;
+}
+
+function addOwnerCopyField() {
+  document.getElementById('owner-copy-settings-list')?.insertAdjacentHTML('beforeend', renderOwnerCopyFieldEditor({ key: `custom-${Date.now()}` }));
+  initIcons();
+  const rows = document.querySelectorAll('[data-owner-copy-row]');
+  rows[rows.length - 1]?.querySelector('[data-owner-copy-title]')?.focus();
+}
+
+async function saveOwnerCopyFields() {
+  if (currentRole !== 'owner') return;
+  const fields = Array.from(document.querySelectorAll('[data-owner-copy-row]')).map((row, index) => ({
+    key: String(row.dataset.key || `custom-${index + 1}`),
+    title: row.querySelector('[data-owner-copy-title]')?.value?.trim() || '',
+    text: row.querySelector('[data-owner-copy-text]')?.value?.trim() || '',
+  })).filter(field => field.title && field.text);
+  const btn = document.getElementById('owner-copy-save-btn');
+  if (btn) btn.disabled = true;
+  try {
+    const payload = { fields, updatedAt: new Date().toISOString() };
+    await sbUpsertAppSetting('client_copy_fields', payload);
+    appSettings.client_copy_fields = payload;
+    renderOwnerSettingsScreen();
+    showToast('Тексты сохранены ✓');
+  } catch (e) {
+    showToast('Ошибка сохранения: ' + e.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 function renderUserSettingsScreen() {

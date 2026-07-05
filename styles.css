@@ -404,6 +404,72 @@ body {
   opacity: 0.72;
 }
 
+.owner-dashboard-menu { position:fixed; top:68px; right:14px; z-index:209; }
+.owner-dashboard-menu-toggle {
+  width:44px; height:44px; border:1px solid rgba(255,255,255,.08); border-radius:999px;
+  background:rgba(16,16,16,.42); color:rgba(255,255,255,.72); backdrop-filter:blur(8px);
+  -webkit-backdrop-filter:blur(8px); box-shadow:0 14px 34px rgba(0,0,0,.22),0 1px 0 rgba(255,255,255,.08) inset;
+  display:flex; align-items:center; justify-content:center; cursor:pointer; transition:.18s ease;
+}
+.owner-dashboard-menu-toggle:hover,.owner-dashboard-menu.is-open .owner-dashboard-menu-toggle { color:#fff; background:rgba(16,16,16,.62); }
+.owner-dashboard-menu-island {
+  position:absolute; top:52px; right:0; width:min(300px,calc(100vw - 28px)); padding:8px;
+  border:1px solid var(--border); border-radius:18px; background:color-mix(in srgb,var(--card) 92%,transparent);
+  box-shadow:0 24px 60px rgba(0,0,0,.28); backdrop-filter:blur(18px); -webkit-backdrop-filter:blur(18px);
+  opacity:0; visibility:hidden; transform:translateY(-8px) scale(.97); transform-origin:top right; transition:.18s ease;
+}
+.owner-dashboard-menu.is-open .owner-dashboard-menu-island { opacity:1; visibility:visible; transform:none; }
+.owner-dashboard-menu-island button {
+  width:100%; border:0; border-radius:13px; padding:11px; background:transparent; color:var(--text);
+  display:flex; align-items:center; gap:11px; text-align:left; cursor:pointer;
+}
+.owner-dashboard-menu-island button:hover,.owner-dashboard-menu-island button:focus-visible { background:var(--surface2); outline:none; }
+.owner-dashboard-menu-island button > span { width:36px; height:36px; border-radius:11px; background:var(--accent-soft); color:var(--accent); display:flex; align-items:center; justify-content:center; flex:0 0 auto; }
+.owner-dashboard-menu-island strong,.owner-dashboard-menu-island small { display:block; }
+.owner-dashboard-menu-island strong { font-size:13px; }
+.owner-dashboard-menu-island small { margin-top:2px; color:var(--text3); font-size:11px; }
+.owner-menu-count { min-width:18px; height:18px; padding:0 5px; margin-left:5px; border-radius:999px; background:var(--red); color:#fff; font-style:normal; font-size:10px; line-height:18px; align-items:center; justify-content:center; vertical-align:1px; }
+.quick-action-modal { max-width:560px; }
+.quick-action-modal-subtitle { color:var(--text3); font-size:12px; margin-top:3px; }
+.daily-report-modal { max-width:760px; max-height:88vh; display:flex; flex-direction:column; }
+.daily-report-toolbar { padding:12px 20px 0; }
+.daily-report-toolbar .form-input { max-width:190px; }
+.daily-report-body { overflow:auto; }
+.daily-report-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:9px; margin-bottom:18px; }
+.daily-report-metric { padding:13px; border:1px solid var(--border); border-radius:14px; background:var(--surface2); }
+.daily-report-metric span { display:block; color:var(--text3); font-size:11px; margin-bottom:5px; }
+.daily-report-metric strong { font-size:18px; line-height:1.1; }
+.daily-report-metric.is-good strong { color:var(--accent); }
+.daily-report-metric.is-bad strong { color:var(--red); }
+.daily-report-section { margin-top:16px; }
+.daily-report-section-title { font-size:12px; font-weight:800; letter-spacing:.05em; color:var(--text3); text-transform:uppercase; margin-bottom:8px; }
+.daily-report-group { border:1px solid var(--border); border-radius:14px; padding:12px; margin-bottom:8px; }
+.daily-report-group-head { display:flex; justify-content:space-between; gap:12px; font-weight:800; font-size:13px; }
+.daily-report-order { display:grid; grid-template-columns:auto 1fr auto; gap:8px; align-items:start; padding-top:8px; margin-top:8px; border-top:1px solid var(--border); font-size:12px; }
+.daily-report-order-status { width:8px; height:8px; border-radius:50%; margin-top:4px; background:var(--red); }
+.daily-report-order-status.is-done { background:var(--accent); }
+.daily-report-order small { color:var(--text3); display:block; margin-top:2px; }
+.owner-copy-settings { margin-top:16px; padding:16px; border:1px solid var(--border); border-radius:16px; background:var(--card); }
+.owner-copy-settings-head { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:12px; }
+.owner-copy-settings-list { display:grid; gap:10px; }
+.owner-copy-field { display:grid; grid-template-columns:1fr auto; gap:10px; padding:12px; border:1px solid var(--border); border-radius:13px; background:var(--surface2); }
+.owner-copy-field textarea { grid-column:1/-1; min-height:92px; resize:vertical; }
+.reminders-list { display:grid; gap:9px; }
+.reminder-order-card { width:100%; padding:13px; border:1px solid var(--border); border-radius:14px; background:var(--surface2); color:var(--text); display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:11px; align-items:center; text-align:left; cursor:pointer; transition:border-color .18s ease,transform .18s ease,background .18s ease; }
+.reminder-order-card:hover,.reminder-order-card:focus-visible { border-color:var(--accent); background:var(--card); transform:translateY(-1px); outline:none; }
+.reminder-order-icon { width:38px; height:38px; border-radius:12px; background:color-mix(in srgb,var(--yellow) 16%,transparent); color:var(--yellow); display:flex; align-items:center; justify-content:center; }
+.reminder-order-main { min-width:0; }
+.reminder-order-main strong,.reminder-order-main small,.reminder-order-date strong,.reminder-order-date small { display:block; }
+.reminder-order-main strong { font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.reminder-order-main small,.reminder-order-date small { color:var(--text3); font-size:11px; margin-top:3px; }
+.reminder-order-date { text-align:right; white-space:nowrap; font-size:12px; }
+@media (max-width:600px) {
+  .daily-report-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .owner-dashboard-menu { top:66px; }
+  .reminder-order-card { grid-template-columns:auto minmax(0,1fr); }
+  .reminder-order-date { grid-column:2; text-align:left; }
+}
+
 /* ===== MAIN CONTENT ===== */
 .main-content {
   flex: 1;
