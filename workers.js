@@ -28,6 +28,9 @@ const WORKER_PERMISSION_DEFINITIONS = [
   { key: 'special_service_status', label: 'Подтверждать тату и тонировку' },
   { key: 'special_service_tatu', label: 'Делает тату' },
   { key: 'special_service_toning', label: 'Делает тонировку' },
+  { key: 'action_panel_view', label: 'Показать панель-островок' },
+  { key: 'action_panel_reminders', label: 'Островок: напоминания' },
+  { key: 'action_panel_client_data', label: 'Островок: данные для клиента' },
 ];
 
 const WORKER_ROLE_PERMISSION_PRESETS = {
@@ -56,6 +59,9 @@ const WORKER_ROLE_PERMISSION_PRESETS = {
     special_service_tatu: true,
     special_service_toning: true,
     own_warehouse_view: true,
+    action_panel_view: true,
+    action_panel_reminders: true,
+    action_panel_client_data: true,
   },
   manager: {
     orders_view_all: true,
@@ -82,6 +88,9 @@ const WORKER_ROLE_PERMISSION_PRESETS = {
     special_service_tatu: false,
     special_service_toning: false,
     own_warehouse_view: false,
+    action_panel_view: false,
+    action_panel_reminders: false,
+    action_panel_client_data: false,
   },
   senior: {
     orders_view_all: false,
@@ -108,6 +117,9 @@ const WORKER_ROLE_PERMISSION_PRESETS = {
     special_service_tatu: false,
     special_service_toning: false,
     own_warehouse_view: false,
+    action_panel_view: false,
+    action_panel_reminders: false,
+    action_panel_client_data: false,
   },
   junior: {
     orders_view_all: false,
@@ -134,6 +146,9 @@ const WORKER_ROLE_PERMISSION_PRESETS = {
     special_service_tatu: false,
     special_service_toning: false,
     own_warehouse_view: false,
+    action_panel_view: false,
+    action_panel_reminders: false,
+    action_panel_client_data: false,
   },
   extra: {
     orders_view_all: false,
@@ -160,6 +175,9 @@ const WORKER_ROLE_PERMISSION_PRESETS = {
     special_service_tatu: false,
     special_service_toning: false,
     own_warehouse_view: false,
+    action_panel_view: false,
+    action_panel_reminders: false,
+    action_panel_client_data: false,
   },
 };
 
@@ -218,6 +236,66 @@ function collectWorkerPermissionState() {
     acc[item.key] = !!document.getElementById(`we-perm-${item.key}`)?.checked;
     return acc;
   }, {});
+}
+
+function getWorkerClientCopyFields(workerLike) {
+  const fields = workerLike?.clientCopyFields?.fields;
+  if (!Array.isArray(fields)) return [];
+  return fields
+    .map((field, index) => ({
+      key: String(field?.key || `worker-copy-${index + 1}`),
+      title: String(field?.title || '').trim(),
+      text: String(field?.text || '').trim(),
+    }))
+    .filter(field => field.title || field.text);
+}
+
+function renderWorkerClientCopyFieldsEditor(workerLike = {}) {
+  const fields = getWorkerClientCopyFields(workerLike);
+  return `
+    <div class="worker-copy-editor">
+      <div class="worker-copy-editor-head">
+        <div>
+          <strong>Личные тексты сотрудника</strong>
+          <small>Если оставить пустым — сотрудник увидит общие тексты владельца</small>
+        </div>
+        <button class="btn-secondary" type="button" onclick="addWorkerClientCopyField()">
+          <i data-lucide="plus" style="width:14px;height:14px;"></i> Добавить
+        </button>
+      </div>
+      <div class="owner-copy-settings-list" id="we-client-copy-fields">
+        ${fields.map(field => renderWorkerClientCopyFieldEditor(field)).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function renderWorkerClientCopyFieldEditor(field = {}) {
+  return `
+    <div class="owner-copy-field" data-worker-copy-row data-key="${escapeAttr(field.key || `worker-copy-${Date.now()}`)}">
+      <input class="form-input" data-worker-copy-title value="${escapeAttr(field.title || '')}" placeholder="Название, например: Адрес">
+      <button type="button" class="icon-btn" onclick="this.closest('[data-worker-copy-row]').remove()" title="Удалить">
+        <i data-lucide="trash-2" style="width:15px;height:15px;"></i>
+      </button>
+      <textarea class="form-input" data-worker-copy-text placeholder="Текст для копирования">${escapeHtml(field.text || '')}</textarea>
+    </div>
+  `;
+}
+
+function addWorkerClientCopyField() {
+  document.getElementById('we-client-copy-fields')?.insertAdjacentHTML('beforeend', renderWorkerClientCopyFieldEditor({ key: `worker-copy-${Date.now()}` }));
+  initIcons();
+  const rows = document.querySelectorAll('[data-worker-copy-row]');
+  rows[rows.length - 1]?.querySelector('[data-worker-copy-title]')?.focus();
+}
+
+function collectWorkerClientCopyFields() {
+  const fields = Array.from(document.querySelectorAll('[data-worker-copy-row]')).map((row, index) => ({
+    key: String(row.dataset.key || `worker-copy-${index + 1}`),
+    title: row.querySelector('[data-worker-copy-title]')?.value?.trim() || '',
+    text: row.querySelector('[data-worker-copy-text]')?.value?.trim() || '',
+  })).filter(field => field.title && field.text);
+  return fields.length ? { fields, updatedAt: new Date().toISOString() } : null;
 }
 
 let _workerOrderCardLayoutDraft = null;
@@ -1097,6 +1175,11 @@ function openWorkerEditModal(workerId) {
           </div>
 
           <div class="form-group">
+            <label class="form-label">${icon('clipboard-copy')} Данные для клиента</label>
+            <div class="worker-permissions-card worker-copy-card" id="we-client-copy-card"></div>
+          </div>
+
+          <div class="form-group">
             <label class="form-label">${icon('layout-template')} Карточка заказа</label>
             <div class="worker-permissions-card" id="we-order-card-layout-card"></div>
           </div>
@@ -1142,6 +1225,8 @@ function openWorkerEditModal(workerId) {
   _renderWeSalaryRule(w);
   const permissionsCard = document.getElementById('we-permissions-card');
   if (permissionsCard) permissionsCard.innerHTML = renderWorkerPermissionRows(w);
+  const clientCopyCard = document.getElementById('we-client-copy-card');
+  if (clientCopyCard) clientCopyCard.innerHTML = renderWorkerClientCopyFieldsEditor(w);
   _workerOrderCardLayoutUseDefault = !w.orderCardLayout;
   _workerOrderCardLayoutDraft = w.orderCardLayout && typeof getResolvedOrderCardLayout === 'function'
     ? getResolvedOrderCardLayout({ ...w, orderCardLayout: w.orderCardLayout })
@@ -1246,6 +1331,7 @@ async function saveWorkerEdit() {
   const displayRole = typeof getWorkerSystemRoleLabel === 'function' ? getWorkerSystemRoleLabel(role) : role;
   const assistant = document.getElementById('we-assistant')?.value || '';
   const permissions = collectWorkerPermissionState();
+  const clientCopyFields = collectWorkerClientCopyFields();
   const orderCardLayout = _workerOrderCardLayoutUseDefault
     ? null
     : (typeof normalizeOrderCardLayout === 'function'
@@ -1267,6 +1353,7 @@ async function saveWorkerEdit() {
       assistant: assistant,
       note: w.note || '',
       permissions,
+      clientCopyFields,
       orderCardLayout,
       salaryFormula,
     };
@@ -1282,6 +1369,7 @@ async function saveWorkerEdit() {
     w.telegramNick = telegramNick;
     w.assistant = assistant;
     w.permissions = permissions;
+    w.clientCopyFields = clientCopyFields;
     w.orderCardLayout = orderCardLayout;
     w.salaryFormula = salaryFormula;
 

@@ -32,6 +32,9 @@ const WORKER_PERMISSION_PRESETS = {
     special_service_tatu: true,
     special_service_toning: true,
     own_warehouse_view: true,
+    action_panel_view: true,
+    action_panel_reminders: true,
+    action_panel_client_data: true,
   },
   manager: {
     orders_view_all: true,
@@ -59,6 +62,9 @@ const WORKER_PERMISSION_PRESETS = {
     special_service_tatu: false,
     special_service_toning: false,
     own_warehouse_view: false,
+    action_panel_view: false,
+    action_panel_reminders: false,
+    action_panel_client_data: false,
   },
   senior: {
     orders_view_all: false,
@@ -86,6 +92,9 @@ const WORKER_PERMISSION_PRESETS = {
     special_service_tatu: false,
     special_service_toning: false,
     own_warehouse_view: false,
+    action_panel_view: false,
+    action_panel_reminders: false,
+    action_panel_client_data: false,
   },
   junior: {
     orders_view_all: false,
@@ -113,6 +122,9 @@ const WORKER_PERMISSION_PRESETS = {
     special_service_tatu: false,
     special_service_toning: false,
     own_warehouse_view: false,
+    action_panel_view: false,
+    action_panel_reminders: false,
+    action_panel_client_data: false,
   },
   extra: {
     orders_view_all: false,
@@ -140,6 +152,9 @@ const WORKER_PERMISSION_PRESETS = {
     special_service_tatu: false,
     special_service_toning: false,
     own_warehouse_view: false,
+    action_panel_view: false,
+    action_panel_reminders: false,
+    action_panel_client_data: false,
   },
 };
 
@@ -237,11 +252,11 @@ function parseWorkerNoteMeta(rawNote) {
   const source = String(rawNote || '');
   const start = source.indexOf(WORKER_PERMISSIONS_META_PREFIX);
   if (start === -1) {
-    return { note: source.trim(), permissions: {}, telegramNick: '', orderCardLayout: null };
+    return { note: source.trim(), permissions: {}, telegramNick: '', orderCardLayout: null, clientCopyFields: null };
   }
   const end = source.indexOf(WORKER_PERMISSIONS_META_SUFFIX, start);
   if (end === -1) {
-    return { note: source.trim(), permissions: {}, telegramNick: '', orderCardLayout: null };
+    return { note: source.trim(), permissions: {}, telegramNick: '', orderCardLayout: null, clientCopyFields: null };
   }
   const encoded = source.slice(start + WORKER_PERMISSIONS_META_PREFIX.length, end);
   const note = (source.slice(0, start) + source.slice(end + WORKER_PERMISSIONS_META_SUFFIX.length)).trim();
@@ -250,7 +265,8 @@ function parseWorkerNoteMeta(rawNote) {
     const meta = decoded && typeof decoded === 'object' && !Array.isArray(decoded) ? decoded : {};
     const isLegacyPermissionsOnly = !Object.prototype.hasOwnProperty.call(meta, 'permissions')
       && !Object.prototype.hasOwnProperty.call(meta, 'telegramNick')
-      && !Object.prototype.hasOwnProperty.call(meta, 'orderCardLayout');
+      && !Object.prototype.hasOwnProperty.call(meta, 'orderCardLayout')
+      && !Object.prototype.hasOwnProperty.call(meta, 'clientCopyFields');
     return {
       note,
       permissions: isLegacyPermissionsOnly
@@ -258,23 +274,28 @@ function parseWorkerNoteMeta(rawNote) {
         : ((meta.permissions && typeof meta.permissions === 'object' && !Array.isArray(meta.permissions)) ? meta.permissions : {}),
       telegramNick: String(isLegacyPermissionsOnly ? '' : (meta.telegramNick || '')).trim().replace(/^@+/, ''),
       orderCardLayout: isLegacyPermissionsOnly ? null : (meta.orderCardLayout && typeof meta.orderCardLayout === 'object' ? meta.orderCardLayout : null),
+      clientCopyFields: isLegacyPermissionsOnly ? null : (meta.clientCopyFields && typeof meta.clientCopyFields === 'object' ? meta.clientCopyFields : null),
     };
   } catch (e) {
-    return { note, permissions: {}, telegramNick: '', orderCardLayout: null };
+    return { note, permissions: {}, telegramNick: '', orderCardLayout: null, clientCopyFields: null };
   }
 }
 
-function buildWorkerNoteWithMeta(note, permissions, telegramNick = '', orderCardLayout = null) {
+function buildWorkerNoteWithMeta(note, permissions, telegramNick = '', orderCardLayout = null, clientCopyFields = null) {
   const cleanNote = String(note || '').trim();
   const cleanPermissions = permissions && typeof permissions === 'object' ? permissions : {};
   const cleanTelegramNick = String(telegramNick || '').trim().replace(/^@+/, '');
   const cleanOrderCardLayout = orderCardLayout && typeof orderCardLayout === 'object' && !Array.isArray(orderCardLayout)
     ? orderCardLayout
     : null;
+  const cleanClientCopyFields = clientCopyFields && typeof clientCopyFields === 'object' && !Array.isArray(clientCopyFields)
+    ? clientCopyFields
+    : null;
   const meta = {};
   if (Object.keys(cleanPermissions).length) meta.permissions = cleanPermissions;
   if (cleanTelegramNick) meta.telegramNick = cleanTelegramNick;
   if (cleanOrderCardLayout) meta.orderCardLayout = cleanOrderCardLayout;
+  if (cleanClientCopyFields) meta.clientCopyFields = cleanClientCopyFields;
   if (!Object.keys(meta).length) return cleanNote;
   const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(meta))));
   return `${cleanNote}${cleanNote ? '\n' : ''}${WORKER_PERMISSIONS_META_PREFIX}${encoded}${WORKER_PERMISSIONS_META_SUFFIX}`;
@@ -509,7 +530,7 @@ function getOrderSpecialServiceAssignedWorker(order, type) {
 }
 
 function currentUserHasAnyDashboardPermission() {
-  return ['orders_create', 'clients_view', 'workers_view', 'car_directory_view', 'warehouses_view', 'dropshippers_manage', 'groups_view', 'calendar_view', 'finance_view', 'owner_cash_view', 'owner_expenses_view', 'owner_payments_view']
+  return ['orders_create', 'clients_view', 'workers_view', 'car_directory_view', 'warehouses_view', 'dropshippers_manage', 'groups_view', 'calendar_view', 'finance_view', 'owner_cash_view', 'owner_expenses_view', 'owner_payments_view', 'action_panel_view']
     .some(key => currentUserHasPermission(key));
 }
 
@@ -660,12 +681,13 @@ async function sbUpdateWorker(workerId, updates) {
   if (updates.assistant !== undefined) body.assistant = updates.assistant || '';
   if (updates.alias !== undefined) body.alias = updates.alias || '';
   if (updates.telegramNick !== undefined) body.telegram_nick = String(updates.telegramNick || '').trim().replace(/^@+/, '');
-  if (updates.note !== undefined || updates.permissions !== undefined || updates.orderCardLayout !== undefined || updates.telegramNick !== undefined) {
+  if (updates.note !== undefined || updates.permissions !== undefined || updates.orderCardLayout !== undefined || updates.telegramNick !== undefined || updates.clientCopyFields !== undefined) {
     body.note = buildWorkerNoteWithMeta(
       updates.note !== undefined ? updates.note : '',
       updates.permissions !== undefined ? updates.permissions : {},
       updates.telegramNick !== undefined ? updates.telegramNick : '',
-      updates.orderCardLayout !== undefined ? updates.orderCardLayout : null
+      updates.orderCardLayout !== undefined ? updates.orderCardLayout : null,
+      updates.clientCopyFields !== undefined ? updates.clientCopyFields : null
     );
   }
   // Пароль обновляется через set-pin если передан
@@ -1507,6 +1529,7 @@ function rowToOrder(r) {
     reworkData:      r.rework_data || {},
     priorityTask:    !!r.rework_data?.priorityTask,
     reminder:        !!r.rework_data?.reminder,
+    reminderWorkers: Array.isArray(r.rework_data?.reminderWorkers) ? r.rework_data.reminderWorkers : [],
     clientPayments:  r.client_payments || [],
     supplierPayments:r.supplier_payments || [],
     deletedAt:       r.deleted_at || '',
@@ -1520,6 +1543,8 @@ function orderToRow(o) {
   else delete reworkData.priorityTask;
   if (o.reminder) reworkData.reminder = true;
   else delete reworkData.reminder;
+  if (Array.isArray(o.reminderWorkers) && o.reminderWorkers.length) reworkData.reminderWorkers = [...new Set(o.reminderWorkers.map(name => String(name || '').trim()).filter(Boolean))];
+  else delete reworkData.reminderWorkers;
   return {
     id:               o.id,
     date:             o.date,
@@ -1710,6 +1735,7 @@ function rowToWorker(r) {
     permissions:   noteMeta.permissions || {},
     telegramNick:  String(r.telegram_nick || noteMeta.telegramNick || '').trim().replace(/^@+/, ''),
     orderCardLayout: noteMeta.orderCardLayout || null,
+    clientCopyFields: noteMeta.clientCopyFields || null,
     salaryFormula: r.salary_formula || '',
     assistant:     r.assistant     || '',
   };
@@ -1722,7 +1748,7 @@ function workerToRow(w) {
     alias:          w.alias         || '',
     role:           w.role || (ROLE_LABELS[systemRole] || systemRole),
     system_role:    systemRole,
-    note:           buildWorkerNoteWithMeta(w.note, w.permissions, w.telegramNick || '', w.orderCardLayout || null),
+    note:           buildWorkerNoteWithMeta(w.note, w.permissions, w.telegramNick || '', w.orderCardLayout || null, w.clientCopyFields || null),
     telegram_nick:  String(w.telegramNick || '').trim().replace(/^@+/, ''),
     salary_formula: w.salaryFormula || '',
     assistant:      w.assistant     || '',

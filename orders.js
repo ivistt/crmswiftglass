@@ -1964,6 +1964,18 @@ const ORDER_COPY_EXTRA_BLOCKS = [
 ];
 
 function getOrderCopyExtraBlocks() {
+  const personal = typeof getCurrentWorkerRecord === 'function'
+    ? getCurrentWorkerRecord()?.clientCopyFields?.fields
+    : null;
+  if (currentRole !== 'owner' && Array.isArray(personal) && personal.length) {
+    return personal
+      .map((block, index) => ({
+        key: String(block?.key || `personal-${index + 1}`),
+        title: String(block?.title || '').trim(),
+        text: String(block?.text || '').trim(),
+      }))
+      .filter(block => block.title && block.text);
+  }
   const configured = appSettings?.client_copy_fields?.fields;
   if (!Array.isArray(configured)) return ORDER_COPY_EXTRA_BLOCKS;
   return configured
@@ -3233,7 +3245,7 @@ async function openOrderModal(id) {
     cancelWrap.style.display = canUseFullOrderForm(accessOrder) ? 'inline-flex' : 'none';
   }
   const reminderWrap = document.getElementById('f-reminder-wrap');
-  if (reminderWrap) reminderWrap.style.display = (currentRole === 'owner' || currentRole === 'manager') ? '' : 'none';
+  if (reminderWrap) reminderWrap.style.display = canCurrentUserUseOrderReminder() ? '' : 'none';
 
   if (id) {
     // РЕДАКТИРОВАНИЕ
@@ -3490,6 +3502,48 @@ function canUseFullOrderForm(order = null) {
   return isNewOrder && canCreateOrder();
 }
 
+function canCurrentUserUseOrderReminder() {
+  return currentRole === 'owner'
+    || currentRole === 'manager'
+    || (typeof canUseActionPanelReminders === 'function' && canUseActionPanelReminders());
+}
+
+function getCurrentOrderReminderChecked(order = null) {
+  if (!order) return false;
+  if (typeof orderHasReminderForCurrentUser === 'function') return orderHasReminderForCurrentUser(order);
+  return !!order.reminder;
+}
+
+function buildCurrentUserReminderState(existingOrder = null, checked = false) {
+  const key = typeof getCurrentReminderWorkerKey === 'function'
+    ? getCurrentReminderWorkerKey()
+    : String(currentWorkerName || '').trim();
+  const source = Array.isArray(existingOrder?.reminderWorkers)
+    ? existingOrder.reminderWorkers
+    : (Array.isArray(existingOrder?.reworkData?.reminderWorkers) ? existingOrder.reworkData.reminderWorkers : []);
+  const set = new Set(source.map(name => String(name || '').trim()).filter(Boolean));
+  if (canCurrentUserUseOrderReminder() && key) {
+    if (checked) set.add(key);
+    else set.delete(key);
+  }
+  return [...set];
+}
+
+function buildOrderReminderPatch(existingOrder = null, checked = false) {
+  const reminderWorkers = buildCurrentUserReminderState(existingOrder, checked);
+  const reworkData = {
+    ...(existingOrder?.reworkData || {}),
+    reminderWorkers,
+  };
+  delete reworkData.reminder;
+  if (!reminderWorkers.length) delete reworkData.reminderWorkers;
+  return {
+    reminder: canCurrentUserUseOrderReminder() ? false : !!existingOrder?.reminder,
+    reminderWorkers,
+    reworkData,
+  };
+}
+
 function setElementDisabledState(el, disabled) {
   if (!el) return;
   if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.tagName === 'BUTTON') {
@@ -3524,7 +3578,9 @@ function getOrderDraftFromForm(baseOrder = null) {
   order.toningDone = order.toningStatus;
   order.toningDoneBy = order.toningStatus ? (baseOrder?.toningDoneBy || order.toningResponsible || currentWorkerName || '') : '';
   order.priorityTask = document.getElementById('f-priority-task')?.checked || false;
-  order.reminder = document.getElementById('f-reminder')?.checked || false;
+  const reminderPatch = buildOrderReminderPatch(baseOrder, document.getElementById('f-reminder')?.checked || false);
+  order.reminder = reminderPatch.reminder;
+  order.reminderWorkers = reminderPatch.reminderWorkers;
   order.total = getN('f-total');
   order.income = getN('f-income');
   order.purchase = getN('f-purchase');
@@ -3535,7 +3591,7 @@ function getOrderDraftFromForm(baseOrder = null) {
   order.inWork = document.getElementById('f-order-status')?.value === 'inWork';
   order.ownWarehouse = document.getElementById('f-order-status')?.value === 'ownWarehouse';
   order.isCancelled = document.getElementById('f-order-status')?.value === 'cancelled';
-  order.reworkData = { ...(baseOrder?.reworkData || {}), priorityTask: order.priorityTask, reminder: order.reminder };
+  order.reworkData = { ...reminderPatch.reworkData, priorityTask: order.priorityTask };
   return order;
 }
 
@@ -4099,7 +4155,7 @@ function fillOrderForm(o) {
   const priorityTaskEl = document.getElementById('f-priority-task');
   if (priorityTaskEl) priorityTaskEl.checked = !!o.priorityTask;
   const reminderEl = document.getElementById('f-reminder');
-  if (reminderEl) reminderEl.checked = !!o.reminder;
+  if (reminderEl) reminderEl.checked = getCurrentOrderReminderChecked(o);
   // услуги — чекбоксы
   const svcHidden = document.getElementById('f-service-type');
   if (svcHidden) {
@@ -4335,6 +4391,8 @@ async function saveOrder() {
   const isNew = !editingOrderId;
   const existingOrder = isNew ? null : orders.find(o => o.id === editingOrderId);
   const canUseFullSave = canUseFullOrderForm(existingOrder);
+  const reminderChecked = document.getElementById('f-reminder')?.checked || false;
+  const reminderPatch = buildOrderReminderPatch(existingOrder, reminderChecked);
 
   recalcMargin();
 
@@ -4370,9 +4428,8 @@ async function saveOrder() {
     priorityTask:    canUseFullSave
       ? (document.getElementById('f-priority-task')?.checked || false)
       : !!existingOrder?.priorityTask,
-    reminder:        canUseFullSave
-      ? (document.getElementById('f-reminder')?.checked || false)
-      : !!existingOrder?.reminder,
+    reminder:        reminderPatch.reminder,
+    reminderWorkers: reminderPatch.reminderWorkers,
     delivery:        getN('f-delivery'),
     warehouse:       get('f-warehouse'),
     warehouseCode:   get('f-warehouse-code'),
@@ -4422,13 +4479,10 @@ async function saveOrder() {
     payoutMoldingAssist:   getN('f-payout-molding-assist'),
     onlySale:        document.getElementById('f-only-sale')?.checked || false,
     reworkData: {
-      ...(existingOrder?.reworkData || {}),
+      ...reminderPatch.reworkData,
       priorityTask: canUseFullSave
         ? (document.getElementById('f-priority-task')?.checked || false)
         : !!existingOrder?.priorityTask,
-      reminder: canUseFullSave
-        ? (document.getElementById('f-reminder')?.checked || false)
-        : !!existingOrder?.reminder,
     },
     clientPayments: currentClientPayments,
     supplierPayments: currentSupplierPayments,

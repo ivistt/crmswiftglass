@@ -176,18 +176,19 @@
       <i data-lucide="menu" style="width:20px;height:20px;"></i>
     </button>
     <div class="owner-dashboard-menu-island" id="owner-dashboard-menu-island" role="menu">
-      <button type="button" role="menuitem" onclick="openQuickCopyModal()">
+      <button type="button" role="menuitem" id="action-menu-client-data" onclick="openQuickCopyModal()">
         <span><i data-lucide="clipboard-copy" style="width:17px;height:17px;"></i></span>
         <div><strong>Данные для клиента</strong><small>Скопировать готовый текст</small></div>
       </button>
-      <button type="button" role="menuitem" onclick="openDailyReportModal()">
+      <button type="button" role="menuitem" id="action-menu-daily-report" onclick="openDailyReportModal()">
         <span><i data-lucide="file-chart-column" style="width:17px;height:17px;"></i></span>
         <div><strong>Отчёт за день</strong><small>Заказы, деньги и расходы</small></div>
       </button>
-      <button type="button" role="menuitem" onclick="openRemindersModal()">
+      <button type="button" role="menuitem" id="action-menu-reminders" onclick="openRemindersModal()">
         <span><i data-lucide="bell" style="width:17px;height:17px;"></i></span>
         <div><strong>Напоминания <em class="owner-menu-count" id="owner-reminders-count"></em></strong><small>Отмеченные заказы</small></div>
       </button>
+      <div class="owner-dashboard-menu-empty" id="action-menu-empty">Панель включена, но действий пока нет</div>
     </div>
   </div>
 

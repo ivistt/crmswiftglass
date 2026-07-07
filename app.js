@@ -792,9 +792,10 @@ function showScreen(name, options = {}) {
   if (el) el.classList.add('active');
   const ownerMenu = document.getElementById('owner-dashboard-menu');
   if (ownerMenu) {
-    ownerMenu.style.display = currentRole === 'owner' && name === 'home' ? '' : 'none';
+    ownerMenu.style.display = canUseDashboardActionPanel() && name === 'home' ? '' : 'none';
     ownerMenu.classList.remove('is-open');
   }
+  updateDashboardActionMenu();
   updateHomeBackLabels();
 
   setActiveNav(name);
@@ -804,7 +805,8 @@ function showScreen(name, options = {}) {
 function toggleOwnerDashboardMenu(event) {
   event?.stopPropagation?.();
   const menu = document.getElementById('owner-dashboard-menu');
-  if (!menu || currentRole !== 'owner') return;
+  if (!menu || !canUseDashboardActionPanel()) return;
+  updateDashboardActionMenu();
   const open = menu.classList.toggle('is-open');
   document.getElementById('owner-dashboard-menu-toggle')?.setAttribute('aria-expanded', open ? 'true' : 'false');
 }
@@ -814,9 +816,62 @@ function closeOwnerDashboardMenu() {
   document.getElementById('owner-dashboard-menu-toggle')?.setAttribute('aria-expanded', 'false');
 }
 
+function canUseDashboardActionPanel() {
+  return currentRole === 'owner' || currentUserHasPermission('action_panel_view');
+}
+
+function canUseActionPanelReminders() {
+  return currentRole === 'owner' || currentUserHasPermission('action_panel_reminders');
+}
+
+function canUseActionPanelClientData() {
+  return currentRole === 'owner' || currentUserHasPermission('action_panel_client_data');
+}
+
+function canUseActionPanelDailyReport() {
+  return currentRole === 'owner';
+}
+
+function updateDashboardActionMenu() {
+  const menu = document.getElementById('owner-dashboard-menu');
+  if (!menu) return;
+  const visible = canUseDashboardActionPanel() && getActiveScreenName() === 'home';
+  menu.style.display = visible ? '' : 'none';
+  const clientBtn = document.getElementById('action-menu-client-data');
+  const reportBtn = document.getElementById('action-menu-daily-report');
+  const remindersBtn = document.getElementById('action-menu-reminders');
+  const empty = document.getElementById('action-menu-empty');
+  const canClient = canUseActionPanelClientData();
+  const canReport = canUseActionPanelDailyReport();
+  const canReminders = canUseActionPanelReminders();
+  if (clientBtn) clientBtn.style.display = canClient ? '' : 'none';
+  if (reportBtn) reportBtn.style.display = canReport ? '' : 'none';
+  if (remindersBtn) remindersBtn.style.display = canReminders ? '' : 'none';
+  if (empty) empty.style.display = (!canClient && !canReport && !canReminders) ? 'block' : 'none';
+  updateOwnerRemindersCount();
+}
+
+function getCurrentReminderWorkerKey() {
+  const worker = typeof getCurrentWorkerRecord === 'function' ? getCurrentWorkerRecord() : null;
+  return String(worker?.name || currentWorkerName || currentRole || '').trim();
+}
+
+function getOrderReminderWorkers(order) {
+  const source = Array.isArray(order?.reminderWorkers)
+    ? order.reminderWorkers
+    : (Array.isArray(order?.reworkData?.reminderWorkers) ? order.reworkData.reminderWorkers : []);
+  return [...new Set(source.map(name => String(name || '').trim()).filter(Boolean))];
+}
+
+function orderHasReminderForCurrentUser(order) {
+  const key = getCurrentReminderWorkerKey();
+  if (key && getOrderReminderWorkers(order).includes(key)) return true;
+  return (currentRole === 'owner' || currentRole === 'manager') && !!order?.reminder;
+}
+
 function getReminderOrders() {
   return (orders || [])
-    .filter(order => order?.reminder && !order.workerDone && !order.isCancelled && !isOrderDeleted(order))
+    .filter(order => orderHasReminderForCurrentUser(order) && !order.workerDone && !order.isCancelled && !isOrderDeleted(order))
     .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')) || String(a.time || '').localeCompare(String(b.time || '')));
 }
 
@@ -829,11 +884,12 @@ function updateOwnerRemindersCount() {
 }
 
 function openRemindersModal() {
-  if (currentRole !== 'owner') return;
+  if (!canUseActionPanelReminders()) return;
   closeOwnerDashboardMenu();
   const list = getReminderOrders();
   const container = document.getElementById('reminders-list');
   if (!container) return;
+  const ownerLabel = getCurrentReminderWorkerKey();
   container.innerHTML = list.length ? list.map(order => `
     <button type="button" class="reminder-order-card" onclick="openOrderFromReminder('${escapeAttr(order.id)}')">
       <span class="reminder-order-icon"><i data-lucide="bell-ring" style="width:17px;height:17px;"></i></span>
@@ -843,7 +899,7 @@ function openRemindersModal() {
       </span>
       <span class="reminder-order-date"><strong>${order.date ? escapeHtml(formatDate(order.date)) : 'Без даты'}</strong><small>${escapeHtml(order.time || '')}</small></span>
     </button>
-  `).join('') : '<div class="empty-state"><div class="empty-state-icon"><i data-lucide="bell-off"></i></div><h3>Напоминаний нет</h3><p>Отметьте нужный заказ галочкой «Напоминание»</p></div>';
+  `).join('') : `<div class="empty-state"><div class="empty-state-icon"><i data-lucide="bell-off"></i></div><h3>Напоминаний нет</h3><p>Отметьте нужный заказ галочкой «Напоминание»${ownerLabel ? ' — она будет личной для вас' : ''}</p></div>`;
   document.getElementById('reminders-modal')?.classList.add('active');
   initIcons();
 }
@@ -859,10 +915,25 @@ document.addEventListener('click', event => {
   if (!event.target.closest('#owner-dashboard-menu')) closeOwnerDashboardMenu();
 });
 
+function getCurrentUserClientCopyBlocks() {
+  const worker = typeof getCurrentWorkerRecord === 'function' ? getCurrentWorkerRecord() : null;
+  const personal = worker?.clientCopyFields?.fields;
+  const source = currentRole !== 'owner' && Array.isArray(personal) && personal.length
+    ? personal
+    : (typeof getOrderCopyExtraBlocks === 'function' ? getOrderCopyExtraBlocks() : []);
+  return source
+    .map((block, index) => ({
+      key: String(block?.key || `copy-${index + 1}`),
+      title: String(block?.title || '').trim(),
+      text: String(block?.text || '').trim(),
+    }))
+    .filter(block => block.title && block.text);
+}
+
 function openQuickCopyModal() {
-  if (currentRole !== 'owner') return;
+  if (!canUseActionPanelClientData()) return;
   closeOwnerDashboardMenu();
-  const fields = typeof getOrderCopyExtraBlocks === 'function' ? getOrderCopyExtraBlocks() : [];
+  const fields = getCurrentUserClientCopyBlocks();
   const container = document.getElementById('quick-copy-options');
   if (!container) return;
   container.innerHTML = fields.length ? fields.map(field => `
@@ -884,7 +955,7 @@ function closeQuickCopyModal() {
 
 function copyQuickClientData() {
   const selected = new Set(Array.from(document.querySelectorAll('[data-quick-copy-field]:checked')).map(input => input.value));
-  const blocks = (typeof getOrderCopyExtraBlocks === 'function' ? getOrderCopyExtraBlocks() : []).filter(field => selected.has(field.key));
+  const blocks = getCurrentUserClientCopyBlocks().filter(field => selected.has(field.key));
   if (!blocks.length) return showToast('Выберите хотя бы один блок', 'error');
   const text = blocks.map(block => block.text).join('\n\n');
   const html = `<div style="font-family:Arial,sans-serif;font-size:16px;line-height:1.45;">${blocks.map(block => `<div style="margin-bottom:18px;">${renderOrderCopyExtraBlockHtml(block.text)}</div>`).join('')}</div>`;
@@ -920,7 +991,7 @@ function getDailyReportData(date) {
 }
 
 function openDailyReportModal() {
-  if (currentRole !== 'owner') return;
+  if (!canUseActionPanelDailyReport()) return;
   closeOwnerDashboardMenu();
   const date = getLocalDateString();
   const input = document.getElementById('daily-report-date');
@@ -936,7 +1007,7 @@ function renderDailyReportModal(date) {
   const container = document.getElementById('daily-report-content');
   if (!container) return;
   const money = value => `${Number(value || 0).toLocaleString('ru')} ₴`;
-  const renderOrder = order => `<div class="daily-report-order"><span class="daily-report-order-status ${order.workerDone ? 'is-done' : ''}"></span><div><strong>${escapeHtml(order.id || '—')} · ${escapeHtml(order.car || order.client || 'Без названия')}</strong><small>${order.workerDone ? 'Выполнен' : 'Не выполнен'}${order.time ? ' · ' + escapeHtml(order.time) : ''}</small></div><strong>${money(getOrderClientTotalAmount(order))}</strong></div>`;
+  const renderOrder = order => `<button type="button" class="daily-report-order" onclick="openOrderFromDailyReport('${escapeAttr(order.id)}')"><span class="daily-report-order-status ${order.workerDone ? 'is-done' : ''}"></span><div><strong>${escapeHtml(order.id || '—')} · ${escapeHtml(order.car || order.client || 'Без названия')}</strong><small>${order.workerDone ? 'Выполнен' : 'Не выполнен'}${order.time ? ' · ' + escapeHtml(order.time) : ''}</small></div><strong>${money(getOrderClientTotalAmount(order))}</strong></button>`;
   container.innerHTML = `
     <div class="daily-report-metrics">
       <div class="daily-report-metric"><span>Заказов</span><strong>${report.scheduled.length}</strong></div>
@@ -952,6 +1023,11 @@ function renderDailyReportModal(date) {
     ${report.transferred.length ? `<div class="daily-report-section"><div class="daily-report-section-title">Перенесены на завтра · ${report.transferred.length}</div>${report.transferred.map(renderOrder).join('')}</div>` : ''}
     <div class="daily-report-section"><div class="daily-report-section-title">Финансовый итог</div><div class="daily-report-group"><div class="daily-report-group-head"><span>Получено минус закупки и расходы</span><span style="color:${report.net >= 0 ? 'var(--accent)' : 'var(--red)'}">${money(report.net)}</span></div></div></div>`;
   initIcons();
+}
+
+function openOrderFromDailyReport(orderId) {
+  closeDailyReportModal();
+  openOrderModal(orderId);
 }
 
 function buildDailyReportText(date) {
