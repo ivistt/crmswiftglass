@@ -733,7 +733,14 @@
       <button class="modal-close" onclick="closeDailyReportModal()"><i data-lucide="x" style="width:16px;height:16px;"></i></button>
     </div>
     <div class="daily-report-toolbar">
-      <input class="form-input" type="date" id="daily-report-date" onchange="renderDailyReportModal(this.value)">
+      <label>
+        <span>С даты</span>
+        <input class="form-input" type="date" id="daily-report-date" onchange="renderDailyReportFromInputs()">
+      </label>
+      <label>
+        <span>По дату</span>
+        <input class="form-input" type="date" id="daily-report-end-date" onchange="renderDailyReportFromInputs()">
+      </label>
     </div>
     <div class="modal-body daily-report-body" id="daily-report-content"></div>
     <div class="modal-footer">
@@ -804,10 +811,14 @@
             </div>
             <div class="form-group" id="f-reminder-wrap">
               <label class="checkbox order-flag-checkbox">
-                <input type="checkbox" id="f-reminder">
+                <input type="checkbox" id="f-reminder" onchange="updateOrderModalAccess(editingOrderId ? orders.find(item => item.id === editingOrderId) : null)">
                 <span>🔔 Напоминание</span>
               </label>
             </div>
+          </div>
+          <div class="form-group" id="f-reminder-comment-wrap" style="display:none;">
+            <label class="form-label">💬 Комментарий к напоминанию</label>
+            <textarea class="form-input" id="f-reminder-comment" rows="2" placeholder="Что нужно не забыть по этому заказу" oninput="updateOrderModalAccess(editingOrderId ? orders.find(item => item.id === editingOrderId) : null)"></textarea>
           </div>
           <div class="form-row">
             <div class="form-group">

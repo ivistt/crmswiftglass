@@ -896,6 +896,7 @@ function openRemindersModal() {
       <span class="reminder-order-main">
         <strong>${escapeHtml(order.id || '—')} · ${escapeHtml(order.car || order.client || 'Без названия')}</strong>
         <small>${order.client ? escapeHtml(order.client) + ' · ' : ''}${order.phone ? escapeHtml(order.phone) + ' · ' : ''}${escapeHtml(getWorkerDisplayName(order.manager || order.responsible) || 'Без ответственного')}</small>
+        ${getOrderReminderComment(order) ? `<em>${escapeHtml(getOrderReminderComment(order))}</em>` : ''}
       </span>
       <span class="reminder-order-date"><strong>${order.date ? escapeHtml(formatDate(order.date)) : 'Без даты'}</strong><small>${escapeHtml(order.time || '')}</small></span>
     </button>
@@ -963,31 +964,61 @@ function copyQuickClientData() {
   closeQuickCopyModal();
 }
 
-function getDailyReportData(date) {
-  const targetDate = date || getLocalDateString();
-  const scheduled = (orders || []).filter(order => isOrderFinanciallyActive(order) && order.date === targetDate);
+function normalizeDailyReportRange(startDate, endDate = '') {
+  let start = String(startDate || '').slice(0, 10) || getLocalDateString();
+  let end = String(endDate || '').slice(0, 10) || start;
+  if (end < start) [start, end] = [end, start];
+  const isRange = start !== end;
+  return {
+    start,
+    end,
+    targetDate: start,
+    isRange,
+    label: isRange ? `${formatDate(start)} — ${formatDate(end)}` : formatDate(start),
+    periodLabel: isRange ? 'период' : 'день',
+  };
+}
+
+function isDateInDailyReportRange(date, range) {
+  const key = String(date || '').slice(0, 10);
+  return !!key && key >= range.start && key <= range.end;
+}
+
+function getDailyReportData(startDate, endDate = '') {
+  const range = normalizeDailyReportRange(startDate, endDate);
+  const scheduled = (orders || []).filter(order => isOrderFinanciallyActive(order) && isDateInDailyReportRange(order.date, range));
+  const activeOrders = (orders || []).filter(order => isOrderFinanciallyActive(order));
+  const getClientDebt = order => Math.max(0, getOrderClientTotalAmount(order) - getOrderClientPaidAmount(order));
+  const getSupplierDebtAmount = order => {
+    if (typeof getSupplierDebt === 'function') return getSupplierDebt(order);
+    return Math.max(0, (Number(order?.purchase) || 0) - getOrderSupplierPaidAmount(order));
+  };
   const completed = scheduled.filter(order => order.workerDone);
   const unfinished = scheduled.filter(order => !order.workerDone);
-  const tomorrow = new Date(`${targetDate}T12:00:00`);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const tomorrowKey = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}`;
   const transferred = (orders || []).filter(order => {
     const history = order?.reworkData?.rescheduleHistory;
-    return Array.isArray(history) && history.some(item => item?.from === targetDate && item?.to === tomorrowKey);
+    return Array.isArray(history) && history.some(item => isDateInDailyReportRange(item?.from, range));
   });
   const groupsMap = new Map();
-  scheduled.forEach(order => {
-    const key = _ownerTodayGroupKey(order);
-    if (!groupsMap.has(key)) groupsMap.set(key, { label: _ownerTodayGroupLabel({ responsible: order.responsible || 'Без ответственного', assistant: order.assistant || '' }), orders: [] });
-    groupsMap.get(key).orders.push(order);
-  });
+  scheduled
+    .slice()
+    .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')) || String(a.time || '').localeCompare(String(b.time || '')))
+    .forEach(order => {
+      const key = _ownerTodayGroupKey(order);
+      if (!groupsMap.has(key)) groupsMap.set(key, { label: _ownerTodayGroupLabel({ responsible: order.responsible || 'Без ответственного', assistant: order.assistant || '' }), orders: [] });
+      groupsMap.get(key).orders.push(order);
+    });
   const expenses = (typeof getOwnerExpenseLogs === 'function' ? getOwnerExpenseLogs() : [])
-    .filter(entry => String(entry?.fop_date || _ownerCashEntryDate(entry) || '').slice(0, 10) === targetDate);
+    .filter(entry => isDateInDailyReportRange(entry?.fop_date || _ownerCashEntryDate(entry), range));
   const expensesTotal = expenses.reduce((sum, entry) => sum + getExpenseCashAmount(entry), 0);
   const orderValue = completed.reduce((sum, order) => sum + getOrderClientTotalAmount(order), 0);
   const received = completed.reduce((sum, order) => sum + getOrderClientPaidAmount(order), 0);
   const supplierCosts = completed.reduce((sum, order) => sum + (Number(order.purchase) || 0), 0);
-  return { targetDate, scheduled, completed, unfinished, transferred, groups: Array.from(groupsMap.values()), expenses, expensesTotal, orderValue, received, supplierCosts, net: received - supplierCosts - expensesTotal };
+  const clientDebtDay = scheduled.reduce((sum, order) => sum + getClientDebt(order), 0);
+  const clientDebtTotal = activeOrders.reduce((sum, order) => sum + getClientDebt(order), 0);
+  const supplierDebtDay = scheduled.reduce((sum, order) => sum + getSupplierDebtAmount(order), 0);
+  const supplierDebtTotal = activeOrders.reduce((sum, order) => sum + getSupplierDebtAmount(order), 0);
+  return { ...range, scheduled, completed, unfinished, transferred, groups: Array.from(groupsMap.values()), expenses, expensesTotal, orderValue, received, supplierCosts, clientDebtDay, clientDebtTotal, supplierDebtDay, supplierDebtTotal, net: received - supplierCosts - expensesTotal };
 }
 
 function openDailyReportModal() {
@@ -995,20 +1026,30 @@ function openDailyReportModal() {
   closeOwnerDashboardMenu();
   const date = getLocalDateString();
   const input = document.getElementById('daily-report-date');
+  const endInput = document.getElementById('daily-report-end-date');
   if (input) input.value = date;
-  renderDailyReportModal(date);
+  if (endInput) endInput.value = date;
+  renderDailyReportModal(date, date);
   document.getElementById('daily-report-modal')?.classList.add('active');
 }
 
 function closeDailyReportModal() { document.getElementById('daily-report-modal')?.classList.remove('active'); }
 
-function renderDailyReportModal(date) {
-  const report = getDailyReportData(date);
+function renderDailyReportFromInputs() {
+  renderDailyReportModal(
+    document.getElementById('daily-report-date')?.value || getLocalDateString(),
+    document.getElementById('daily-report-end-date')?.value || document.getElementById('daily-report-date')?.value || getLocalDateString()
+  );
+}
+
+function renderDailyReportModal(startDate, endDate = '') {
+  const report = getDailyReportData(startDate, endDate);
   const container = document.getElementById('daily-report-content');
   if (!container) return;
   const money = value => `${Number(value || 0).toLocaleString('ru')} ₴`;
-  const renderOrder = order => `<button type="button" class="daily-report-order" onclick="openOrderFromDailyReport('${escapeAttr(order.id)}')"><span class="daily-report-order-status ${order.workerDone ? 'is-done' : ''}"></span><div><strong>${escapeHtml(order.id || '—')} · ${escapeHtml(order.car || order.client || 'Без названия')}</strong><small>${order.workerDone ? 'Выполнен' : 'Не выполнен'}${order.time ? ' · ' + escapeHtml(order.time) : ''}</small></div><strong>${money(getOrderClientTotalAmount(order))}</strong></button>`;
+  const renderOrder = order => `<button type="button" class="daily-report-order" onclick="openOrderFromDailyReport('${escapeAttr(order.id)}')"><span class="daily-report-order-status ${order.workerDone ? 'is-done' : ''}"></span><div><strong>${escapeHtml(order.id || '—')} · ${escapeHtml(order.car || order.client || 'Без названия')}</strong><small>${order.workerDone ? 'Выполнен' : 'Не выполнен'}${report.isRange && order.date ? ' · ' + escapeHtml(formatDate(order.date)) : ''}${order.time ? ' · ' + escapeHtml(order.time) : ''}</small></div><strong>${money(getOrderClientTotalAmount(order))}</strong></button>`;
   container.innerHTML = `
+    <div class="daily-report-range-label">${escapeHtml(report.label)}</div>
     <div class="daily-report-metrics">
       <div class="daily-report-metric"><span>Заказов</span><strong>${report.scheduled.length}</strong></div>
       <div class="daily-report-metric is-good"><span>Выполнено</span><strong>${report.completed.length}</strong></div>
@@ -1016,11 +1057,15 @@ function renderDailyReportModal(date) {
       <div class="daily-report-metric"><span>Сумма работ</span><strong>${money(report.orderValue)}</strong></div>
       <div class="daily-report-metric is-good"><span>Получено</span><strong>${money(report.received)}</strong></div>
       <div class="daily-report-metric is-bad"><span>Расходы</span><strong>${money(report.expensesTotal + report.supplierCosts)}</strong></div>
+      <div class="daily-report-metric is-bad"><span>Долг клиентов · ${escapeHtml(report.periodLabel)}</span><strong>${money(report.clientDebtDay)}</strong></div>
+      <div class="daily-report-metric is-bad"><span>Долг клиентов · всего</span><strong>${money(report.clientDebtTotal)}</strong></div>
+      <div class="daily-report-metric is-bad"><span>Поставщикам · ${escapeHtml(report.periodLabel)}</span><strong>${money(report.supplierDebtDay)}</strong></div>
+      <div class="daily-report-metric is-bad"><span>Поставщикам · всего</span><strong>${money(report.supplierDebtTotal)}</strong></div>
     </div>
     <div class="daily-report-section"><div class="daily-report-section-title">Группы</div>
-      ${report.groups.length ? report.groups.map(group => `<div class="daily-report-group"><div class="daily-report-group-head"><span>${escapeHtml(group.label)}</span><span>${group.orders.filter(order => order.workerDone).length}/${group.orders.length}</span></div>${group.orders.map(renderOrder).join('')}</div>`).join('') : '<div class="empty-state"><p>Заказов на эту дату нет</p></div>'}
+      ${report.groups.length ? report.groups.map(group => `<div class="daily-report-group"><div class="daily-report-group-head"><span>${escapeHtml(group.label)}</span><span>${group.orders.filter(order => order.workerDone).length}/${group.orders.length}</span></div>${group.orders.map(renderOrder).join('')}</div>`).join('') : '<div class="empty-state"><p>Заказов на выбранный период нет</p></div>'}
     </div>
-    ${report.transferred.length ? `<div class="daily-report-section"><div class="daily-report-section-title">Перенесены на завтра · ${report.transferred.length}</div>${report.transferred.map(renderOrder).join('')}</div>` : ''}
+    ${report.transferred.length ? `<div class="daily-report-section"><div class="daily-report-section-title">Перенесены · ${report.transferred.length}</div>${report.transferred.map(renderOrder).join('')}</div>` : ''}
     <div class="daily-report-section"><div class="daily-report-section-title">Финансовый итог</div><div class="daily-report-group"><div class="daily-report-group-head"><span>Получено минус закупки и расходы</span><span style="color:${report.net >= 0 ? 'var(--accent)' : 'var(--red)'}">${money(report.net)}</span></div></div></div>`;
   initIcons();
 }
@@ -1030,27 +1075,39 @@ function openOrderFromDailyReport(orderId) {
   openOrderModal(orderId);
 }
 
-function buildDailyReportText(date) {
-  const report = getDailyReportData(date);
+function buildDailyReportText(startDate, endDate = '') {
+  const report = getDailyReportData(startDate, endDate);
   const money = value => `${Number(value || 0).toLocaleString('ru')} ₴`;
-  const lines = [`ОТЧЁТ ЗА ${formatDate(report.targetDate)}`, '', `Заказов: ${report.scheduled.length}`, `Выполнено: ${report.completed.length}`, `Не выполнено: ${report.unfinished.length}`, `Перенесено на завтра: ${report.transferred.length}`, ''];
+  const lines = [`ОТЧЁТ ЗА ${report.label}`, '', `Заказов: ${report.scheduled.length}`, `Выполнено: ${report.completed.length}`, `Не выполнено: ${report.unfinished.length}`, `Перенесено: ${report.transferred.length}`, ''];
   report.groups.forEach(group => {
     lines.push(`${group.label} — ${group.orders.filter(order => order.workerDone).length}/${group.orders.length}`);
-    group.orders.forEach(order => lines.push(`${order.workerDone ? '✓' : '○'} ${order.id} · ${order.car || order.client || 'Без названия'} · ${money(getOrderClientTotalAmount(order))}`));
+    group.orders.forEach(order => lines.push(`${order.workerDone ? '✓' : '○'} ${report.isRange && order.date ? formatDate(order.date) + ' · ' : ''}${order.id} · ${order.car || order.client || 'Без названия'} · ${money(getOrderClientTotalAmount(order))}`));
     lines.push('');
   });
   if (report.transferred.length) {
-    lines.push('ПЕРЕНЕСЕНЫ НА ЗАВТРА');
-    report.transferred.forEach(order => lines.push(`→ ${order.id} · ${order.car || order.client || 'Без названия'}`));
+    lines.push('ПЕРЕНЕСЕНЫ');
+    report.transferred.forEach(order => lines.push(`→ ${report.isRange && order.date ? formatDate(order.date) + ' · ' : ''}${order.id} · ${order.car || order.client || 'Без названия'}`));
     lines.push('');
   }
-  lines.push(`Сумма выполненных заказов: ${money(report.orderValue)}`, `Получено: ${money(report.received)}`, `Закупки: ${money(report.supplierCosts)}`, `Прочие расходы: ${money(report.expensesTotal)}`, `Итог: ${money(report.net)}`);
+  lines.push(
+    `Сумма выполненных заказов: ${money(report.orderValue)}`,
+    `Получено: ${money(report.received)}`,
+    `Закупки: ${money(report.supplierCosts)}`,
+    `Прочие расходы: ${money(report.expensesTotal)}`,
+    `Долг клиентов за ${report.periodLabel}: ${money(report.clientDebtDay)}`,
+    `Долг клиентов всего: ${money(report.clientDebtTotal)}`,
+    `Долг поставщикам за ${report.periodLabel}: ${money(report.supplierDebtDay)}`,
+    `Долг поставщикам всего: ${money(report.supplierDebtTotal)}`,
+    `Итог: ${money(report.net)}`
+  );
   return lines.join('\n');
 }
 
 function copyDailyReport() {
-  const date = document.getElementById('daily-report-date')?.value || getLocalDateString();
-  copyOrderClientContent({ text: buildDailyReportText(date), html: `<pre style="white-space:pre-wrap;font-family:Arial,sans-serif">${escapeHtml(buildDailyReportText(date))}</pre>` });
+  const start = document.getElementById('daily-report-date')?.value || getLocalDateString();
+  const end = document.getElementById('daily-report-end-date')?.value || start;
+  const text = buildDailyReportText(start, end);
+  copyOrderClientContent({ text, html: `<pre style="white-space:pre-wrap;font-family:Arial,sans-serif">${escapeHtml(text)}</pre>` });
 }
 
 function updateHomeBackLabels() {
@@ -4026,12 +4083,51 @@ async function saveOwnerCopyFields() {
 function renderUserSettingsScreen() {
   const container = document.getElementById('owner-settings-content');
   if (!container) return;
+  const worker = typeof getCurrentWorkerRecord === 'function' ? getCurrentWorkerRecord() : null;
+  const canClientData = typeof canUseActionPanelClientData === 'function' && canUseActionPanelClientData();
   container.innerHTML = `
     <div class="settings-user-shell">
       ${renderSettingsQuickActions({ logo: true })}
+      ${canClientData ? `
+        <div class="settings-user-section">
+          <div class="settings-user-section-title">Данные для клиента</div>
+          <div class="worker-permissions-card worker-copy-card" id="settings-client-copy-card">
+            ${typeof renderWorkerClientCopyFieldsEditor === 'function' ? renderWorkerClientCopyFieldsEditor(worker || {}) : ''}
+          </div>
+          <div style="display:flex;justify-content:flex-end;margin-top:12px;">
+            <button type="button" class="btn-primary" id="settings-client-copy-save-btn" onclick="saveCurrentUserClientCopyFields()">
+              <i data-lucide="save" style="width:14px;height:14px;"></i> Сохранить мои тексты
+            </button>
+          </div>
+        </div>
+      ` : ''}
     </div>
   `;
   initIcons();
+}
+
+async function saveCurrentUserClientCopyFields() {
+  if (!(typeof canUseActionPanelClientData === 'function' && canUseActionPanelClientData())) return;
+  const worker = typeof getCurrentWorkerRecord === 'function' ? getCurrentWorkerRecord() : null;
+  if (!worker?.id) return showToast('Не найден сотрудник для сохранения', 'error');
+  const clientCopyFields = typeof collectWorkerClientCopyFields === 'function' ? collectWorkerClientCopyFields() : null;
+  const btn = document.getElementById('settings-client-copy-save-btn');
+  if (btn) btn.disabled = true;
+  try {
+    await sbUpdateWorker(worker.id, {
+      note: worker.note || '',
+      permissions: worker.permissions || {},
+      telegramNick: worker.telegramNick || '',
+      orderCardLayout: worker.orderCardLayout || null,
+      clientCopyFields,
+    });
+    worker.clientCopyFields = clientCopyFields;
+    showToast('Мои тексты сохранены ✓');
+  } catch (e) {
+    showToast('Ошибка сохранения: ' + e.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 async function sendOwnerTelegramTest() {

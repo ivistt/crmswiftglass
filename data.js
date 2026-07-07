@@ -1530,6 +1530,7 @@ function rowToOrder(r) {
     priorityTask:    !!r.rework_data?.priorityTask,
     reminder:        !!r.rework_data?.reminder,
     reminderWorkers: Array.isArray(r.rework_data?.reminderWorkers) ? r.rework_data.reminderWorkers : [],
+    reminderComment: String(r.rework_data?.reminderComment || ''),
     clientPayments:  r.client_payments || [],
     supplierPayments:r.supplier_payments || [],
     deletedAt:       r.deleted_at || '',
@@ -1543,8 +1544,12 @@ function orderToRow(o) {
   else delete reworkData.priorityTask;
   if (o.reminder) reworkData.reminder = true;
   else delete reworkData.reminder;
-  if (Array.isArray(o.reminderWorkers) && o.reminderWorkers.length) reworkData.reminderWorkers = [...new Set(o.reminderWorkers.map(name => String(name || '').trim()).filter(Boolean))];
+  const reminderWorkers = Array.isArray(o.reminderWorkers) ? o.reminderWorkers : (Array.isArray(reworkData.reminderWorkers) ? reworkData.reminderWorkers : []);
+  if (reminderWorkers.length) reworkData.reminderWorkers = [...new Set(reminderWorkers.map(name => String(name || '').trim()).filter(Boolean))];
   else delete reworkData.reminderWorkers;
+  const reminderComment = Object.prototype.hasOwnProperty.call(o, 'reminderComment') ? o.reminderComment : reworkData.reminderComment;
+  if (String(reminderComment || '').trim()) reworkData.reminderComment = String(reminderComment || '').trim();
+  else delete reworkData.reminderComment;
   return {
     id:               o.id,
     date:             o.date,
@@ -1703,6 +1708,8 @@ function orderToRowSparse(o) {
     ['reworkData', 'rework_data'],
     ['priorityTask', 'rework_data'],
     ['reminder', 'rework_data'],
+    ['reminderWorkers', 'rework_data'],
+    ['reminderComment', 'rework_data'],
     ['clientPayments', 'client_payments'],
     ['supplierPayments', 'supplier_payments'],
   ];

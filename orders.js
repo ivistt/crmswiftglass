@@ -3246,6 +3246,11 @@ async function openOrderModal(id) {
   }
   const reminderWrap = document.getElementById('f-reminder-wrap');
   if (reminderWrap) reminderWrap.style.display = canCurrentUserUseOrderReminder() ? '' : 'none';
+  const reminderCommentWrap = document.getElementById('f-reminder-comment-wrap');
+  const reminderCommentEl = document.getElementById('f-reminder-comment');
+  const reminderComment = accessOrder ? getOrderReminderComment(accessOrder) : '';
+  if (reminderCommentWrap) reminderCommentWrap.style.display = (canCurrentUserUseOrderReminder() || reminderComment) ? '' : 'none';
+  if (reminderCommentEl && !id) reminderCommentEl.value = '';
 
   if (id) {
     // РЕДАКТИРОВАНИЕ
@@ -3514,6 +3519,10 @@ function getCurrentOrderReminderChecked(order = null) {
   return !!order.reminder;
 }
 
+function getOrderReminderComment(order = null) {
+  return String(order?.reminderComment || order?.reworkData?.reminderComment || '').trim();
+}
+
 function buildCurrentUserReminderState(existingOrder = null, checked = false) {
   const key = typeof getCurrentReminderWorkerKey === 'function'
     ? getCurrentReminderWorkerKey()
@@ -3529,19 +3538,35 @@ function buildCurrentUserReminderState(existingOrder = null, checked = false) {
   return [...set];
 }
 
-function buildOrderReminderPatch(existingOrder = null, checked = false) {
+function buildOrderReminderPatch(existingOrder = null, checked = false, comment = null) {
   const reminderWorkers = buildCurrentUserReminderState(existingOrder, checked);
+  const nextComment = comment === null
+    ? getOrderReminderComment(existingOrder)
+    : String(comment || '').trim();
   const reworkData = {
     ...(existingOrder?.reworkData || {}),
     reminderWorkers,
   };
   delete reworkData.reminder;
   if (!reminderWorkers.length) delete reworkData.reminderWorkers;
+  if (nextComment) reworkData.reminderComment = nextComment;
+  else delete reworkData.reminderComment;
   return {
     reminder: canCurrentUserUseOrderReminder() ? false : !!existingOrder?.reminder,
     reminderWorkers,
+    reminderComment: nextComment,
     reworkData,
   };
+}
+
+function hasOrderReminderChanges(order = null) {
+  if (!canCurrentUserUseOrderReminder()) return false;
+  const originalOrder = order || (editingOrderId ? orders.find(item => item.id === editingOrderId) : null);
+  const currentChecked = document.getElementById('f-reminder')?.checked || false;
+  const originalChecked = getCurrentOrderReminderChecked(originalOrder);
+  const currentComment = String(document.getElementById('f-reminder-comment')?.value || '').trim();
+  const originalComment = getOrderReminderComment(originalOrder);
+  return currentChecked !== originalChecked || currentComment !== originalComment;
 }
 
 function setElementDisabledState(el, disabled) {
@@ -3578,9 +3603,10 @@ function getOrderDraftFromForm(baseOrder = null) {
   order.toningDone = order.toningStatus;
   order.toningDoneBy = order.toningStatus ? (baseOrder?.toningDoneBy || order.toningResponsible || currentWorkerName || '') : '';
   order.priorityTask = document.getElementById('f-priority-task')?.checked || false;
-  const reminderPatch = buildOrderReminderPatch(baseOrder, document.getElementById('f-reminder')?.checked || false);
+  const reminderPatch = buildOrderReminderPatch(baseOrder, document.getElementById('f-reminder')?.checked || false, document.getElementById('f-reminder-comment')?.value || '');
   order.reminder = reminderPatch.reminder;
   order.reminderWorkers = reminderPatch.reminderWorkers;
+  order.reminderComment = reminderPatch.reminderComment;
   order.total = getN('f-total');
   order.income = getN('f-income');
   order.purchase = getN('f-purchase');
@@ -3874,7 +3900,9 @@ function updateOrderModalAccess(order = null) {
   const canToggleTatuStatus = canCurrentUserToggleSpecialServiceStatus(draftOrder, 'tatu') || tatuTabFallback;
   const canToggleToningStatus = canCurrentUserToggleSpecialServiceStatus(draftOrder, 'toning') || toningTabFallback;
   const canComplete = canCurrentUserCompleteOrder(existingOrder);
-  const canSave = isPrivileged || (canEditServices && hasSeniorServiceChanges(existingOrder));
+  const canEditReminder = canCurrentUserUseOrderReminder();
+  const reminderComment = getOrderReminderComment(existingOrder);
+  const canSave = isPrivileged || (canEditServices && hasSeniorServiceChanges(existingOrder)) || hasOrderReminderChanges(existingOrder);
   const headerActions = document.getElementById('order-modal-owner-actions');
   if (headerActions) {
     headerActions.style.display = (isPrivileged && !!editingOrderId && !!existingOrder) ? 'inline-flex' : 'none';
@@ -3893,9 +3921,13 @@ function updateOrderModalAccess(order = null) {
   const basicFieldIds = [
     'f-date','f-time','f-responsible','f-assistant','f-manager','f-client','f-phone','f-address',
     'f-vin','f-extra-note','f-car','f-code','f-glass-manufacturer','f-new-post','f-warehouse',
-    'f-warehouse-code','f-notes','f-order-status','f-only-sale','f-toning-external','f-priority-task','f-reminder','f-configuration'
+    'f-warehouse-code','f-notes','f-order-status','f-only-sale','f-toning-external','f-priority-task','f-reminder','f-reminder-comment','f-configuration'
   ];
   basicFieldIds.forEach(id => setElementDisabledState(document.getElementById(id), !isPrivileged));
+  setElementDisabledState(document.getElementById('f-reminder'), !canEditReminder);
+  setElementDisabledState(document.getElementById('f-reminder-comment'), !canEditReminder);
+  const reminderCommentWrap = document.getElementById('f-reminder-comment-wrap');
+  if (reminderCommentWrap) reminderCommentWrap.style.display = (canEditReminder || reminderComment) ? '' : 'none';
   document.querySelectorAll('#f-configuration-checkboxes input[type="checkbox"]').forEach(input => setElementDisabledState(input, !isPrivileged));
 
   const workCostsSection = document.getElementById('order-work-costs-section');
@@ -4156,6 +4188,7 @@ function fillOrderForm(o) {
   if (priorityTaskEl) priorityTaskEl.checked = !!o.priorityTask;
   const reminderEl = document.getElementById('f-reminder');
   if (reminderEl) reminderEl.checked = getCurrentOrderReminderChecked(o);
+  set('f-reminder-comment', getOrderReminderComment(o));
   // услуги — чекбоксы
   const svcHidden = document.getElementById('f-service-type');
   if (svcHidden) {
@@ -4241,6 +4274,7 @@ function clearOrderForm() {
   if (priorityTaskEl) priorityTaskEl.checked = false;
   const reminderEl = document.getElementById('f-reminder');
   if (reminderEl) reminderEl.checked = false;
+  set('f-reminder-comment', '');
   const tatuStatusEl = document.getElementById('f-tatu-status');
   if (tatuStatusEl) tatuStatusEl.checked = false;
   const toningStatusEl = document.getElementById('f-toning-status');
@@ -4392,7 +4426,10 @@ async function saveOrder() {
   const existingOrder = isNew ? null : orders.find(o => o.id === editingOrderId);
   const canUseFullSave = canUseFullOrderForm(existingOrder);
   const reminderChecked = document.getElementById('f-reminder')?.checked || false;
-  const reminderPatch = buildOrderReminderPatch(existingOrder, reminderChecked);
+  const reminderComment = (canCurrentUserUseOrderReminder() || canUseFullSave)
+    ? (document.getElementById('f-reminder-comment')?.value || '')
+    : getOrderReminderComment(existingOrder);
+  const reminderPatch = buildOrderReminderPatch(existingOrder, reminderChecked, reminderComment);
 
   recalcMargin();
 
@@ -4430,6 +4467,7 @@ async function saveOrder() {
       : !!existingOrder?.priorityTask,
     reminder:        reminderPatch.reminder,
     reminderWorkers: reminderPatch.reminderWorkers,
+    reminderComment: reminderPatch.reminderComment,
     delivery:        getN('f-delivery'),
     warehouse:       get('f-warehouse'),
     warehouseCode:   get('f-warehouse-code'),
