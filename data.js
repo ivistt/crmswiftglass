@@ -1530,7 +1530,7 @@ function rowToOrder(r) {
     onlySale:        r.only_sale || false,
     reworkData:      r.rework_data || {},
     priorityTask:    !!r.rework_data?.priorityTask,
-    reminder:        !!r.rework_data?.reminder,
+    reminder:        !!r.rework_data?.reminder || (Array.isArray(r.rework_data?.reminderWorkers) && r.rework_data.reminderWorkers.length > 0),
     reminderWorkers: Array.isArray(r.rework_data?.reminderWorkers) ? r.rework_data.reminderWorkers : [],
     reminderComment: String(r.rework_data?.reminderComment || ''),
     clientPayments:  r.client_payments || [],

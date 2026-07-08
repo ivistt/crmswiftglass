@@ -3515,45 +3515,30 @@ function canCurrentUserUseOrderReminder() {
 
 function getCurrentOrderReminderChecked(order = null) {
   if (!order) return false;
-  if (typeof orderHasReminderForCurrentUser === 'function') return orderHasReminderForCurrentUser(order);
-  return !!order.reminder;
+  return !!order.reminder || (Array.isArray(order.reminderWorkers) && order.reminderWorkers.length > 0) || (Array.isArray(order.reworkData?.reminderWorkers) && order.reworkData.reminderWorkers.length > 0);
 }
 
 function getOrderReminderComment(order = null) {
   return String(order?.reminderComment || order?.reworkData?.reminderComment || '').trim();
 }
 
-function buildCurrentUserReminderState(existingOrder = null, checked = false) {
-  const key = typeof getCurrentReminderWorkerKey === 'function'
-    ? getCurrentReminderWorkerKey()
-    : String(currentWorkerName || '').trim();
-  const source = Array.isArray(existingOrder?.reminderWorkers)
-    ? existingOrder.reminderWorkers
-    : (Array.isArray(existingOrder?.reworkData?.reminderWorkers) ? existingOrder.reworkData.reminderWorkers : []);
-  const set = new Set(source.map(name => String(name || '').trim()).filter(Boolean));
-  if (canCurrentUserUseOrderReminder() && key) {
-    if (checked) set.add(key);
-    else set.delete(key);
-  }
-  return [...set];
-}
-
 function buildOrderReminderPatch(existingOrder = null, checked = false, comment = null) {
-  const reminderWorkers = buildCurrentUserReminderState(existingOrder, checked);
+  const canEditReminder = canCurrentUserUseOrderReminder();
+  const reminder = canEditReminder ? !!checked : getCurrentOrderReminderChecked(existingOrder);
   const nextComment = comment === null
     ? getOrderReminderComment(existingOrder)
     : String(comment || '').trim();
   const reworkData = {
     ...(existingOrder?.reworkData || {}),
-    reminderWorkers,
   };
-  delete reworkData.reminder;
-  if (!reminderWorkers.length) delete reworkData.reminderWorkers;
+  delete reworkData.reminderWorkers;
+  if (reminder) reworkData.reminder = true;
+  else delete reworkData.reminder;
   if (nextComment) reworkData.reminderComment = nextComment;
   else delete reworkData.reminderComment;
   return {
-    reminder: canCurrentUserUseOrderReminder() ? false : !!existingOrder?.reminder,
-    reminderWorkers,
+    reminder,
+    reminderWorkers: [],
     reminderComment: nextComment,
     reworkData,
   };

@@ -864,9 +864,7 @@ function getOrderReminderWorkers(order) {
 }
 
 function orderHasReminderForCurrentUser(order) {
-  const key = getCurrentReminderWorkerKey();
-  if (key && getOrderReminderWorkers(order).includes(key)) return true;
-  return (currentRole === 'owner' || currentRole === 'manager') && !!order?.reminder;
+  return !!order?.reminder || getOrderReminderWorkers(order).length > 0;
 }
 
 function getReminderOrders() {
@@ -889,7 +887,6 @@ function openRemindersModal() {
   const list = getReminderOrders();
   const container = document.getElementById('reminders-list');
   if (!container) return;
-  const ownerLabel = getCurrentReminderWorkerKey();
   container.innerHTML = list.length ? list.map(order => `
     <button type="button" class="reminder-order-card" onclick="openOrderFromReminder('${escapeAttr(order.id)}')">
       <span class="reminder-order-icon"><i data-lucide="bell-ring" style="width:17px;height:17px;"></i></span>
@@ -900,7 +897,7 @@ function openRemindersModal() {
       </span>
       <span class="reminder-order-date"><strong>${order.date ? escapeHtml(formatDate(order.date)) : 'Без даты'}</strong><small>${escapeHtml(order.time || '')}</small></span>
     </button>
-  `).join('') : `<div class="empty-state"><div class="empty-state-icon"><i data-lucide="bell-off"></i></div><h3>Напоминаний нет</h3><p>Отметьте нужный заказ галочкой «Напоминание»${ownerLabel ? ' — она будет личной для вас' : ''}</p></div>`;
+  `).join('') : '<div class="empty-state"><div class="empty-state-icon"><i data-lucide="bell-off"></i></div><h3>Напоминаний нет</h3><p>Отметьте нужный заказ галочкой «Напоминание»</p></div>';
   document.getElementById('reminders-modal')?.classList.add('active');
   initIcons();
 }
