@@ -705,6 +705,17 @@ async function sbUpdateWorker(workerId, updates) {
   return rows[0] ? rowToWorker(rows[0]) : null;
 }
 
+async function sbUpdateWorkerClientCopyFields(workerId, clientCopyFields) {
+  const res = await fetch(`${WORKER_URL}/api/workers/${encodeURIComponent(workerId)}/client-copy-fields`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+    body: JSON.stringify({ clientCopyFields }),
+  });
+  if (!res.ok) await throwApiError(res);
+  const rows = await res.json();
+  return rows[0] ? rowToWorker(rows[0]) : null;
+}
+
 // ── WORKER PROBLEMS ──────────────────────────────────────────
 
 async function sbFetchWorkerProblems(workerName) {

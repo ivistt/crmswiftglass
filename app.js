@@ -4111,14 +4111,8 @@ async function saveCurrentUserClientCopyFields() {
   const btn = document.getElementById('settings-client-copy-save-btn');
   if (btn) btn.disabled = true;
   try {
-    await sbUpdateWorker(worker.id, {
-      note: worker.note || '',
-      permissions: worker.permissions || {},
-      telegramNick: worker.telegramNick || '',
-      orderCardLayout: worker.orderCardLayout || null,
-      clientCopyFields,
-    });
-    worker.clientCopyFields = clientCopyFields;
+    const savedWorker = await sbUpdateWorkerClientCopyFields(worker.id, clientCopyFields);
+    worker.clientCopyFields = savedWorker?.clientCopyFields || clientCopyFields;
     showToast('Мои тексты сохранены ✓');
   } catch (e) {
     showToast('Ошибка сохранения: ' + e.message, 'error');
