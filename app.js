@@ -792,7 +792,7 @@ function showScreen(name, options = {}) {
   if (el) el.classList.add('active');
   const ownerMenu = document.getElementById('owner-dashboard-menu');
   if (ownerMenu) {
-    ownerMenu.style.display = canUseDashboardActionPanel() && name === 'home' ? '' : 'none';
+    ownerMenu.style.display = canUseDashboardActionPanel() ? '' : 'none';
     ownerMenu.classList.remove('is-open');
   }
   updateDashboardActionMenu();
@@ -835,7 +835,7 @@ function canUseActionPanelDailyReport() {
 function updateDashboardActionMenu() {
   const menu = document.getElementById('owner-dashboard-menu');
   if (!menu) return;
-  const visible = canUseDashboardActionPanel() && getActiveScreenName() === 'home';
+  const visible = canUseDashboardActionPanel();
   menu.style.display = visible ? '' : 'none';
   const clientBtn = document.getElementById('action-menu-client-data');
   const reportBtn = document.getElementById('action-menu-daily-report');
