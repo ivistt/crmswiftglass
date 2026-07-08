@@ -829,9 +829,10 @@ async function sbFetchCashLog(workerName, deletedMode = 'active') {
     );
     if (!res.ok) await throwApiError(res);
     const rows = await res.json();
-    const page = (Array.isArray(rows) ? rows : []).filter(entry => String(entry?.ledger_status || 'posted') !== 'voided');
+    const rawPage = Array.isArray(rows) ? rows : [];
+    const page = rawPage.filter(entry => String(entry?.ledger_status || 'posted') !== 'voided');
     allRows.push(...page);
-    if (page.length < pageSize) break;
+    if (rawPage.length < pageSize) break;
   }
   return allRows;
 }
@@ -844,9 +845,10 @@ async function sbFetchAllCashLog(deletedMode = 'active') {
     const res = await fetch(`${WORKER_URL}/api/cash/all?deleted=${encodeURIComponent(mode)}&offset=${offset}&limit=${pageSize}`, { headers: getHeaders() });
     if (!res.ok) await throwApiError(res);
     const rows = await res.json();
-    const page = (Array.isArray(rows) ? rows : []).filter(entry => String(entry?.ledger_status || 'posted') !== 'voided');
+    const rawPage = Array.isArray(rows) ? rows : [];
+    const page = rawPage.filter(entry => String(entry?.ledger_status || 'posted') !== 'voided');
     allRows.push(...page);
-    if (page.length < pageSize) break;
+    if (rawPage.length < pageSize) break;
   }
   return allRows;
 }
