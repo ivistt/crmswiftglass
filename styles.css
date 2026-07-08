@@ -2385,6 +2385,24 @@ body {
 .form-group.span-2 { grid-column: span 2; }
 .form-group.span-3 { grid-column: span 3; }
 .form-group.span-full { grid-column: 1 / -1; }
+.finance-flow-panel {
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface3);
+}
+.finance-flow-panel--supplier {
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--red) 10%, transparent), transparent 62%),
+    var(--surface3);
+  border-color: color-mix(in srgb, var(--red) 24%, var(--border));
+}
+.finance-flow-panel--client {
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 11%, transparent), transparent 62%),
+    var(--surface3);
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--border));
+}
 
 .form-label {
   font-size: 11px;
