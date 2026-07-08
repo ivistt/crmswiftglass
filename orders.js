@@ -4274,7 +4274,8 @@ function clearOrderForm() {
   if (priorityTaskEl) priorityTaskEl.checked = false;
   const reminderEl = document.getElementById('f-reminder');
   if (reminderEl) reminderEl.checked = false;
-  set('f-reminder-comment', '');
+  const reminderCommentEl = document.getElementById('f-reminder-comment');
+  if (reminderCommentEl) reminderCommentEl.value = '';
   const tatuStatusEl = document.getElementById('f-tatu-status');
   if (tatuStatusEl) tatuStatusEl.checked = false;
   const toningStatusEl = document.getElementById('f-toning-status');
