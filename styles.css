@@ -406,12 +406,19 @@ body {
 
 .owner-dashboard-menu { position:fixed; top:68px; right:14px; z-index:209; }
 .owner-dashboard-menu-toggle {
+  position:relative;
   width:44px; height:44px; border:1px solid rgba(255,255,255,.08); border-radius:999px;
   background:rgba(16,16,16,.42); color:rgba(255,255,255,.72); backdrop-filter:blur(8px);
   -webkit-backdrop-filter:blur(8px); box-shadow:0 14px 34px rgba(0,0,0,.22),0 1px 0 rgba(255,255,255,.08) inset;
   display:flex; align-items:center; justify-content:center; cursor:pointer; transition:.18s ease;
 }
 .owner-dashboard-menu-toggle:hover,.owner-dashboard-menu.is-open .owner-dashboard-menu-toggle { color:#fff; background:rgba(16,16,16,.62); }
+.owner-dashboard-menu-badge {
+  position:absolute; top:-4px; right:-4px; min-width:20px; height:20px; padding:0 5px;
+  border-radius:999px; background:var(--red); color:#fff; border:2px solid rgba(16,16,16,.78);
+  display:none; align-items:center; justify-content:center; font-style:normal; font-size:10px; font-weight:900; line-height:1;
+  box-shadow:0 8px 18px rgba(220,38,38,.34);
+}
 .owner-dashboard-menu-island {
   position:absolute; top:52px; right:0; width:min(300px,calc(100vw - 28px)); padding:8px;
   border:1px solid var(--border); border-radius:18px; background:color-mix(in srgb,var(--card) 92%,transparent);

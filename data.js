@@ -261,7 +261,7 @@ function parseWorkerNoteMeta(rawNote) {
   const encoded = source.slice(start + WORKER_PERMISSIONS_META_PREFIX.length, end);
   const note = (source.slice(0, start) + source.slice(end + WORKER_PERMISSIONS_META_SUFFIX.length)).trim();
   try {
-    const decoded = JSON.parse(atob(encoded));
+    const decoded = JSON.parse(decodeWorkerMetaPayload(encoded));
     const meta = decoded && typeof decoded === 'object' && !Array.isArray(decoded) ? decoded : {};
     const isLegacyPermissionsOnly = !Object.prototype.hasOwnProperty.call(meta, 'permissions')
       && !Object.prototype.hasOwnProperty.call(meta, 'telegramNick')
@@ -278,6 +278,21 @@ function parseWorkerNoteMeta(rawNote) {
     };
   } catch (e) {
     return { note, permissions: {}, telegramNick: '', orderCardLayout: null, clientCopyFields: null };
+  }
+}
+
+function decodeWorkerMetaPayload(encoded) {
+  const binary = atob(String(encoded || ''));
+  try {
+    if (typeof TextDecoder !== 'undefined') {
+      const bytes = Uint8Array.from(binary, ch => ch.charCodeAt(0));
+      return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    }
+  } catch (e) {}
+  try {
+    return decodeURIComponent(escape(binary));
+  } catch (e) {
+    return binary;
   }
 }
 

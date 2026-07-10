@@ -875,10 +875,17 @@ function getReminderOrders() {
 
 function updateOwnerRemindersCount() {
   const badge = document.getElementById('owner-reminders-count');
-  if (!badge) return;
-  const count = getReminderOrders().length;
-  badge.textContent = count ? String(count) : '';
-  badge.style.display = count ? 'inline-flex' : 'none';
+  const toggleBadge = document.getElementById('owner-dashboard-menu-badge');
+  const count = canUseActionPanelReminders() ? getReminderOrders().length : 0;
+  const label = count > 99 ? '99+' : String(count || '');
+  if (badge) {
+    badge.textContent = label;
+    badge.style.display = count ? 'inline-flex' : 'none';
+  }
+  if (toggleBadge) {
+    toggleBadge.textContent = label;
+    toggleBadge.style.display = count ? 'inline-flex' : 'none';
+  }
 }
 
 function openRemindersModal() {
