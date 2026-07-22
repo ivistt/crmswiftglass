@@ -103,6 +103,9 @@ function clearCacheAndReload() {
   if (typeof workerSalaries !== 'undefined') workerSalaries = [];
   if (typeof assistantWorkerSalaries !== 'undefined') assistantWorkerSalaries = [];
   if (typeof workerCashLog !== 'undefined') workerCashLog = [];
+  if (typeof workerCashSummary !== 'undefined') workerCashSummary = null;
+  if (typeof workerCashLogComplete !== 'undefined') workerCashLogComplete = false;
+  if (typeof workerCashLoadVersion !== 'undefined') workerCashLoadVersion += 1;
   if (typeof allSalaries !== 'undefined') allSalaries = [];
   if (typeof manualClients !== 'undefined') manualClients = [];
   if (typeof currentClientPayments !== 'undefined') currentClientPayments = [];

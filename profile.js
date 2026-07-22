@@ -5,6 +5,11 @@
 let workerSalaries = [];
 let workerProblems = [];
 let workerCashLog  = [];  // записи кассы текущего специалиста
+let workerCashSummary = null;
+let workerCashLogComplete = false;
+let workerCashFastLoadPromise = null;
+let workerCashFullLoadPromise = null;
+let workerCashLoadVersion = 0;
 let assistantWorkerSalaries = [];
 let cashSearchQuery = '';
 let selectedAssistantSalaryName = '';
@@ -154,8 +159,97 @@ async function loadWorkerCashLog() {
   if (!canAccessPersonalCash()) return;
   try {
     workerCashLog = await sbFetchCashLog(currentWorkerName);
+    workerCashLogComplete = true;
   } catch (e) {
     workerCashLog = [];
+    workerCashLogComplete = false;
+  }
+}
+
+async function loadWorkerCashFastState({ force = false } = {}) {
+  if (!canAccessPersonalCash()) return false;
+  if (!force && workerCashFastLoadPromise) return workerCashFastLoadPromise;
+  const loadVersion = ++workerCashLoadVersion;
+
+  const fastPromise = Promise.all([
+    sbFetchCashSummary(currentWorkerName),
+    sbFetchCashLogPage(currentWorkerName, { limit: 200 }),
+  ]).then(([summary, rows]) => {
+    if (loadVersion !== workerCashLoadVersion) return false;
+    const summaryRows = Array.isArray(summary?.workers) ? summary.workers : [];
+    const hasAccountBreakdown = summaryRows.every(row =>
+      Object.prototype.hasOwnProperty.call(row || {}, 'confirmed_cash_uah')
+      && Object.prototype.hasOwnProperty.call(row || {}, 'confirmed_fop_uah')
+    );
+    if (!hasAccountBreakdown) {
+      throw new Error('Cash summary SQL must be updated');
+    }
+    workerCashSummary = summary;
+    workerCashLog = Array.isArray(rows) ? rows : [];
+    workerCashLogComplete = false;
+    return true;
+  }).catch(error => {
+    console.warn('Fast worker cash load unavailable:', error);
+    if (loadVersion === workerCashLoadVersion) workerCashSummary = null;
+    return false;
+  }).finally(() => {
+    if (workerCashFastLoadPromise === fastPromise) workerCashFastLoadPromise = null;
+  });
+  workerCashFastLoadPromise = fastPromise;
+
+  return workerCashFastLoadPromise;
+}
+
+async function loadWorkerCashFullState({ force = false } = {}) {
+  if (!canAccessPersonalCash()) return false;
+  if (!force && workerCashLogComplete) return true;
+  if (!force && workerCashFullLoadPromise) return workerCashFullLoadPromise;
+  const loadVersion = workerCashLoadVersion;
+
+  const fullPromise = sbFetchCashLog(currentWorkerName)
+    .then(rows => {
+      if (loadVersion !== workerCashLoadVersion) return false;
+      workerCashLog = Array.isArray(rows) ? rows : [];
+      workerCashLogComplete = true;
+      return true;
+    })
+    .catch(error => {
+      console.warn('Full worker cash load failed:', error);
+      return false;
+    })
+    .finally(() => {
+      if (workerCashFullLoadPromise === fullPromise) workerCashFullLoadPromise = null;
+    });
+  workerCashFullLoadPromise = fullPromise;
+
+  return workerCashFullLoadPromise;
+}
+
+function loadWorkerCashFullInBackground() {
+  if (workerCashLogComplete) return;
+  if (workerCashFullLoadPromise) {
+    workerCashFullLoadPromise.then(() => {
+      if (!workerCashLogComplete) loadWorkerCashFullInBackground();
+    });
+    return;
+  }
+  loadWorkerCashFullState().then(ok => {
+    if (ok && document.getElementById('screen-cash')?.classList.contains('active')) {
+      renderCashScreen();
+    }
+  });
+}
+
+async function loadWorkerCashCompleteHistory(button = null) {
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Загрузка…';
+  }
+  const ok = await loadWorkerCashFullState();
+  if (ok) renderCashScreen();
+  else if (button) {
+    button.disabled = false;
+    button.textContent = 'Вся история';
   }
 }
 
@@ -164,22 +258,59 @@ function calcCashBalance(log) {
   return (log || []).reduce((s, e) => s + Number(e.amount), 0);
 }
 
+function hasWorkerCashSummary() {
+  return !!workerCashSummary
+    && typeof workerCashSummary === 'object'
+    && Array.isArray(workerCashSummary.workers);
+}
+
+function getWorkerCashSummaryAmount(field) {
+  if (!hasWorkerCashSummary()) return null;
+  if (!workerCashSummary.workers.some(row => Object.prototype.hasOwnProperty.call(row || {}, field))) {
+    return workerCashSummary.workers.length ? null : 0;
+  }
+  return workerCashSummary.workers.reduce(
+    (sum, row) => sum + (Number(row?.[field]) || 0),
+    0
+  );
+}
+
+function getWorkerCashReverseBalanceMap(log = [], currentBalance = 0) {
+  const map = new Map();
+  let balance = Number(currentBalance) || 0;
+  [...(log || [])]
+    .filter(entry => !String(entry?.deleted_at || '').trim())
+    .sort((a, b) => {
+      const at = new Date(a?.created_at || a?.fop_date || 0).getTime();
+      const bt = new Date(b?.created_at || b?.fop_date || 0).getTime();
+      if (at !== bt) return bt - at;
+      return String(b?.id || '').localeCompare(String(a?.id || ''));
+    })
+    .forEach(entry => {
+      const id = String(entry?.id || '').trim();
+      if (id) map.set(id, balance);
+      balance -= Number(entry?.amount) || 0;
+    });
+  return map;
+}
+
 // ── ОТКРЫТИЕ ЭКРАНА ──────────────────────────────────────────
 
 async function openProfileScreen() {
   await loadWorkerSalaries();
   await loadWorkerProblems();
-  if (canAccessPersonalCash()) await loadWorkerCashLog();
   renderProfile();
   showScreen('profile');
   setActiveNav('profile');
 }
 
 async function openCashScreen() {
-  await loadWorkerCashLog();
+  const fastLoaded = await loadWorkerCashFastState({ force: true });
+  if (!fastLoaded) await loadWorkerCashFullState({ force: true });
   renderCashScreen();
   showScreen('cash');
   setActiveNav('cash');
+  if (fastLoaded) loadWorkerCashFullInBackground();
 }
 
 // ── РЕНДЕР ЗП ────────────────────────────────────────────────
@@ -328,9 +459,12 @@ function renderCashScreen() {
   const confirmedCashOnlyLog = confirmedUnifiedCashLog.filter(entry => !isCardCashEntry(entry));
   const confirmedFopCashLog = fopCashLog.filter(entry => getCashEntryApprovalStatus(entry) === 'confirmed');
   const pendingFopCashLog = fopCashLog.filter(entry => getCashEntryApprovalStatus(entry) !== 'confirmed');
-  const cashBalance = calcCashBalance(confirmedUnifiedCashLog);
-  const currencyBalance = calcCurrencyCashBalance(currencyCashLog);
-  const fopBalance = calcCashBalance(confirmedFopCashLog);
+  const summaryCashBalance = getWorkerCashSummaryAmount('confirmed_cash_uah');
+  const summaryCurrencyBalance = getWorkerCashSummaryAmount('usd');
+  const summaryFopBalance = getWorkerCashSummaryAmount('confirmed_fop_uah');
+  const cashBalance = summaryCashBalance !== null ? summaryCashBalance : calcCashBalance(confirmedUnifiedCashLog);
+  const currencyBalance = summaryCurrencyBalance !== null ? summaryCurrencyBalance : calcCurrencyCashBalance(currencyCashLog);
+  const fopBalance = summaryFopBalance !== null ? summaryFopBalance : calcCashBalance(confirmedFopCashLog);
 
   el.innerHTML = ''
     + '<div class="profile-header">'
@@ -338,6 +472,12 @@ function renderCashScreen() {
     + '<div><div style="font-size:20px;font-weight:800;">' + getWorkerDisplayName(currentWorkerName) + '</div>'
     + '<div style="font-size:13px;color:var(--text3);margin-top:2px;">Касса</div></div>'
     + '</div>'
+    + (!workerCashLogComplete
+      ? '<div class="profile-today-card" style="margin-top:12px;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">'
+        + '<div style="font-size:12px;color:var(--text3);">Показаны последние операции. Полная история загружается в фоне.</div>'
+        + '<button class="btn-secondary" style="font-size:12px;padding:6px 10px;" onclick="loadWorkerCashCompleteHistory(this)">Вся история</button>'
+        + '</div>'
+      : '')
     + renderCashSection(confirmedUnifiedCashLog, cashBalance, today, {
       title: 'Касса',
       account: 'cash',
@@ -872,9 +1012,9 @@ function renderCashSection(log, balance, today, options = {}) {
   const pendingEntries = options.pendingEntries || [];
   const balanceColor = balance >= 0 ? 'var(--accent)' : '#ef4444';
   const filteredLog = _filterCashLogByComment(log, cashSearchQuery);
-  const balanceMap = typeof getCashRunningBalanceMap === 'function'
-    ? getCashRunningBalanceMap(log)
-    : new Map();
+  const balanceMap = !workerCashLogComplete && hasWorkerCashSummary()
+    ? getWorkerCashReverseBalanceMap(log, balance)
+    : (typeof getCashRunningBalanceMap === 'function' ? getCashRunningBalanceMap(log) : new Map());
 
   // Разделяем лог на сегодня и архив
   const todayLog   = filteredLog.filter(e => _cashEntryDate(e) === today);
@@ -978,6 +1118,7 @@ async function confirmFopCashEntry(id) {
     if (Array.isArray(window.allCashLog)) {
       window.allCashLog = window.allCashLog.map(entry => entry.id === id ? { ...entry, ...updated, fop_confirmed: true, approval_status: 'confirmed' } : entry);
     }
+    await refreshCurrentWorkerCashState();
     renderCashScreen();
     if (document.getElementById('screen-profile')?.classList.contains('active')) renderProfile();
     const account = getCashEntryAccountType(updated);
@@ -991,8 +1132,11 @@ async function confirmFopCashEntry(id) {
   }
 }
 
-function setCashSearchQuery(value) {
+async function setCashSearchQuery(value) {
   cashSearchQuery = value || '';
+  if (cashSearchQuery.trim() && !workerCashLogComplete) {
+    await loadWorkerCashFullState();
+  }
   renderCashScreen();
 }
 
@@ -1519,11 +1663,9 @@ function closeCashEntryModal() {
 
 async function refreshCurrentWorkerCashState() {
   if (!currentWorkerName) return;
-  try {
-    workerCashLog = await sbFetchCashLog(currentWorkerName);
-  } catch (e) {
-    console.warn('Failed to refresh worker cash log:', e);
-  }
+  const fastLoaded = await loadWorkerCashFastState({ force: true });
+  if (fastLoaded) loadWorkerCashFullInBackground();
+  else await loadWorkerCashFullState({ force: true });
 }
 
 async function refreshCurrentWorkerSalaryState() {
@@ -1578,15 +1720,21 @@ async function saveCashEntry() {
       }
       const uahAmount = Math.round(rate * usdAmount * 100) / 100;
       if (window._cashAccount === 'currency-back') {
-        const currentCurrencyBalance = calcCurrencyCashBalance((workerCashLog || []).filter(item => !isFopCashEntry(item)).filter(isCurrencyCashEntry));
+        const summaryCurrencyBalance = getWorkerCashSummaryAmount('usd');
+        const currentCurrencyBalance = summaryCurrencyBalance !== null
+          ? summaryCurrencyBalance
+          : calcCurrencyCashBalance((workerCashLog || []).filter(item => !isFopCashEntry(item)).filter(isCurrencyCashEntry));
         if (usdAmount > currentCurrencyBalance) {
           showToast('Недостаточно валюты в кассе', 'error');
           return;
         }
       } else {
-        const currentCashBalance = calcCashBalance((workerCashLog || [])
-          .filter(item => !isFopCashEntry(item))
-          .filter(item => !isPendingPersonalConfirmableCashEntry(item)));
+        const summaryCashBalance = getWorkerCashSummaryAmount('confirmed_cash_uah');
+        const currentCashBalance = summaryCashBalance !== null
+          ? summaryCashBalance
+          : calcCashBalance((workerCashLog || [])
+            .filter(item => !isFopCashEntry(item))
+            .filter(item => !isPendingPersonalConfirmableCashEntry(item)));
         if (uahAmount > currentCashBalance) {
           showToast('Недостаточно гривны в кассе', 'error');
           return;
@@ -1623,7 +1771,10 @@ async function saveCashEntry() {
         return;
       }
       const signedUsdAmount = usdAmount * sign;
-      const currentCurrencyBalance = calcCurrencyCashBalance((workerCashLog || []).filter(item => !isFopCashEntry(item)).filter(isCurrencyCashEntry));
+      const summaryCurrencyBalance = getWorkerCashSummaryAmount('usd');
+      const currentCurrencyBalance = summaryCurrencyBalance !== null
+        ? summaryCurrencyBalance
+        : calcCurrencyCashBalance((workerCashLog || []).filter(item => !isFopCashEntry(item)).filter(isCurrencyCashEntry));
       if (signedUsdAmount < 0 && Math.abs(signedUsdAmount) > currentCurrencyBalance) {
         showToast('Недостаточно валюты в кассе', 'error');
         return;

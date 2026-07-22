@@ -5,6 +5,22 @@ create index if not exists cash_log_active_created_at_idx
   on public.cash_log (created_at desc)
   where deleted_at is null;
 
+create index if not exists cash_log_worker_id_active_created_at_idx
+  on public.cash_log (worker_id, created_at desc)
+  where deleted_at is null;
+
+create index if not exists cash_log_cash_owner_id_active_created_at_idx
+  on public.cash_log (cash_owner_id, created_at desc)
+  where deleted_at is null;
+
+create index if not exists cash_log_worker_name_active_created_at_idx
+  on public.cash_log (worker_name, created_at desc)
+  where deleted_at is null;
+
+create index if not exists cash_log_cash_owner_active_created_at_idx
+  on public.cash_log (cash_owner, created_at desc)
+  where deleted_at is null;
+
 create or replace function public.crm_cash_summary()
 returns jsonb
 language sql
@@ -66,6 +82,15 @@ as $$
           and (is_currency is false or currency_uah_amount > 0)
       ), 0)::numeric as confirmed_uah,
       coalesce(sum(amount) filter (
+        where account_type = 'cash'
+          and approval_status in ('confirmed', 'not_required')
+          and (is_currency is false or currency_uah_amount > 0)
+      ), 0)::numeric as confirmed_cash_uah,
+      coalesce(sum(amount) filter (
+        where account_type = 'fop'
+          and approval_status in ('confirmed', 'not_required')
+      ), 0)::numeric as confirmed_fop_uah,
+      coalesce(sum(amount) filter (
         where account_type <> 'currency'
           and approval_status = 'pending'
           and (is_currency is false or currency_uah_amount > 0)
@@ -89,6 +114,8 @@ as $$
           'worker_id', worker_id,
           'worker_name', worker_name,
           'confirmed_uah', confirmed_uah,
+          'confirmed_cash_uah', confirmed_cash_uah,
+          'confirmed_fop_uah', confirmed_fop_uah,
           'pending_uah', pending_uah,
           'usd', usd,
           'expense_total', expense_total,

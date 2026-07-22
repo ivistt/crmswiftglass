@@ -902,7 +902,11 @@ export default {
 
     // ── /api/cash ────────────────────────────────────────────
     if (url.pathname === '/api/cash/summary' && request.method === 'GET') {
-      if (authedRole !== 'owner') {
+      const workerName = String(url.searchParams.get('worker') || '').trim();
+      if (!workerName && authedRole !== 'owner') {
+        return Response.json({ error: 'worker required' }, { status: 400, headers: cors });
+      }
+      if (workerName && !(await canAccessWorker(workerName, session, sb, sbHeaders))) {
         return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
       }
 
@@ -911,12 +915,36 @@ export default {
         headers: sbHeaders,
         body: '{}',
       });
-      const data = await res.json().catch(() => null);
+      let data = await res.json().catch(() => null);
       if (!res.ok) {
         return Response.json(data || { error: 'Cash summary unavailable' }, {
           status: res.status,
           headers: { ...cors, 'Cache-Control': 'no-store' },
         });
+      }
+      if (workerName && data && typeof data === 'object') {
+        const targetWorker = await findWorkerByIdentity(workerName, sb, sbHeaders);
+        const targetId = String(targetWorker?.id || '').trim();
+        const labels = new Set([workerName, targetWorker?.name, targetWorker?.alias]
+          .map(value => String(value || '').trim().toLowerCase())
+          .filter(Boolean));
+        const rows = (Array.isArray(data.workers) ? data.workers : []).filter(row => {
+          const rowId = String(row?.worker_id || '').trim();
+          const rowName = String(row?.worker_name || '').trim().toLowerCase();
+          return (targetId && rowId === targetId) || (!!rowName && labels.has(rowName));
+        });
+        const sum = field => rows.reduce((total, row) => total + (Number(row?.[field]) || 0), 0);
+        data = {
+          generated_at: data.generated_at || new Date().toISOString(),
+          workers: rows,
+          total_confirmed_uah: sum('confirmed_uah'),
+          total_confirmed_cash_uah: sum('confirmed_cash_uah'),
+          total_confirmed_fop_uah: sum('confirmed_fop_uah'),
+          total_pending_uah: sum('pending_uah'),
+          total_usd: sum('usd'),
+          total_expenses: sum('expense_total'),
+          entries_count: sum('entries_count'),
+        };
       }
       return Response.json(data || {}, {
         headers: { ...cors, 'Cache-Control': 'no-store' },
