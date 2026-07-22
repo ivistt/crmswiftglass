@@ -10,6 +10,9 @@ let ownerExpenseSelectedWorker = '';
 let ownerCashCurrencyView = 'uah';
 let ownerCashConfirmFilter = 'all';
 let ownerCashSearchQuery = '';
+let ownerCashFastLoadPromise = null;
+let ownerCashFullLoadPromise = null;
+let ownerCashStateGeneration = 0;
 // Legacy bucket name used in historical cash rows.
 const OWNER_PENDING_CASH_WORKER_NAME = 'Карты владельца';
 let calendarCursorDate = new Date();
@@ -106,9 +109,91 @@ function clearCacheAndReload() {
   if (typeof currentSupplierPayments !== 'undefined') currentSupplierPayments = [];
   if (typeof window !== 'undefined') {
     window.allCashLog = [];
+    window.ownerCashRecentLog = [];
+    window.ownerCashSummary = null;
+    window.__allCashLogComplete = false;
   }
 
   location.reload();
+}
+
+function hasOwnerCashSummary() {
+  return !!(window.ownerCashSummary && typeof window.ownerCashSummary === 'object' && Array.isArray(window.ownerCashSummary.workers));
+}
+
+function getOwnerCashViewLog() {
+  if (window.__allCashLogComplete === true && Array.isArray(window.allCashLog)) return window.allCashLog;
+  return Array.isArray(window.ownerCashRecentLog) ? window.ownerCashRecentLog : [];
+}
+
+async function loadOwnerCashFastState({ force = false } = {}) {
+  if (!force && ownerCashFastLoadPromise) return ownerCashFastLoadPromise;
+  ownerCashFastLoadPromise = (async () => {
+    const [summary, recent] = await Promise.all([
+      sbFetchCashSummary(),
+      sbFetchCashPage({ limit: 200 }),
+    ]);
+    window.ownerCashSummary = summary;
+    window.ownerCashRecentLog = recent;
+    ownerCashStateGeneration += 1;
+    return true;
+  })();
+  try {
+    return await ownerCashFastLoadPromise;
+  } catch (e) {
+    console.warn('[cash] Fast summary unavailable, using full history fallback:', e);
+    window.ownerCashSummary = null;
+    window.ownerCashRecentLog = [];
+    return false;
+  } finally {
+    ownerCashFastLoadPromise = null;
+  }
+}
+
+async function loadOwnerCashFullState({ force = false } = {}) {
+  if (!force && window.__allCashLogComplete === true) return window.allCashLog || [];
+  if (ownerCashFullLoadPromise) {
+    try { await ownerCashFullLoadPromise; } catch (e) { if (!force) throw e; }
+    if (!force && window.__allCashLogComplete === true) return window.allCashLog || [];
+  }
+  const requestedGeneration = ownerCashStateGeneration;
+  let staleResult = false;
+  ownerCashFullLoadPromise = (async () => {
+    const rows = await sbFetchAllCashLog();
+    if (requestedGeneration !== ownerCashStateGeneration) {
+      staleResult = true;
+      return rows;
+    }
+    window.allCashLog = rows;
+    window.__allCashLogComplete = true;
+    if (!window.ownerCashRecentLog?.length) window.ownerCashRecentLog = rows.slice(0, 200);
+    return rows;
+  })();
+  try {
+    return await ownerCashFullLoadPromise;
+  } finally {
+    ownerCashFullLoadPromise = null;
+    if (staleResult) setTimeout(loadOwnerCashFullInBackground, 0);
+  }
+}
+
+function loadOwnerCashFullInBackground() {
+  if (currentRole !== 'owner' || window.__allCashLogComplete === true || ownerCashFullLoadPromise) return;
+  loadOwnerCashFullState().then(() => {
+    if (document.getElementById('screen-home')?.classList.contains('active')) renderHome();
+    if (document.getElementById('screen-owner-cash')?.classList.contains('active')) renderOwnerCashScreen();
+  }).catch(e => console.warn('[cash] Background history load failed:', e));
+}
+
+async function loadOwnerCashStartupState() {
+  const fastLoaded = await loadOwnerCashFastState();
+  if (fastLoaded) return;
+  try {
+    await loadOwnerCashFullState();
+  } catch (e) {
+    window.allCashLog = [];
+    window.__allCashLogComplete = false;
+  }
 }
 
 async function initApp() {
@@ -129,9 +214,7 @@ async function initApp() {
     }
   })());
   if (currentRole === 'owner') {
-    tasks.push((async () => {
-      try { window.allCashLog = await sbFetchAllCashLog(); } catch(e) { window.allCashLog = []; }
-    })());
+    tasks.push(loadOwnerCashStartupState());
     tasks.push((async () => {
       try {
         if (typeof loadAllSalaries === 'function') await loadAllSalaries();
@@ -155,6 +238,7 @@ async function initApp() {
     loader.classList.add('hiding');
     setTimeout(() => loader.remove(), 400);
   }
+  loadOwnerCashFullInBackground();
 }
 
 function getSystemBannerState(key) {
@@ -274,14 +358,17 @@ function openOwnerSettingsScreen() {
 
 async function openOwnerCashScreen() {
   if (!canViewOwnerCash()) return;
-  try { window.allCashLog = await sbFetchAllCashLog(); } catch(e) { window.allCashLog = window.allCashLog || []; }
+  if (!hasOwnerCashSummary() && window.__allCashLogComplete !== true) {
+    await loadOwnerCashStartupState();
+  }
   renderOwnerCashScreen();
   showScreen('owner-cash');
+  loadOwnerCashFullInBackground();
 }
 
 async function openOwnerExpensesScreen() {
   if (!canViewOwnerExpenses()) return;
-  try { window.allCashLog = await sbFetchAllCashLog(); } catch(e) { window.allCashLog = window.allCashLog || []; }
+  try { await loadOwnerCashFullState(); } catch(e) { window.allCashLog = window.allCashLog || []; }
   renderOwnerExpensesScreen();
   showScreen('owner-expenses');
 }
@@ -727,7 +814,7 @@ async function refreshOrders() {
   };
   const beforeSignature = getOrdersDataSignature();
   const beforeCashSignature = currentRole === 'owner'
-    ? JSON.stringify((window.allCashLog || []).slice().sort((a, b) => String(a.id || a.created_at).localeCompare(String(b.id || b.created_at))))
+    ? JSON.stringify(window.ownerCashSummary || (window.allCashLog || []).slice().sort((a, b) => String(a.id || a.created_at).localeCompare(String(b.id || b.created_at))))
     : '';
 
   refreshButtons.forEach(btn => {
@@ -740,10 +827,16 @@ async function refreshOrders() {
   try {
     orders = await sbFetchOrders();
     if (currentRole === 'owner') {
-      try { window.allCashLog = await sbFetchAllCashLog(); } catch(e) { window.allCashLog = window.allCashLog || []; }
+      const fastLoaded = await loadOwnerCashFastState({ force: true });
+      if (fastLoaded) {
+        window.__allCashLogComplete = false;
+        loadOwnerCashFullInBackground();
+      } else {
+        try { await loadOwnerCashFullState({ force: true }); } catch(e) { window.allCashLog = window.allCashLog || []; }
+      }
     }
     const afterCashSignature = currentRole === 'owner'
-      ? JSON.stringify((window.allCashLog || []).slice().sort((a, b) => String(a.id || a.created_at).localeCompare(String(b.id || b.created_at))))
+      ? JSON.stringify(window.ownerCashSummary || (window.allCashLog || []).slice().sort((a, b) => String(a.id || a.created_at).localeCompare(String(b.id || b.created_at))))
       : '';
     const unchanged = beforeSignature === getOrdersDataSignature() && beforeCashSignature === afterCashSignature;
     refreshActiveOrdersViews();
@@ -1025,7 +1118,7 @@ function getDailyReportData(startDate, endDate = '') {
   return { ...range, scheduled, completed, unfinished, transferred, groups: Array.from(groupsMap.values()), expenses, expensesTotal, orderValue, received, supplierCosts, clientDebtDay, clientDebtTotal, supplierDebtDay, supplierDebtTotal, net: received - supplierCosts - expensesTotal };
 }
 
-function openDailyReportModal() {
+async function openDailyReportModal() {
   if (!canUseActionPanelDailyReport()) return;
   closeOwnerDashboardMenu();
   const date = getLocalDateString();
@@ -1033,8 +1126,13 @@ function openDailyReportModal() {
   const endInput = document.getElementById('daily-report-end-date');
   if (input) input.value = date;
   if (endInput) endInput.value = date;
-  renderDailyReportModal(date, date);
   document.getElementById('daily-report-modal')?.classList.add('active');
+  if (currentRole === 'owner' && window.__allCashLogComplete !== true) {
+    const container = document.getElementById('daily-report-content');
+    if (container) container.innerHTML = '<div class="empty-state"><p>Загружаю точные финансовые данные…</p></div>';
+    try { await loadOwnerCashFullState(); } catch (e) { console.warn('[cash] Daily report history unavailable:', e); }
+  }
+  renderDailyReportModal(date, date);
 }
 
 function closeDailyReportModal() { document.getElementById('daily-report-modal')?.classList.remove('active'); }
@@ -1257,7 +1355,10 @@ function renderHome() {
   }
 
   if (canViewOwnerExpenses()) {
-    const expenseTotal = getOwnerExpenseLogs().reduce((sum, entry) => sum + getExpenseCashAmount(entry), 0);
+    const summaryExpenseTotal = getOwnerCashSummaryTotal('expense_total');
+    const expenseTotal = summaryExpenseTotal !== null
+      ? summaryExpenseTotal
+      : getOwnerExpenseLogs().reduce((sum, entry) => sum + getExpenseCashAmount(entry), 0);
     container.innerHTML += `
       <div class="home-card" onclick="openOwnerExpensesScreen()">
         <div class="home-card-icon-wrap home-card-icon-dim">
@@ -1463,6 +1564,55 @@ function getOwnerCashResolvedWorker(entry) {
   return null;
 }
 
+function getOwnerCashSummaryRows() {
+  return hasOwnerCashSummary() ? window.ownerCashSummary.workers : [];
+}
+
+function ownerCashSummaryRowMatchesDescriptor(row, descriptor) {
+  if (!row || !descriptor) return false;
+  const rowId = String(row.worker_id || '').trim();
+  const descriptorId = String(descriptor.workerId || '').trim();
+  if (rowId && descriptorId) return rowId === descriptorId;
+  const rowName = String(row.worker_name || '').trim();
+  const descriptorName = String(descriptor.workerName || '').trim();
+  if (!rowName || !descriptorName) return false;
+  const resolved = typeof getWorkerRecordByName === 'function' ? getWorkerRecordByName(rowName) : null;
+  if (descriptorId && String(resolved?.id || '').trim()) return descriptorId === String(resolved.id).trim();
+  return rowName.toLowerCase() === descriptorName.toLowerCase();
+}
+
+function getOwnerCashSummaryAmount(workerKey, field) {
+  const descriptor = getOwnerCashWorkerDescriptorByKey(workerKey);
+  if (!descriptor) return 0;
+  return getOwnerCashSummaryRows()
+    .filter(row => ownerCashSummaryRowMatchesDescriptor(row, descriptor))
+    .reduce((sum, row) => sum + (Number(row?.[field]) || 0), 0);
+}
+
+function getOwnerCashSummaryTotal(field) {
+  if (!hasOwnerCashSummary()) return null;
+  return getOwnerCashSummaryRows().reduce((sum, row) => sum + (Number(row?.[field]) || 0), 0);
+}
+
+function getOwnerCashReverseBalanceMap(log = [], currentBalance = 0, amountGetter = entry => Number(entry?.amount) || 0) {
+  const map = new Map();
+  let balance = Number(currentBalance) || 0;
+  [...(log || [])]
+    .filter(entry => !String(entry?.deleted_at || '').trim())
+    .sort((a, b) => {
+      const at = new Date(a?.created_at || a?.fop_date || 0).getTime();
+      const bt = new Date(b?.created_at || b?.fop_date || 0).getTime();
+      if (at !== bt) return bt - at;
+      return String(b?.id || '').localeCompare(String(a?.id || ''));
+    })
+    .forEach(entry => {
+      const id = String(entry?.id || '').trim();
+      if (id) map.set(id, balance);
+      balance -= Number(amountGetter(entry)) || 0;
+    });
+  return map;
+}
+
 function getOwnerCashWorkerDescriptors() {
   const map = new Map();
   const addDescriptor = ({ workerId = '', workerName = '' }) => {
@@ -1508,7 +1658,11 @@ function getOwnerCashWorkerDescriptors() {
       });
     });
 
-  [...(window.allCashLog || [])].forEach(entry => {
+  getOwnerCashSummaryRows().forEach(row => {
+    addDescriptor({ workerId: row?.worker_id || '', workerName: row?.worker_name || '' });
+  });
+
+  getOwnerCashViewLog().forEach(entry => {
     const resolvedWorker = getOwnerCashResolvedWorker(entry);
     if (!resolvedWorker) return;
     addDescriptor({ workerId: resolvedWorker.id, workerName: resolvedWorker.name });
@@ -1554,7 +1708,7 @@ function getOwnerSpecialCashSections() {
 function getOwnerSpecialCashLogs(sectionKey, confirmFilter = ownerCashConfirmFilter) {
   const section = getOwnerSpecialCashSections().find(item => item.key === sectionKey);
   if (!section) return [];
-  return [...(window.allCashLog || [])]
+  return [...getOwnerCashViewLog()]
     .filter(entry => entry?.manual_payment !== true)
     .filter(entry => section.matches(entry))
     .filter(entry => {
@@ -1567,7 +1721,7 @@ function getOwnerSpecialCashLogs(sectionKey, confirmFilter = ownerCashConfirmFil
 
 function getOwnerCashLogs(confirmFilter = ownerCashConfirmFilter) {
   const workerDescriptors = getOwnerCashWorkerDescriptors();
-  return [...(window.allCashLog || [])]
+  return [...getOwnerCashViewLog()]
     .filter(entry => entry?.manual_payment !== true)
     .filter(entry => workerDescriptors.some(item => item.matches(entry)))
     .filter(entry => {
@@ -1588,7 +1742,7 @@ function getOwnerCashLogs(confirmFilter = ownerCashConfirmFilter) {
 
 function getOwnerExpenseLogs() {
   const editableWorkers = new Set(getOwnerCashEditableWorkers());
-  return [...(window.allCashLog || [])]
+  return [...getOwnerCashViewLog()]
     .filter(entry => !String(entry?.deleted_at || '').trim())
     .filter(entry => entry?.manual_payment !== true)
     .filter(entry => editableWorkers.has(getCashEntryOwner(entry)))
@@ -1794,13 +1948,15 @@ function getOwnerCashBalanceLogs() {
 
 function getOwnerCurrencyCashLogs() {
   const workerDescriptors = getOwnerCashWorkerDescriptors();
-  return [...(window.allCashLog || [])]
+  return [...getOwnerCashViewLog()]
     .filter(entry => entry?.manual_payment !== true)
     .filter(entry => workerDescriptors.some(item => item.matches(entry)))
     .filter(isCurrencyCashEntry);
 }
 
 function getOwnerCurrentCashTotal() {
+  const summaryTotal = getOwnerCashSummaryTotal('confirmed_uah');
+  if (summaryTotal !== null) return summaryTotal;
   return getOwnerCashBalanceLogs().reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
 }
 
@@ -1831,8 +1987,11 @@ function cashEntryMatchesOwnerSearch(entry, query, options = {}) {
   return normalized.split(/\s+/).filter(Boolean).every(word => text.includes(word));
 }
 
-function setOwnerCashSearchQuery(value) {
+async function setOwnerCashSearchQuery(value) {
   ownerCashSearchQuery = String(value || '');
+  if (ownerCashSearchQuery.trim() && window.__allCashLogComplete !== true) {
+    try { await loadOwnerCashFullState(); } catch (e) { console.warn('[cash] Full search history unavailable:', e); }
+  }
   renderOwnerCashScreen();
 }
 
@@ -1857,7 +2016,7 @@ function getOrderIdFromCashEntry(entry) {
 
 function openOrderFromCashEntry(entryId, event) {
   event?.stopPropagation?.();
-  const entry = (window.allCashLog || []).find(item => String(item?.id || '') === String(entryId || ''));
+  const entry = getOwnerCashViewLog().find(item => String(item?.id || '') === String(entryId || ''));
   const orderId = getOrderIdFromCashEntry(entry);
   if (!orderId) return;
   const order = (orders || []).find(item => String(item?.id || '') === String(orderId));
@@ -1999,7 +2158,7 @@ function setOwnerCashSelectedWorker(workerName) {
 }
 
 function getOwnerFopCashLogs(confirmFilter = ownerCashConfirmFilter) {
-  return [...(window.allCashLog || [])]
+  return [...getOwnerCashViewLog()]
     .filter(entry => getCashEntryAccountType(entry) === 'fop')
     .filter(entry => {
       const method = getCashEntryPaymentMethod(entry);
@@ -2079,6 +2238,7 @@ function openOwnerCashHistoryModal(workerKey) {
     <div class="modal" style="max-width:760px;max-height:88vh;display:flex;flex-direction:column;">
       <div class="modal-header" style="flex-shrink:0;">
         <div class="modal-title">${escapeHtml(title)}</div>
+        ${window.__allCashLogComplete === true ? '' : `<button class="btn-secondary" style="font-size:12px;padding:6px 10px;margin-left:auto;" onclick="loadOwnerCashCompleteHistory()">Вся история</button>`}
         <button class="modal-close" onclick="closeOwnerCashHistoryModal()">${icon('x')}</button>
       </div>
       <div class="modal-body" style="overflow-y:auto;flex:1;">
@@ -2088,6 +2248,16 @@ function openOwnerCashHistoryModal(workerKey) {
   `;
   modal.classList.add('active');
   initIcons();
+}
+
+async function loadOwnerCashCompleteHistory() {
+  try {
+    await loadOwnerCashFullState();
+    renderOwnerCashScreen();
+    if (ownerCashSelectedWorker) openOwnerCashHistoryModal(ownerCashSelectedWorker);
+  } catch (e) {
+    showToast('Не удалось загрузить всю историю: ' + e.message, 'error');
+  }
 }
 
 function closeOwnerCashHistoryModal() {
@@ -2139,7 +2309,7 @@ function updateOwnerCashExpenseMode() {
 function openOwnerCashEntryModal(entryId = '', options = {}) {
   if (currentRole !== 'owner') return;
   const entry = entryId
-    ? (window.allCashLog || []).find(item => String(item.id) === String(entryId))
+    ? getOwnerCashViewLog().find(item => String(item.id) === String(entryId))
     : null;
   const selectedWorker = entry?.worker_name || ownerCashSelectedWorker || getOwnerCashEditableWorkers()[0] || '';
   const expenseParsed = parseExpenseCashEntry(entry);
@@ -2215,11 +2385,14 @@ function closeOwnerCashEntryModal() {
 }
 
 async function refreshOwnerCashState() {
-  try {
-    window.allCashLog = await sbFetchAllCashLog();
-  } catch (e) {
-    console.warn('Failed to refresh owner cash log:', e);
+  const fastLoaded = await loadOwnerCashFastState({ force: true });
+  if (fastLoaded) {
+    window.__allCashLogComplete = false;
+    loadOwnerCashFullInBackground();
+    return;
   }
+  try { await loadOwnerCashFullState({ force: true }); }
+  catch (e) { console.warn('Failed to refresh owner cash log:', e); }
 }
 
 async function saveOwnerCashEntry() {
@@ -2472,7 +2645,7 @@ function closeOwnerExpenseHistoryModal() {
 
 async function deleteOwnerCashEntry(id) {
   if (currentRole !== 'owner' || !id) return;
-  const entry = (window.allCashLog || []).find(item => String(item.id) === String(id));
+  const entry = getOwnerCashViewLog().find(item => String(item.id) === String(id));
   const hardDelete = !!String(entry?.deleted_at || '').trim();
   const message = hardDelete
     ? 'Удалить эту запись кассы безвозвратно? Восстановить ее уже не получится.'
@@ -2498,6 +2671,7 @@ async function deleteOwnerCashEntry(id) {
         );
       }
     }
+    await refreshOwnerCashState();
     renderOwnerCashScreen();
     renderOwnerExpensesScreen();
     if (document.getElementById('owner-expense-history-modal')?.classList.contains('active') && ownerExpenseSelectedWorker) {
@@ -2512,7 +2686,7 @@ async function deleteOwnerCashEntry(id) {
 
 async function reverseOwnerCashEntry(id) {
   if (currentRole !== 'owner' || !id) return;
-  const entry = (window.allCashLog || []).find(item => String(item.id) === String(id));
+  const entry = getOwnerCashViewLog().find(item => String(item.id) === String(id));
   if (!canReverseOwnerCashEntry(entry)) {
     showToast('Эту запись уже нельзя отменить', 'error');
     return;
@@ -2558,6 +2732,7 @@ async function restoreOwnerCashEntry(id) {
           : item
       );
     }
+    await refreshOwnerCashState();
     closeOwnerDeletedCashModal();
     renderOwnerCashScreen();
     renderOwnerExpensesScreen();
@@ -2698,10 +2873,13 @@ function renderOwnerEmployeeCashHistory(workerName, logs) {
 
   const confirmedRows = getOwnerCashBalanceLogs()
     .filter(entry => workerDescriptor ? workerDescriptor.matches(entry) : getCashEntryOwner(entry) === workerName);
-  const total = confirmedRows.reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
-  const balanceMap = typeof getCashRunningBalanceMap === 'function'
-    ? getCashRunningBalanceMap(confirmedRows)
-    : new Map();
+  const summaryTotal = hasOwnerCashSummary() ? getOwnerCashSummaryAmount(workerName, 'confirmed_uah') : null;
+  const total = summaryTotal !== null
+    ? summaryTotal
+    : confirmedRows.reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
+  const balanceMap = window.__allCashLogComplete !== true && summaryTotal !== null
+    ? getOwnerCashReverseBalanceMap(confirmedRows, summaryTotal)
+    : (typeof getCashRunningBalanceMap === 'function' ? getCashRunningBalanceMap(confirmedRows) : new Map());
   const workerKey = getOwnerCashSafeKey(workerName);
 
   if (!rows.length) {
@@ -2710,7 +2888,7 @@ function renderOwnerEmployeeCashHistory(workerName, logs) {
         <div class="owner-cash-history-title">
           <div>
             <div class="fin-month-name">${escapeHtml(getOwnerCashHistoryTitle(workerName))}</div>
-            <div class="fin-month-sub">История кассы сотрудника</div>
+            <div class="fin-month-sub">История кассы сотрудника${window.__allCashLogComplete === true ? '' : ' · последние записи'}</div>
           </div>
         </div>
         <div class="empty-state" style="padding:24px 12px;">
@@ -2838,7 +3016,7 @@ function renderOwnerEmployeeCashHistory(workerName, logs) {
       <div class="owner-cash-history-title">
           <div>
             <div class="fin-month-name">${escapeHtml(getOwnerCashHistoryTitle(workerName))}</div>
-            <div class="fin-month-sub">История кассы сотрудника</div>
+            <div class="fin-month-sub">История кассы сотрудника${window.__allCashLogComplete === true ? '' : ' · последние записи'}</div>
           </div>
         <div style="font-size:18px;font-weight:900;color:${total >= 0 ? 'var(--accent)' : '#ef4444'};white-space:nowrap;">${total.toLocaleString('ru')} ₴</div>
       </div>
@@ -2990,7 +3168,8 @@ function renderOwnerEmployeeCurrencyCashHistory(workerKey, logs) {
 
   if (!rows.length) return '';
 
-  const total = calcCurrencyCashBalance(rows);
+  const summaryTotal = hasOwnerCashSummary() ? getOwnerCashSummaryAmount(workerKey, 'usd') : null;
+  const total = summaryTotal !== null ? summaryTotal : calcCurrencyCashBalance(rows);
   const safeWorkerKey = getOwnerCashSafeKey(String(workerKey || historyTitle) + '-currency');
   const tree = {};
 
@@ -3125,7 +3304,7 @@ async function confirmOwnerCashEntry(id) {
   try {
     const updated = await sbUpdateCashEntry(id, { fop_confirmed: true });
     try {
-      window.allCashLog = await sbFetchAllCashLog();
+      await refreshOwnerCashState();
     } catch (refreshError) {
       console.warn('Failed to refresh cash log after confirmation:', refreshError);
       if (Array.isArray(window.allCashLog)) {
@@ -3815,12 +3994,16 @@ function renderOwnerCashScreen() {
   const currentCashRows = workerDescriptors.map(item => ({
     workerName: item.key,
     label: item.label,
-    balance: Number(balances[item.key] || 0),
+    balance: hasOwnerCashSummary()
+      ? getOwnerCashSummaryAmount(item.key, 'confirmed_uah')
+      : Number(balances[item.key] || 0),
   }));
   const currentCurrencyRows = workerDescriptors.map(item => ({
     workerName: item.key,
     label: item.label,
-    balance: Number(currencyBalances[item.key] || 0),
+    balance: hasOwnerCashSummary()
+      ? getOwnerCashSummaryAmount(item.key, 'usd')
+      : Number(currencyBalances[item.key] || 0),
   }));
   const currentCashTotal = currentCashRows.reduce((sum, row) => sum + row.balance, 0);
   const currentCurrencyTotal = currentCurrencyRows.reduce((sum, row) => sum + row.balance, 0);
@@ -3850,7 +4033,7 @@ function renderOwnerCashScreen() {
         <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;">
           <div>
             <div class="fin-month-name">Текущая касса</div>
-            <div class="fin-month-sub">${isUahView ? 'Баланс считает только подтвержденные записи' : 'Баланс в долларах после обмена из гривневой кассы'}</div>
+            <div class="fin-month-sub">${isUahView ? 'Баланс считает все подтвержденные записи в базе' : 'Баланс в долларах после обмена из гривневой кассы'}${window.__allCashLogComplete === true ? '' : ' · история догружается'}</div>
           </div>
           <div style="display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap;justify-content:flex-end;">
             <div class="owner-cash-confirm-filters" style="padding:0;">
@@ -3878,7 +4061,8 @@ function renderOwnerCashScreen() {
     </div>
   `;
 
-  if (!balanceLogs.length && !currencyLogs.length) {
+  const summaryEntriesCount = hasOwnerCashSummary() ? Number(window.ownerCashSummary.entries_count || 0) : 0;
+  if (!balanceLogs.length && !currencyLogs.length && !summaryEntriesCount) {
     container.innerHTML = currentCashHtml + `
       <div class="empty-state">
         <div class="empty-state-icon">${icon('banknote')}</div>

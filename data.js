@@ -863,6 +863,30 @@ async function sbFetchCashLog(workerName, deletedMode = 'active') {
   return allRows;
 }
 
+async function sbFetchCashSummary() {
+  const res = await fetch(`${WORKER_URL}/api/cash/summary`, { headers: getHeaders() });
+  if (!res.ok) await throwApiError(res);
+  const data = await res.json();
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error('Invalid cash summary response');
+  }
+  return data;
+}
+
+async function sbFetchCashPage({ deletedMode = 'active', offset = 0, limit = 200 } = {}) {
+  const mode = deletedMode === 'only' ? 'only' : deletedMode === 'all' ? 'all' : 'active';
+  const safeOffset = Math.max(0, Number(offset) || 0);
+  const safeLimit = Math.min(1000, Math.max(1, Number(limit) || 200));
+  const res = await fetch(
+    `${WORKER_URL}/api/cash/all?deleted=${encodeURIComponent(mode)}&offset=${safeOffset}&limit=${safeLimit}`,
+    { headers: getHeaders() }
+  );
+  if (!res.ok) await throwApiError(res);
+  const rows = await res.json();
+  return (Array.isArray(rows) ? rows : [])
+    .filter(entry => String(entry?.ledger_status || 'posted') !== 'voided');
+}
+
 async function sbFetchAllCashLog(deletedMode = 'active') {
   const mode = deletedMode === 'only' ? 'only' : deletedMode === 'all' ? 'all' : 'active';
   const pageSize = 1000;
