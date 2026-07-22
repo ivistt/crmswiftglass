@@ -602,6 +602,17 @@ async function sbSaveOrderWithCash(o, { isNew = false, cashEntries = [], rollbac
   };
 }
 
+async function sbUpdateOrderPublicComment(orderId, publicComment) {
+  const res = await fetch(`${WORKER_URL}/api/orders/${encodeURIComponent(orderId)}/public-comment`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+    body: JSON.stringify({ publicComment: String(publicComment || '').slice(0, 4000) }),
+  });
+  if (!res.ok) await throwApiError(res);
+  const rows = await res.json();
+  return rowToOrder(Array.isArray(rows) ? rows[0] : rows);
+}
+
 async function sbBackfillOrderCashEntries() {
   const res = await fetch(`${WORKER_URL}/api/admin/backfill-order-cash`, {
     method: 'POST',
@@ -1640,6 +1651,7 @@ function rowToOrder(r) {
     reminder:        !!r.rework_data?.reminder || (Array.isArray(r.rework_data?.reminderWorkers) && r.rework_data.reminderWorkers.length > 0),
     reminderWorkers: Array.isArray(r.rework_data?.reminderWorkers) ? r.rework_data.reminderWorkers : [],
     reminderComment: String(r.rework_data?.reminderComment || ''),
+    publicComment:  String(r.rework_data?.publicComment || ''),
     clientPayments:  r.client_payments || [],
     supplierPayments:r.supplier_payments || [],
     deletedAt:       r.deleted_at || '',
@@ -1659,6 +1671,9 @@ function orderToRow(o) {
   const reminderComment = Object.prototype.hasOwnProperty.call(o, 'reminderComment') ? o.reminderComment : reworkData.reminderComment;
   if (String(reminderComment || '').trim()) reworkData.reminderComment = String(reminderComment || '').trim();
   else delete reworkData.reminderComment;
+  const publicComment = Object.prototype.hasOwnProperty.call(o, 'publicComment') ? o.publicComment : reworkData.publicComment;
+  if (String(publicComment || '').trim()) reworkData.publicComment = String(publicComment || '').trim().slice(0, 4000);
+  else delete reworkData.publicComment;
   return {
     id:               o.id,
     date:             o.date,
@@ -1819,6 +1834,7 @@ function orderToRowSparse(o) {
     ['reminder', 'rework_data'],
     ['reminderWorkers', 'rework_data'],
     ['reminderComment', 'rework_data'],
+    ['publicComment', 'rework_data'],
     ['clientPayments', 'client_payments'],
     ['supplierPayments', 'supplier_payments'],
   ];

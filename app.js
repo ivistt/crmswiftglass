@@ -928,13 +928,17 @@ function getCurrentUserClientCopyBlocks() {
   const source = currentRole !== 'owner' && Array.isArray(personal) && personal.length
     ? personal
     : (typeof getOrderCopyExtraBlocks === 'function' ? getOrderCopyExtraBlocks() : []);
-  return source
+  const personalBlocks = source
     .map((block, index) => ({
       key: String(block?.key || `copy-${index + 1}`),
       title: String(block?.title || '').trim(),
       text: String(block?.text || '').trim(),
     }))
     .filter(block => block.title && block.text);
+  const manufacturerBlocks = typeof getGlassManufacturerClientCopyBlocks === 'function'
+    ? getGlassManufacturerClientCopyBlocks()
+    : [];
+  return [...personalBlocks, ...manufacturerBlocks];
 }
 
 function openQuickCopyModal() {
@@ -4104,10 +4108,89 @@ function renderOwnerSettingsScreen() {
       </div>
     </div>
     ${renderOwnerCashSnapshotSettings()}
+    ${renderOwnerGlassManufacturerSettings()}
     ${renderOwnerCopyFieldsSettings()}
     ${typeof renderOwnerSystemBannerControls === 'function' ? renderOwnerSystemBannerControls() : ''}
   `;
   initIcons();
+}
+
+function renderOwnerGlassManufacturerSettings() {
+  const items = typeof getGlassManufacturers === 'function' ? getGlassManufacturers() : [];
+  return `
+    <div class="owner-copy-settings owner-manufacturer-settings">
+      <div class="owner-copy-settings-head">
+        <div>
+          <div class="owner-banner-card-title">Производители стекла</div>
+          <div class="owner-banner-card-text">Название попадёт в заказ, а комментарий — в «Данные для клиента»</div>
+        </div>
+        <button type="button" class="btn-secondary" onclick="addOwnerGlassManufacturer()"><i data-lucide="plus" style="width:14px;height:14px;"></i> Добавить</button>
+      </div>
+      <div class="owner-manufacturer-list" id="owner-manufacturer-list">
+        ${items.map(item => renderOwnerGlassManufacturerEditor(item)).join('')}
+      </div>
+      <div class="owner-manufacturer-empty" id="owner-manufacturer-empty" style="display:${items.length ? 'none' : ''};">Производителей пока нет</div>
+      <div style="display:flex;justify-content:flex-end;margin-top:12px;">
+        <button type="button" class="btn-primary" id="owner-manufacturer-save-btn" onclick="saveOwnerGlassManufacturers()"><i data-lucide="save" style="width:14px;height:14px;"></i> Сохранить производителей</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderOwnerGlassManufacturerEditor(item = {}) {
+  const key = String(item?.key || `manufacturer-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  return `
+    <div class="owner-manufacturer-row" data-owner-manufacturer-row data-key="${escapeAttr(key)}">
+      <div class="owner-manufacturer-row-head">
+        <input class="form-input" data-owner-manufacturer-name value="${escapeAttr(item?.name || '')}" placeholder="Название производителя">
+        <button type="button" class="icon-btn" onclick="removeOwnerGlassManufacturer(this)" title="Удалить производителя"><i data-lucide="trash-2" style="width:15px;height:15px;"></i></button>
+      </div>
+      <textarea class="form-input" data-owner-manufacturer-description rows="3" placeholder="Комментарий для клиента">${escapeHtml(item?.description || '')}</textarea>
+    </div>
+  `;
+}
+
+function addOwnerGlassManufacturer() {
+  const list = document.getElementById('owner-manufacturer-list');
+  if (!list) return;
+  list.insertAdjacentHTML('beforeend', renderOwnerGlassManufacturerEditor());
+  const empty = document.getElementById('owner-manufacturer-empty');
+  if (empty) empty.style.display = 'none';
+  initIcons();
+  list.lastElementChild?.querySelector('[data-owner-manufacturer-name]')?.focus();
+}
+
+function removeOwnerGlassManufacturer(button) {
+  button?.closest('[data-owner-manufacturer-row]')?.remove();
+  const list = document.getElementById('owner-manufacturer-list');
+  const empty = document.getElementById('owner-manufacturer-empty');
+  if (empty) empty.style.display = list?.children?.length ? 'none' : '';
+}
+
+async function saveOwnerGlassManufacturers() {
+  if (currentRole !== 'owner') return;
+  const items = Array.from(document.querySelectorAll('[data-owner-manufacturer-row]')).map((row, index) => ({
+    key: String(row.dataset.key || `manufacturer-${index + 1}`),
+    name: String(row.querySelector('[data-owner-manufacturer-name]')?.value || '').trim(),
+    description: String(row.querySelector('[data-owner-manufacturer-description]')?.value || '').trim(),
+  })).filter(item => item.name);
+  const normalizedNames = items.map(item => item.name.toLocaleLowerCase('ru'));
+  if (new Set(normalizedNames).size !== normalizedNames.length) {
+    return showToast('Названия производителей не должны повторяться', 'error');
+  }
+  const btn = document.getElementById('owner-manufacturer-save-btn');
+  if (btn) btn.disabled = true;
+  try {
+    const payload = { items, updatedAt: new Date().toISOString() };
+    await sbUpsertAppSetting('glass_manufacturers', payload);
+    appSettings.glass_manufacturers = payload;
+    renderOwnerSettingsScreen();
+    showToast('Производители сохранены ✓');
+  } catch (e) {
+    showToast('Ошибка сохранения: ' + e.message, 'error');
+  } finally {
+    if (btn?.isConnected) btn.disabled = false;
+  }
 }
 
 function renderOwnerCashSnapshotSettings() {

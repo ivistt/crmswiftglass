@@ -349,6 +349,42 @@ export default {
       }
     }
 
+    const publicCommentMatch = url.pathname.match(/^\/api\/orders\/(.+)\/public-comment$/);
+    if (publicCommentMatch && request.method === 'PATCH') {
+      const id = decodeURIComponent(publicCommentMatch[1] || '');
+      const previousOrder = await getOrderById(id, sb, sbHeaders);
+      if (!previousOrder) {
+        return Response.json({ error: 'Order not found' }, { status: 404, headers: cors });
+      }
+      let canViewOrder = authedRole === 'owner' || authedRole === 'manager';
+      if (!canViewOrder) {
+        const visibleOrders = await fetchOrdersForSession(session, sb, sbHeaders);
+        canViewOrder = (Array.isArray(visibleOrders) ? visibleOrders : []).some(order => String(order?.id || '') === id);
+      }
+      if (!canViewOrder) {
+        return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
+      }
+      const body = await request.json().catch(() => ({}));
+      const publicComment = String(body?.publicComment || body?.public_comment || '').trim().slice(0, 4000);
+      const reworkData = {
+        ...(previousOrder?.rework_data && typeof previousOrder.rework_data === 'object' ? previousOrder.rework_data : {}),
+        publicCommentUpdatedAt: new Date().toISOString(),
+        publicCommentUpdatedBy: String(session.workerName || '').trim() || authedRole,
+      };
+      if (publicComment) reworkData.publicComment = publicComment;
+      else delete reworkData.publicComment;
+      const res = await fetch(`${sb}/rest/v1/orders?id=eq.${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: sbHeaders,
+        body: JSON.stringify({ rework_data: reworkData }),
+      });
+      const data = await res.json().catch(() => []);
+      if (!res.ok) {
+        return Response.json({ error: data?.message || data?.error || 'Order comment update failed' }, { status: res.status || 400, headers: cors });
+      }
+      return Response.json(data, { headers: cors });
+    }
+
     if (url.pathname.startsWith('/api/orders/')) {
       const id = decodeURIComponent(url.pathname.split('/').pop());
 
