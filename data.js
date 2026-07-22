@@ -839,8 +839,67 @@ async function sbDeleteWorkerSalary(id) {
 
 // ── CASH LOG ─────────────────────────────────────────────────
 
-async function sbFetchCashLog(workerName, deletedMode = 'active') {
+const CASH_SNAPSHOT_SETTING_KEY = 'cash_snapshot_v1';
+
+function getActiveCashSnapshot() {
+  const snapshot = appSettings?.[CASH_SNAPSHOT_SETTING_KEY];
+  if (!snapshot || snapshot.active !== true || !String(snapshot.cutoffAt || '').trim()) return null;
+  return snapshot;
+}
+
+function getCashSnapshotBalance(workerIdentity, account = 'cash') {
+  const snapshot = getActiveCashSnapshot();
+  if (!snapshot) return 0;
+  const workerId = String(workerIdentity?.workerId || workerIdentity?.id || '').trim();
+  const workerName = String(
+    workerIdentity?.workerName
+    || workerIdentity?.name
+    || (typeof workerIdentity === 'string' ? workerIdentity : '')
+    || ''
+  ).trim().toLowerCase();
+  const key = account === 'usd' ? 'usd' : (account === 'fop' ? 'fop' : (account === 'expenses' ? 'expenses' : 'cash'));
+  return (Array.isArray(snapshot.balances) ? snapshot.balances : []).reduce((sum, row) => {
+    const rowId = String(row?.workerId || '').trim();
+    const rowName = String(row?.workerName || '').trim().toLowerCase();
+    const matches = (workerId && rowId && workerId === rowId) || (workerName && rowName && workerName === rowName);
+    return matches ? sum + (Number(row?.[key]) || 0) : sum;
+  }, 0);
+}
+
+function getCashSnapshotTotal(account = 'uah') {
+  const snapshot = getActiveCashSnapshot();
+  if (!snapshot) return 0;
+  return (Array.isArray(snapshot.balances) ? snapshot.balances : []).reduce((sum, row) => {
+    if (account === 'usd') return sum + (Number(row?.usd) || 0);
+    if (account === 'cash') return sum + (Number(row?.cash) || 0);
+    if (account === 'fop') return sum + (Number(row?.fop) || 0);
+    if (account === 'expenses') return sum + (Number(row?.expenses) || 0);
+    return sum + (Number(row?.cash) || 0) + (Number(row?.fop) || 0);
+  }, 0);
+}
+
+let cashSnapshotConfirmedKeysCache = null;
+let cashSnapshotConfirmedKeysSource = null;
+
+function cashSnapshotHasConfirmedSourceKey(sourceKey) {
+  const snapshot = getActiveCashSnapshot();
+  if (!snapshot || !sourceKey) return false;
+  if (cashSnapshotConfirmedKeysSource !== snapshot) {
+    cashSnapshotConfirmedKeysSource = snapshot;
+    cashSnapshotConfirmedKeysCache = new Set(Array.isArray(snapshot.confirmedPaymentKeys) ? snapshot.confirmedPaymentKeys : []);
+  }
+  return cashSnapshotConfirmedKeysCache.has(String(sourceKey));
+}
+
+function shouldApplyCashSnapshotBase(scope = 'owner') {
+  if (!getActiveCashSnapshot()) return false;
+  if (scope === 'personal') return true;
+  return window.cashLogUsesSnapshot !== false;
+}
+
+async function sbFetchCashLog(workerName, deletedMode = 'active', options = {}) {
   const mode = deletedMode === 'only' ? 'only' : deletedMode === 'all' ? 'all' : 'active';
+  const fullHistory = options?.fullHistory === true;
   const resolvedWorkerName = String(
     (workers || []).find(item => item.name === workerName || item.alias === workerName)?.name
     || workerName
@@ -850,7 +909,7 @@ async function sbFetchCashLog(workerName, deletedMode = 'active') {
   const allRows = [];
   for (let offset = 0; ; offset += pageSize) {
     const res = await fetch(
-      `${WORKER_URL}/api/cash?worker=${encodeURIComponent(resolvedWorkerName)}&deleted=${encodeURIComponent(mode)}&offset=${offset}&limit=${pageSize}`,
+      `${WORKER_URL}/api/cash?worker=${encodeURIComponent(resolvedWorkerName)}&deleted=${encodeURIComponent(mode)}&history=${fullHistory ? 'full' : 'snapshot'}&offset=${offset}&limit=${pageSize}`,
       { headers: getHeaders() }
     );
     if (!res.ok) await throwApiError(res);
@@ -863,12 +922,14 @@ async function sbFetchCashLog(workerName, deletedMode = 'active') {
   return allRows;
 }
 
-async function sbFetchAllCashLog(deletedMode = 'active') {
+async function sbFetchAllCashLog(deletedMode = 'active', options = {}) {
   const mode = deletedMode === 'only' ? 'only' : deletedMode === 'all' ? 'all' : 'active';
+  const fullHistory = options?.fullHistory === true;
+  window.cashLogUsesSnapshot = mode === 'active' && !fullHistory && !!getActiveCashSnapshot();
   const pageSize = 1000;
   const allRows = [];
   for (let offset = 0; ; offset += pageSize) {
-    const res = await fetch(`${WORKER_URL}/api/cash/all?deleted=${encodeURIComponent(mode)}&offset=${offset}&limit=${pageSize}`, { headers: getHeaders() });
+    const res = await fetch(`${WORKER_URL}/api/cash/all?deleted=${encodeURIComponent(mode)}&history=${fullHistory ? 'full' : 'snapshot'}&offset=${offset}&limit=${pageSize}`, { headers: getHeaders() });
     if (!res.ok) await throwApiError(res);
     const rows = await res.json();
     const rawPage = Array.isArray(rows) ? rows : [];
@@ -877,6 +938,26 @@ async function sbFetchAllCashLog(deletedMode = 'active') {
     if (rawPage.length < pageSize) break;
   }
   return allRows;
+}
+
+async function sbCreateCashSnapshot() {
+  const res = await fetch(`${WORKER_URL}/api/cash/snapshot`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ action: 'create' }),
+  });
+  if (!res.ok) await throwApiError(res);
+  return res.json();
+}
+
+async function sbDisableCashSnapshot() {
+  const res = await fetch(`${WORKER_URL}/api/cash/snapshot`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ action: 'disable' }),
+  });
+  if (!res.ok) await throwApiError(res);
+  return res.json();
 }
 
 async function sbInsertCashEntry(entry) {
@@ -1446,9 +1527,9 @@ function getDropshipperCashWorkerRecord(dropshipperName) {
   }) || null;
 }
 
-function getCashRunningBalanceMap(log = [], amountGetter = entry => Number(entry?.amount) || 0) {
+function getCashRunningBalanceMap(log = [], amountGetter = entry => Number(entry?.amount) || 0, initialBalance = 0) {
   const map = new Map();
-  let balance = 0;
+  let balance = Number(initialBalance) || 0;
   [...(log || [])]
     .filter(entry => !String(entry?.deleted_at || '').trim())
     .sort((a, b) => {
@@ -2601,17 +2682,21 @@ function isOrderPaymentConfirmed(order, payment, paymentType = 'client') {
   if (!method) return false;
   if (!isConfirmablePaymentMethod(method)) return true;
   const sourceKey = buildPaymentSourceKey(order?.id || '', method, paymentType, payment);
-  return Array.isArray(window.allCashLog) && window.allCashLog.some(entry =>
+  return (Array.isArray(window.allCashLog) && window.allCashLog.some(entry =>
     getCashEntrySourceKey(entry) === sourceKey && entry?.fop_confirmed === true
-  );
+  )) || cashSnapshotHasConfirmedSourceKey(sourceKey);
 }
 
 function getOrderPaymentCashEntry(order, payment, paymentType = 'client') {
   const method = normalizePaymentMethod(payment?.method || '');
   if (!method || !isConfirmablePaymentMethod(method)) return null;
   const sourceKey = buildPaymentSourceKey(order?.id || '', method, paymentType, payment);
-  return Array.isArray(window.allCashLog)
+  const liveEntry = Array.isArray(window.allCashLog)
     ? (window.allCashLog.find(entry => getCashEntrySourceKey(entry) === sourceKey) || null)
+    : null;
+  if (liveEntry) return liveEntry;
+  return cashSnapshotHasConfirmedSourceKey(sourceKey)
+    ? { source_key: sourceKey, fop_source_key: sourceKey, fop_confirmed: true, approval_status: 'confirmed', snapshot: true }
     : null;
 }
 

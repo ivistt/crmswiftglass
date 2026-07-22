@@ -164,6 +164,12 @@ function calcCashBalance(log) {
   return (log || []).reduce((s, e) => s + Number(e.amount), 0);
 }
 
+function getCurrentWorkerCashSnapshotBalance(account = 'cash') {
+  if (!shouldApplyCashSnapshotBase('personal')) return 0;
+  const worker = typeof getCurrentWorkerRecord === 'function' ? getCurrentWorkerRecord() : null;
+  return getCashSnapshotBalance(worker || currentWorkerName, account);
+}
+
 // ── ОТКРЫТИЕ ЭКРАНА ──────────────────────────────────────────
 
 async function openProfileScreen() {
@@ -328,9 +334,12 @@ function renderCashScreen() {
   const confirmedCashOnlyLog = confirmedUnifiedCashLog.filter(entry => !isCardCashEntry(entry));
   const confirmedFopCashLog = fopCashLog.filter(entry => getCashEntryApprovalStatus(entry) === 'confirmed');
   const pendingFopCashLog = fopCashLog.filter(entry => getCashEntryApprovalStatus(entry) !== 'confirmed');
-  const cashBalance = calcCashBalance(confirmedUnifiedCashLog);
-  const currencyBalance = calcCurrencyCashBalance(currencyCashLog);
-  const fopBalance = calcCashBalance(confirmedFopCashLog);
+  const cashSnapshotBase = getCurrentWorkerCashSnapshotBalance('cash');
+  const currencySnapshotBase = getCurrentWorkerCashSnapshotBalance('usd');
+  const fopSnapshotBase = getCurrentWorkerCashSnapshotBalance('fop');
+  const cashBalance = cashSnapshotBase + calcCashBalance(confirmedUnifiedCashLog);
+  const currencyBalance = currencySnapshotBase + calcCurrencyCashBalance(currencyCashLog);
+  const fopBalance = fopSnapshotBase + calcCashBalance(confirmedFopCashLog);
 
   el.innerHTML = ''
     + '<div class="profile-header">'
@@ -346,11 +355,12 @@ function renderCashScreen() {
       pendingLabel: 'ОЖИДАЮТ ПОДТВЕРЖДЕНИЯ (КАРТА)',
       defaultPendingComment: 'Карта',
       archiveKeyPrefix: 'cash',
+      initialBalance: cashSnapshotBase,
       extraButtonsHtml: '<button class="btn-secondary" style="font-size:12px;padding:6px 10px;" onclick="openCashEntryModal(\'currency-back\')">Из $</button>'
     })
     + renderCurrencyCashSection(currencyCashLog, currencyBalance, today)
-    + ((currentWorkerHasFopCashRoute() || fopCashLog.length)
-      ? renderCashSection(confirmedFopCashLog, fopBalance, today, { title: 'Касса БАБЕНКО', account: 'fop', buttonText: '+ БАБЕНКО', pendingEntries: pendingFopCashLog })
+    + ((currentWorkerHasFopCashRoute() || fopCashLog.length || fopSnapshotBase)
+      ? renderCashSection(confirmedFopCashLog, fopBalance, today, { title: 'Касса БАБЕНКО', account: 'fop', buttonText: '+ БАБЕНКО', pendingEntries: pendingFopCashLog, initialBalance: fopSnapshotBase })
       : '')
     + renderWorkerDropshipperCashSection();
 
@@ -873,7 +883,7 @@ function renderCashSection(log, balance, today, options = {}) {
   const balanceColor = balance >= 0 ? 'var(--accent)' : '#ef4444';
   const filteredLog = _filterCashLogByComment(log, cashSearchQuery);
   const balanceMap = typeof getCashRunningBalanceMap === 'function'
-    ? getCashRunningBalanceMap(log)
+    ? getCashRunningBalanceMap(log, entry => Number(entry?.amount) || 0, options.initialBalance || 0)
     : new Map();
 
   // Разделяем лог на сегодня и архив
@@ -1578,13 +1588,13 @@ async function saveCashEntry() {
       }
       const uahAmount = Math.round(rate * usdAmount * 100) / 100;
       if (window._cashAccount === 'currency-back') {
-        const currentCurrencyBalance = calcCurrencyCashBalance((workerCashLog || []).filter(item => !isFopCashEntry(item)).filter(isCurrencyCashEntry));
+        const currentCurrencyBalance = getCurrentWorkerCashSnapshotBalance('usd') + calcCurrencyCashBalance((workerCashLog || []).filter(item => !isFopCashEntry(item)).filter(isCurrencyCashEntry));
         if (usdAmount > currentCurrencyBalance) {
           showToast('Недостаточно валюты в кассе', 'error');
           return;
         }
       } else {
-        const currentCashBalance = calcCashBalance((workerCashLog || [])
+        const currentCashBalance = getCurrentWorkerCashSnapshotBalance('cash') + calcCashBalance((workerCashLog || [])
           .filter(item => !isFopCashEntry(item))
           .filter(item => !isPendingPersonalConfirmableCashEntry(item)));
         if (uahAmount > currentCashBalance) {
@@ -1623,7 +1633,7 @@ async function saveCashEntry() {
         return;
       }
       const signedUsdAmount = usdAmount * sign;
-      const currentCurrencyBalance = calcCurrencyCashBalance((workerCashLog || []).filter(item => !isFopCashEntry(item)).filter(isCurrencyCashEntry));
+      const currentCurrencyBalance = getCurrentWorkerCashSnapshotBalance('usd') + calcCurrencyCashBalance((workerCashLog || []).filter(item => !isFopCashEntry(item)).filter(isCurrencyCashEntry));
       if (signedUsdAmount < 0 && Math.abs(signedUsdAmount) > currentCurrencyBalance) {
         showToast('Недостаточно валюты в кассе', 'error');
         return;

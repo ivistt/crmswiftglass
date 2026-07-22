@@ -461,6 +461,12 @@ body {
 .daily-report-order-status.is-done { background:var(--accent); }
 .daily-report-order small { color:var(--text3); display:block; margin-top:2px; }
 .owner-copy-settings { margin-top:16px; padding:16px; border:1px solid var(--border); border-radius:16px; background:var(--card); }
+.cash-snapshot-card { margin-bottom:16px; padding:16px; border:1px solid color-mix(in srgb,var(--accent) 28%,var(--border)); border-radius:16px; background:color-mix(in srgb,var(--accent) 5%,var(--card)); display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
+.cash-snapshot-main { display:flex; align-items:flex-start; gap:12px; min-width:0; }
+.cash-snapshot-icon { width:40px; height:40px; border-radius:13px; flex:0 0 auto; display:flex; align-items:center; justify-content:center; color:var(--accent); background:var(--accent-dim); border:1px solid color-mix(in srgb,var(--accent) 24%,transparent); }
+.cash-snapshot-icon svg { width:19px; height:19px; }
+.cash-snapshot-meta { margin-top:8px; color:var(--text2); font-size:11px; font-weight:800; }
+.cash-snapshot-meta.is-muted { color:var(--text3); }
 .owner-copy-settings-head { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:12px; }
 .owner-copy-settings-list { display:grid; gap:10px; }
 .owner-copy-field { display:grid; grid-template-columns:1fr auto; gap:10px; padding:12px; border:1px solid var(--border); border-radius:13px; background:var(--surface2); }
@@ -477,6 +483,8 @@ body {
 .reminder-order-date { text-align:right; white-space:nowrap; font-size:12px; }
 @media (max-width:600px) {
   .daily-report-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .cash-snapshot-card { flex-direction:column; }
+  .cash-snapshot-card .owner-banner-card-actions { width:100%; justify-content:flex-start; }
   .owner-dashboard-menu { top:66px; }
   .reminder-order-card { grid-template-columns:auto minmax(0,1fr); }
   .reminder-order-date { grid-column:2; text-align:left; }

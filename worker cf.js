@@ -25,16 +25,6 @@ export default {
       const { password } = await request.json().catch(() => ({}));
       if (!password) return Response.json({ ok: false }, { status: 401, headers: cors });
 
-      if (password === env.PASS_OWNER) {
-        const token = await makeToken('owner', 'Maksim', env.SESSION_SECRET);
-        return Response.json({ ok: true, role: 'owner', workerName: 'Максим', token }, { headers: cors });
-      }
-
-      if (password === env.PASS_OWNER2) {
-        const token = await makeToken('owner', 'Vasiliy', env.SESSION_SECRET);
-        return Response.json({ ok: true, role: 'owner', workerName: 'Василий', token }, { headers: cors });
-      }
-
       const pinHash = await sha256(password);
       const res = await fetch(`${sb}/rest/v1/workers?pin_hash=eq.${pinHash}&limit=1`, { headers: sbHeaders });
       const rows = await res.json();
@@ -55,11 +45,9 @@ export default {
     if (!session) {
       return Response.json({ ok: false, error: 'Unauthorized' }, { status: 401, headers: cors });
     }
-    if (session.role !== 'owner') {
-      const liveWorker = await getWorkerByName(session.workerName, sb, sbHeaders).catch(() => null);
-      if (liveWorker?.system_role) {
-        session.role = liveWorker.system_role;
-      }
+    const liveWorker = await getWorkerByName(session.workerName, sb, sbHeaders).catch(() => null);
+    if (liveWorker?.system_role) {
+      session.role = liveWorker.system_role;
     }
     const { role: authedRole } = session;
 
@@ -122,9 +110,13 @@ export default {
           return Response.json({ ok: false, error: 'Forbidden' }, { status: 403, headers: cors });
         }
         const body = await request.json().catch(() => ({}));
+        const workerId = body?.worker_id === null || body?.worker_id === undefined
+          ? null
+          : String(body.worker_id || '').trim();
         const payload = {
           label: String(body?.label || '').trim(),
           method_type: String(body?.method_type || '').trim().toLowerCase(),
+          worker_id: workerId || null,
           worker_name: body?.worker_name === null || body?.worker_name === undefined ? null : String(body.worker_name || '').trim(),
           requires_confirmation: body?.requires_confirmation === true,
           active: body?.active !== false,
@@ -136,9 +128,14 @@ export default {
           return Response.json({ ok: false, error: 'Invalid method_type' }, { status: 400, headers: cors });
         }
         if (payload.method_type === 'cash') {
+          payload.worker_id = null;
           payload.worker_name = null;
           payload.requires_confirmation = false;
         } else {
+          if (payload.worker_id && !payload.worker_name) {
+            const worker = await getWorkerById(payload.worker_id, sb, sbHeaders);
+            payload.worker_name = String(worker?.name || '').trim();
+          }
           if (!payload.worker_name) return Response.json({ ok: false, error: 'worker_name required' }, { status: 400, headers: cors });
           payload.requires_confirmation = true;
         }
@@ -162,6 +159,10 @@ export default {
       const patch = {};
       if (Object.prototype.hasOwnProperty.call(body, 'label')) patch.label = String(body.label || '').trim();
       if (Object.prototype.hasOwnProperty.call(body, 'method_type')) patch.method_type = String(body.method_type || '').trim().toLowerCase();
+      if (Object.prototype.hasOwnProperty.call(body, 'worker_id')) {
+        const workerId = body.worker_id === null ? null : String(body.worker_id || '').trim();
+        patch.worker_id = workerId || null;
+      }
       if (Object.prototype.hasOwnProperty.call(body, 'worker_name')) patch.worker_name = body.worker_name === null ? null : String(body.worker_name || '').trim();
       if (Object.prototype.hasOwnProperty.call(body, 'active')) patch.active = body.active !== false;
       if (Object.prototype.hasOwnProperty.call(body, 'sort_order')) patch.sort_order = Number(body.sort_order) || 0;
@@ -178,9 +179,14 @@ export default {
 
       const nextType = patch.method_type || String(current.method_type || '').trim().toLowerCase();
       if (nextType === 'cash') {
+        patch.worker_id = null;
         patch.worker_name = null;
         patch.requires_confirmation = false;
       } else {
+        if (patch.worker_id && !patch.worker_name) {
+          const worker = await getWorkerById(patch.worker_id, sb, sbHeaders);
+          patch.worker_name = String(worker?.name || '').trim();
+        }
         const nextWorker = (Object.prototype.hasOwnProperty.call(patch, 'worker_name') ? patch.worker_name : current.worker_name) || '';
         if (!String(nextWorker || '').trim()) {
           return Response.json({ ok: false, error: 'worker_name required' }, { status: 400, headers: cors });
@@ -221,7 +227,7 @@ export default {
       }
 
       if (request.method === 'POST') {
-        if (authedRole !== 'owner' && authedRole !== 'manager') {
+        if (authedRole !== 'owner' && authedRole !== 'manager' && !workerHasPermission(liveWorker, 'orders_create')) {
           return Response.json({ ok: false, error: 'Forbidden' }, { status: 403, headers: cors });
         }
 
@@ -230,24 +236,26 @@ export default {
         if (Array.isArray(data) && data[0]) {
           await syncOrderFopCashEntries(data[0], sb, sbHeaders);
           await syncOrderSashaManagerCashEntries(data[0], sb, sbHeaders);
-          await maybeNotifyPlannerOrder(null, data[0], sb, sbHeaders, env);
+          await maybeNotifyOrderTransitions(null, data[0], sb, sbHeaders, env);
         }
         return Response.json(data, { headers: cors });
       }
     }
 
     if (url.pathname === '/api/orders/save-with-cash' && request.method === 'POST') {
-      if (authedRole === 'junior') {
-        return Response.json({ ok: false, error: 'Forbidden' }, { status: 403, headers: cors });
-      }
-
       const body = await request.json().catch(() => ({}));
       const isNew = body.is_new === true;
       const orderBody = body.order || {};
       const rollbackOrder = body.rollback_order || null;
       const cashEntries = Array.isArray(body.cash_entries) ? body.cash_entries : [];
+      const syncPaymentTypes = normalizeOrderCashSyncPaymentTypes(body.sync_payment_types);
+      const financeDebug = [];
+      const canCreateOrders = authedRole === 'owner' || authedRole === 'manager' || workerHasPermission(liveWorker, 'orders_create');
 
-      if (isNew && authedRole !== 'owner' && authedRole !== 'manager') {
+      if (isNew && !canCreateOrders) {
+        return Response.json({ ok: false, error: 'Forbidden' }, { status: 403, headers: cors });
+      }
+      if (!isNew && authedRole === 'junior') {
         return Response.json({ ok: false, error: 'Forbidden' }, { status: 403, headers: cors });
       }
       if (!isNew && !orderBody.id) {
@@ -293,6 +301,9 @@ export default {
 
         const orderRows = await orderRes.json();
         savedOrder = Array.isArray(orderRows) ? orderRows[0] : null;
+        if (savedOrder && previousOrder) {
+          savedOrder = { ...previousOrder, ...savedOrder };
+        }
         if (!savedOrder) {
           throw new Error('Order was not saved');
         }
@@ -304,9 +315,13 @@ export default {
             throw new Error('Forbidden cash entry');
           }
 
-          const cashRes = await fetch(`${sb}/rest/v1/cash_log`, {
+          const hasSourceKey = !!getCashLedgerSourceKey(cashEntry);
+          const cashRes = await fetch(`${sb}/rest/v1/cash_log${hasSourceKey ? '?on_conflict=source_key' : ''}`, {
             method: 'POST',
-            headers: sbHeaders,
+            headers: hasSourceKey ? {
+              ...sbHeaders,
+              Prefer: 'resolution=merge-duplicates,return=representation',
+            } : sbHeaders,
             body: JSON.stringify(cashEntry),
           });
           if (!cashRes.ok) {
@@ -316,11 +331,11 @@ export default {
           if (Array.isArray(cashRows) && cashRows[0]) savedCashEntries.push(cashRows[0]);
         }
 
-        await syncOrderFopCashEntries(savedOrder, sb, sbHeaders);
+        await syncOrderFopCashEntries(savedOrder, sb, sbHeaders, { paymentTypes: syncPaymentTypes, debug: financeDebug });
         const sashaCashEntries = await syncOrderSashaManagerCashEntries(savedOrder, sb, sbHeaders);
         savedCashEntries.push(...sashaCashEntries);
-        await maybeNotifyPlannerOrder(previousOrder, savedOrder, sb, sbHeaders, env);
-        return Response.json({ order: savedOrder, cash_entries: savedCashEntries }, { headers: cors });
+        await maybeNotifyOrderTransitions(previousOrder, savedOrder, sb, sbHeaders, env);
+        return Response.json({ order: savedOrder, cash_entries: savedCashEntries, finance_debug: financeDebug }, { headers: cors });
       } catch (e) {
         await rollbackOrderSaveWithCash({
           sb,
@@ -351,7 +366,7 @@ export default {
           }
 
           if (authedRole === 'senior' || authedRole === 'extra') {
-            const currentWorker = await getWorkerByName(session.workerName, sb, sbHeaders);
+            const currentWorker = await findWorkerByIdentity(session.workerName, sb, sbHeaders);
             if (!(await isOwnOrderForSession(previousOrder, session, sb, sbHeaders)) && !canPatchSpecialServiceOnly(body, previousOrder, session, currentWorker)) {
               return Response.json({ ok: false, error: 'Forbidden' }, { status: 403, headers: cors });
             }
@@ -381,7 +396,7 @@ export default {
           if (Array.isArray(data) && data[0]) {
             await syncOrderFopCashEntries(data[0], sb, sbHeaders);
             await syncOrderSashaManagerCashEntries(data[0], sb, sbHeaders);
-            await maybeNotifyPlannerOrder(previousOrder, data[0], sb, sbHeaders, env);
+            await maybeNotifyOrderTransitions(previousOrder, data[0], sb, sbHeaders, env);
           }
           return Response.json(data, { headers: cors });
         } catch (e) {
@@ -415,7 +430,7 @@ export default {
     // ── /api/clients ─────────────────────────────────────────
     if (url.pathname === '/api/clients') {
       if (request.method === 'GET') {
-        if (authedRole !== 'owner' && authedRole !== 'manager') {
+        if (authedRole !== 'owner' && authedRole !== 'manager' && !workerHasPermission(liveWorker, 'clients_view')) {
           return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
         }
 
@@ -515,7 +530,35 @@ export default {
     }
 
     if (url.pathname.startsWith('/api/workers/') && !url.pathname.includes('set-pin')) {
-      const id = url.pathname.split('/').pop();
+      const parts = url.pathname.split('/').filter(Boolean);
+      const id = decodeURIComponent(parts[2] || '');
+
+      if (parts[3] === 'client-copy-fields' && request.method === 'PATCH') {
+        const targetWorker = await getWorkerById(id, sb, sbHeaders);
+        if (!targetWorker) return Response.json({ ok: false, error: 'Not found' }, { status: 404, headers: cors });
+        const isSelf = String(targetWorker.name || '').trim() === String(session.workerName || '').trim();
+        if (authedRole !== 'owner' && !(isSelf && workerHasPermission(liveWorker, 'action_panel_client_data'))) {
+          return Response.json({ ok: false, error: 'Forbidden' }, { status: 403, headers: cors });
+        }
+
+        const body = await request.json().catch(() => ({}));
+        const clientCopyFields = normalizeWorkerClientCopyFields(body.clientCopyFields || body.client_copy_fields || null);
+        const noteMeta = parseWorkerNoteMeta(targetWorker.note || '');
+        const note = buildWorkerNoteWithMeta({
+          note: noteMeta.note,
+          permissions: noteMeta.permissions || {},
+          telegramNick: noteMeta.telegramNick || '',
+          orderCardLayout: noteMeta.orderCardLayout || null,
+          clientCopyFields,
+        });
+        const res = await fetch(`${sb}/rest/v1/workers?id=eq.${encodeURIComponent(id)}`, {
+          method: 'PATCH',
+          headers: sbHeaders,
+          body: JSON.stringify({ note }),
+        });
+        const data = await res.json();
+        return Response.json(data, { headers: cors });
+      }
 
       if (request.method === 'PATCH') {
         if (authedRole !== 'owner') {
@@ -591,6 +634,17 @@ export default {
           if (!isOwnAttendance && !isOwnWithdrawal) {
             return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
           }
+          if (!body.worker_id && body.worker_name) {
+            const worker = await getWorkerByName(body.worker_name, sb, sbHeaders);
+            if (worker?.id) body.worker_id = worker.id;
+          }
+          if (isAttendanceSalaryBody(body)) {
+            body.date = String(body.date || new Date().toISOString().slice(0, 10)).slice(0, 10);
+            const existingAttendance = await getActiveAttendanceSalary(body.worker_name, body.date, sb, sbHeaders);
+            if (existingAttendance) {
+              return Response.json([existingAttendance], { headers: cors });
+            }
+          }
           const res = await fetch(`${sb}/rest/v1/worker_salaries`, {
             method: 'POST',
             headers: sbHeaders,
@@ -601,7 +655,10 @@ export default {
         }
 
         const body = await request.json();
-
+        if (!body.worker_id && body.worker_name) {
+          const worker = await getWorkerByName(body.worker_name, sb, sbHeaders);
+          if (worker?.id) body.worker_id = worker.id;
+        }
         if (body.entry_type === 'manual') {
           if (authedRole !== 'owner') {
             return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
@@ -623,6 +680,14 @@ export default {
             || await canManageSalaryEntryForOrder(body.order_id, session, sb, sbHeaders);
           if (!allowed) {
             return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
+          }
+        }
+
+        if (isAttendanceSalaryBody(body)) {
+          body.date = String(body.date || new Date().toISOString().slice(0, 10)).slice(0, 10);
+          const existingAttendance = await getActiveAttendanceSalary(body.worker_name, body.date, sb, sbHeaders);
+          if (existingAttendance) {
+            return Response.json([existingAttendance], { headers: cors });
           }
         }
 
@@ -682,7 +747,7 @@ export default {
           if (body.comment !== undefined && !String(body.comment || '').trim()) {
             return Response.json({ error: 'Comment required' }, { status: 400, headers: cors });
           }
-          if (body.amount !== undefined && Number(body.amount) === 0) {
+          if (body.amount !== undefined && Number(body.amount) === 0 && authedRole !== 'owner') {
             return Response.json({ error: 'Invalid manual salary entry' }, { status: 400, headers: cors });
           }
           const oldHistory = Array.isArray(salaryRowForLock.edit_history) ? salaryRowForLock.edit_history : [];
@@ -711,6 +776,11 @@ export default {
           }
         }
 
+        if (authedRole === 'owner' && body.amount !== undefined) {
+          const correction = await createSalaryCorrectionRow(salaryRowForLock, Number(body.amount) || 0, body.comment, session, sb, sbHeaders);
+          return Response.json(correction, { headers: cors });
+        }
+
         const res = await fetch(
           `${sb}/rest/v1/worker_salaries?id=eq.${encodeURIComponent(id)}`,
           { method: 'PATCH', headers: sbHeaders, body: JSON.stringify(body) }
@@ -732,8 +802,8 @@ export default {
           if (!isOwnAttendance) {
             return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
           }
-          await fetch(`${sb}/rest/v1/worker_salaries?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE', headers: sbHeaders });
-          return Response.json({ ok: true }, { headers: cors });
+          const data = await createSalaryReversalRow(salaryRow, session, sb, sbHeaders, 'Отмена выхода в работу');
+          return Response.json({ ok: true, reversal: data }, { headers: cors });
         }
 
         if (authedRole === 'junior') {
@@ -743,8 +813,8 @@ export default {
           if (!isOwnAttendance) {
             return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
           }
-          await fetch(`${sb}/rest/v1/worker_salaries?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE', headers: sbHeaders });
-          return Response.json({ ok: true }, { headers: cors });
+          const data = await createSalaryReversalRow(salaryRow, session, sb, sbHeaders, 'Отмена выхода в работу');
+          return Response.json({ ok: true, reversal: data }, { headers: cors });
         }
 
         if (authedRole !== 'owner' && authedRole !== 'senior' && authedRole !== 'extra') {
@@ -768,8 +838,8 @@ export default {
           }
         }
 
-        await fetch(`${sb}/rest/v1/worker_salaries?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE', headers: sbHeaders });
-        return Response.json({ ok: true }, { headers: cors });
+        const data = await createSalaryReversalRow(salaryRow, session, sb, sbHeaders, 'Отмена записи ЗП');
+        return Response.json({ ok: true, reversal: data }, { headers: cors });
       }
     }
 
@@ -830,10 +900,55 @@ export default {
       }
     }
 
+    // ── /api/cash/snapshot ───────────────────────────────────
+    if (url.pathname === '/api/cash/snapshot' && request.method === 'GET') {
+      if (authedRole !== 'owner') {
+        return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
+      }
+      const snapshot = await getCashSnapshotValue(sb, sbHeaders);
+      return Response.json(snapshot || { active: false }, { headers: cors });
+    }
+
+    if (url.pathname === '/api/cash/snapshot' && request.method === 'POST') {
+      if (authedRole !== 'owner') {
+        return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
+      }
+      const body = await request.json().catch(() => ({}));
+      const action = String(body?.action || 'create').trim().toLowerCase();
+
+      if (action === 'disable') {
+        const current = await getCashSnapshotValue(sb, sbHeaders);
+        const disabled = {
+          ...(current || {}),
+          active: false,
+          disabledAt: new Date().toISOString(),
+          disabledBy: String(session.workerName || '').trim() || 'owner',
+        };
+        const saved = await upsertCashSnapshotValue(disabled, sb, sbHeaders);
+        return Response.json(saved, { headers: cors });
+      }
+
+      if (action !== 'create') {
+        return Response.json({ error: 'Invalid snapshot action' }, { status: 400, headers: cors });
+      }
+
+      try {
+        const snapshot = await buildCashSnapshotValue(session, sb, sbHeaders);
+        const saved = await upsertCashSnapshotValue(snapshot, sb, sbHeaders);
+        return Response.json(saved, { headers: cors });
+      } catch (error) {
+        const status = Number(error?.status) || 500;
+        return Response.json({ error: error?.message || 'Не удалось создать снапшот кассы' }, { status, headers: cors });
+      }
+    }
+
     // ── /api/cash ────────────────────────────────────────────
     if (url.pathname === '/api/cash' && request.method === 'GET') {
       const workerName = url.searchParams.get('worker');
       const deletedMode = url.searchParams.get('deleted') || 'active';
+      const historyMode = url.searchParams.get('history') || 'snapshot';
+      const offset = Math.max(0, Number(url.searchParams.get('offset')) || 0);
+      const limit = Math.min(1000, Math.max(1, Number(url.searchParams.get('limit')) || 1000));
       if (!workerName) {
         return Response.json({ error: 'worker required' }, { status: 400, headers: cors });
       }
@@ -848,6 +963,12 @@ export default {
         .filter(Boolean);
       const uniqueLabels = [...new Set(workerLabels)];
       const orParts = [];
+      const targetWorkerId = String(targetWorker?.id || '').trim();
+      if (targetWorkerId) {
+        const encodedId = encodeURIComponent(targetWorkerId);
+        orParts.push(`worker_id.eq.${encodedId}`);
+        orParts.push(`cash_owner_id.eq.${encodedId}`);
+      }
       uniqueLabels.forEach(label => {
         const encoded = encodeURIComponent(label);
         orParts.push(`worker_name.eq.${encoded}`);
@@ -859,16 +980,44 @@ export default {
         : deletedMode === 'all'
           ? ''
           : '&deleted_at=is.null';
+      const snapshot = deletedMode === 'active' && historyMode !== 'full'
+        ? await getCashSnapshotValue(sb, sbHeaders)
+        : null;
+      const snapshotQuery = snapshot?.active === true && snapshot?.cutoffAt
+        ? `&created_at=gte.${encodeURIComponent(snapshot.cutoffAt)}`
+        : '';
       const res = await fetch(
-        `${sb}/rest/v1/cash_log?or=(${orParts.join(',')})${deletedQuery}&order=created_at.desc&limit=1000`,
+        `${sb}/rest/v1/cash_log?or=(${orParts.join(',')})${deletedQuery}${snapshotQuery}&order=created_at.desc&offset=${offset}&limit=${limit}`,
         { headers: sbHeaders }
       );
       const data = await res.json();
+      if (offset === 0 && snapshot?.active === true && Array.isArray(data)) {
+        const pendingRows = await getCashSnapshotPendingRows(snapshot, sb, sbHeaders);
+        const targetLabels = new Set(uniqueLabels.map(label => String(label || '').trim().toLowerCase()).filter(Boolean));
+        const ownPendingRows = pendingRows.filter(row => {
+          const rowWorkerId = String(row?.cash_owner_id || row?.worker_id || '').trim();
+          const rowWorkerName = String(row?.cash_owner || row?.worker_name || '').trim().toLowerCase();
+          return (targetWorkerId && rowWorkerId === targetWorkerId) || (rowWorkerName && targetLabels.has(rowWorkerName));
+        });
+        const merged = [...data];
+        const seenIds = new Set(merged.map(row => String(row?.id || '').trim()).filter(Boolean));
+        ownPendingRows.forEach(row => {
+          const id = String(row?.id || '').trim();
+          if (!id || seenIds.has(id)) return;
+          seenIds.add(id);
+          merged.push(row);
+        });
+        merged.sort((a, b) => String(b?.created_at || '').localeCompare(String(a?.created_at || '')));
+        return Response.json(merged, { headers: cors });
+      }
       return Response.json(data, { headers: cors });
     }
 
     if (url.pathname === '/api/cash/all' && request.method === 'GET') {
       const deletedMode = url.searchParams.get('deleted') || 'active';
+      const historyMode = url.searchParams.get('history') || 'snapshot';
+      const offset = Math.max(0, Number(url.searchParams.get('offset')) || 0);
+      const limit = Math.min(1000, Math.max(1, Number(url.searchParams.get('limit')) || 1000));
       if (authedRole !== 'owner') {
         return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
       }
@@ -878,8 +1027,27 @@ export default {
         : deletedMode === 'all'
           ? ''
           : 'deleted_at=is.null&';
-      const res = await fetch(`${sb}/rest/v1/cash_log?${deletedQuery}order=created_at.desc&limit=10000`, { headers: sbHeaders });
+      const snapshot = deletedMode === 'active' && historyMode !== 'full'
+        ? await getCashSnapshotValue(sb, sbHeaders)
+        : null;
+      const snapshotQuery = snapshot?.active === true && snapshot?.cutoffAt
+        ? `created_at=gte.${encodeURIComponent(snapshot.cutoffAt)}&`
+        : '';
+      const res = await fetch(`${sb}/rest/v1/cash_log?${deletedQuery}${snapshotQuery}order=created_at.desc&offset=${offset}&limit=${limit}`, { headers: sbHeaders });
       const data = await res.json();
+      if (offset === 0 && snapshot?.active === true && Array.isArray(data)) {
+        const pendingRows = await getCashSnapshotPendingRows(snapshot, sb, sbHeaders);
+        const merged = [...data];
+        const seenIds = new Set(merged.map(row => String(row?.id || '').trim()).filter(Boolean));
+        pendingRows.forEach(row => {
+          const id = String(row?.id || '').trim();
+          if (!id || seenIds.has(id)) return;
+          seenIds.add(id);
+          merged.push(row);
+        });
+        merged.sort((a, b) => String(b?.created_at || '').localeCompare(String(a?.created_at || '')));
+        return Response.json(merged, { headers: cors });
+      }
       return Response.json(data, { headers: cors });
     }
 
@@ -897,22 +1065,16 @@ export default {
         return Response.json({ error: 'Invalid cash account' }, { status: 400, headers: cors });
       }
       body.cash_account = cashAccount;
-      if (cashAccount === 'fop' && body.worker_name !== 'Oleg Starshiy') {
-        return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
-      }
       if (body.manual_payment === true && authedRole !== 'owner') {
         return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
       }
-      if (cashAccount === 'fop' || isConfirmableCardCashMethod(getPaymentMethodFromCashSourceKey(body.fop_source_key))) {
+      if (cashAccount === 'fop' || isConfirmableCardCashMethod(getPaymentMethodFromCashSourceKey(getCashLedgerSourceKey(body)))) {
         body.fop_confirmed = !!body.fop_confirmed;
         body.fop_date = body.fop_date ? String(body.fop_date).slice(0, 10) : null;
       } else {
         body.fop_confirmed = false;
         body.fop_source_key = null;
         body.fop_date = null;
-      }
-      if (cashAccount === 'fop') {
-        body.fop_confirmed = true;
       }
       if (body.manual_payment === true) {
         body.worker_name = 'OWNER_PAYMENTS';
@@ -930,37 +1092,318 @@ export default {
         return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
       }
 
+      if (!body.worker_id && body.worker_name) {
+        const worker = await getWorkerByName(body.worker_name, sb, sbHeaders);
+        if (worker?.id) body.worker_id = worker.id;
+      }
+      if (!body.cash_owner_id && body.cash_owner) {
+        const worker = await getWorkerByName(body.cash_owner, sb, sbHeaders);
+        if (worker?.id) body.cash_owner_id = worker.id;
+      }
+      if (!body.approval_by_id && body.approval_by) {
+        const worker = await getWorkerByName(body.approval_by, sb, sbHeaders);
+        if (worker?.id) body.approval_by_id = worker.id;
+      }
+
       Object.assign(body, buildStructuredCashFields(body));
+      const sourceKey = getCashLedgerSourceKey(body);
       const cashPayload = {
         worker_name: String(body.worker_name || '').trim(),
+        worker_id: body.worker_id || null,
         amount: Number(body.amount) || 0,
         comment: String(body.comment || '').trim(),
         cash_account: String(body.cash_account || 'cash').trim().toLowerCase(),
         fop_confirmed: !!body.fop_confirmed,
-        fop_source_key: body.fop_source_key ? String(body.fop_source_key) : null,
+        fop_source_key: body.fop_source_key ? String(body.fop_source_key) : (sourceKey || null),
         fop_date: body.fop_date ? String(body.fop_date).slice(0, 10) : null,
         manual_payment: body.manual_payment === true,
         manual_payment_method: body.manual_payment_method ? String(body.manual_payment_method).trim() : null,
         cash_owner: body.cash_owner ? String(body.cash_owner).trim() : null,
+        cash_owner_id: body.cash_owner_id || null,
         account_type: body.account_type ? String(body.account_type).trim().toLowerCase() : null,
         payment_type: body.payment_type ? String(body.payment_type).trim() : null,
         payment_method: body.payment_method ? String(body.payment_method).trim() : null,
         approval_status: body.approval_status ? String(body.approval_status).trim() : null,
         approval_by: body.approval_by ? String(body.approval_by).trim() : null,
+        approval_by_id: body.approval_by_id || null,
         source_type: body.source_type ? String(body.source_type).trim() : null,
         source_id: body.source_id ? String(body.source_id).trim() : null,
         order_id: body.order_id ? String(body.order_id).trim() : null,
         expense_category: body.expense_category ? String(body.expense_category).trim() : null,
         warehouse_name: body.warehouse_name ? String(body.warehouse_name).trim() : null,
+        source_key: sourceKey || null,
+        ledger_status: 'posted',
+        reversal_of: body.reversal_of ? String(body.reversal_of).trim() : null,
+        reversal_reason: body.reversal_reason ? String(body.reversal_reason).trim() : null,
+        correction_of: body.correction_of ? String(body.correction_of).trim() : null,
+        correction_reason: body.correction_reason ? String(body.correction_reason).trim() : null,
       };
 
-      const res = await fetch(`${sb}/rest/v1/cash_log`, {
+      const res = await fetch(`${sb}/rest/v1/cash_log${sourceKey ? '?on_conflict=source_key' : ''}`, {
         method: 'POST',
-        headers: sbHeaders,
+        headers: sourceKey ? {
+          ...sbHeaders,
+          Prefer: 'resolution=merge-duplicates,return=representation',
+        } : sbHeaders,
         body: JSON.stringify(cashPayload),
       });
       const data = await res.json();
       return Response.json(data, { status: res.status, headers: cors });
+    }
+
+    if (url.pathname.startsWith('/api/cash/') && url.pathname.endsWith('/reverse') && request.method === 'POST') {
+      if (authedRole !== 'owner') {
+        return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
+      }
+
+      const parts = url.pathname.split('/').filter(Boolean);
+      const id = decodeURIComponent(parts[2] || '');
+      const body = await request.json().catch(() => ({}));
+      const reason = String(body?.reason || '').trim();
+      if (!id) {
+        return Response.json({ error: 'Cash entry id required' }, { status: 400, headers: cors });
+      }
+      if (!reason) {
+        return Response.json({ error: 'Reason required' }, { status: 400, headers: cors });
+      }
+
+      const cashRow = await getCashById(id, sb, sbHeaders);
+      if (!cashRow) {
+        return Response.json({ error: 'Cash entry not found' }, { status: 404, headers: cors });
+      }
+      const ledgerStatus = String(cashRow?.ledger_status || 'posted');
+      if (ledgerStatus === 'voided' || ledgerStatus === 'reversed' || ledgerStatus === 'corrected') {
+        return Response.json({ error: 'Cash entry already reversed' }, { status: 400, headers: cors });
+      }
+      if (String(cashRow?.source_type || '') === 'reversal' || String(cashRow?.reversal_of || '').trim()) {
+        return Response.json({ error: 'Reversal entry cannot be reversed' }, { status: 400, headers: cors });
+      }
+
+      const now = new Date().toISOString();
+      const currencyCorrectionComment = buildReversedCurrencyCashComment(cashRow.comment, reason);
+      const reversalPayload = {
+        worker_name: cashRow.worker_name,
+        worker_id: cashRow.worker_id || null,
+        amount: -(Number(cashRow.amount) || 0),
+        comment: currencyCorrectionComment || `Отмена: ${String(cashRow.comment || '').trim()} — ${reason}`,
+        cash_account: String(cashRow.cash_account || cashRow.account_type || 'cash').trim().toLowerCase(),
+        fop_confirmed: cashRow.fop_confirmed === true,
+        fop_source_key: null,
+        fop_date: cashRow.fop_date || null,
+        manual_payment: false,
+        manual_payment_method: null,
+        cash_owner: cashRow.cash_owner || cashRow.worker_name || null,
+        cash_owner_id: cashRow.cash_owner_id || cashRow.worker_id || null,
+        account_type: cashRow.account_type || cashRow.cash_account || 'cash',
+        payment_type: cashRow.payment_type || 'correction',
+        payment_method: cashRow.payment_method || null,
+        approval_status: 'not_required',
+        approval_by: null,
+        approval_by_id: null,
+        source_type: 'reversal',
+        source_id: id,
+        order_id: cashRow.order_id || null,
+        expense_category: cashRow.expense_category || null,
+        warehouse_name: cashRow.warehouse_name || null,
+        source_key: `reversal:${id}`,
+        ledger_status: 'posted',
+        reversal_of: id,
+        reversal_reason: reason,
+      };
+
+      const reverseRes = await fetch(`${sb}/rest/v1/cash_log?on_conflict=source_key`, {
+        method: 'POST',
+        headers: {
+          ...sbHeaders,
+          Prefer: 'resolution=merge-duplicates,return=representation',
+        },
+        body: JSON.stringify(reversalPayload),
+      });
+      const reverseData = await reverseRes.json().catch(() => []);
+      if (!reverseRes.ok) {
+        return Response.json({ error: reverseData?.message || 'Failed to create reversal', details: reverseData }, { status: reverseRes.status || 400, headers: cors });
+      }
+
+      const voidRes = await fetch(`${sb}/rest/v1/cash_log?id=eq.${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: sbHeaders,
+        body: JSON.stringify({
+          ledger_status: 'reversed',
+          reversal_reason: reason,
+          reversed_by: session.workerName || null,
+          reversed_at: now,
+        }),
+      });
+      const voidData = await voidRes.json().catch(() => []);
+      if (!voidRes.ok) {
+        return Response.json({ error: voidData?.message || 'Failed to mark original entry as reversed', details: voidData }, { status: voidRes.status || 400, headers: cors });
+      }
+
+      return Response.json({ reversal: Array.isArray(reverseData) ? reverseData[0] : reverseData, original: Array.isArray(voidData) ? voidData[0] : voidData }, { headers: cors });
+    }
+
+    if (url.pathname.startsWith('/api/cash/') && url.pathname.endsWith('/correct') && request.method === 'POST') {
+      if (authedRole !== 'owner') {
+        return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
+      }
+
+      const parts = url.pathname.split('/').filter(Boolean);
+      const id = decodeURIComponent(parts[2] || '');
+      const body = await request.json().catch(() => ({}));
+      const reason = String(body?.reason || body?.comment || '').trim();
+      if (!id) {
+        return Response.json({ error: 'Cash entry id required' }, { status: 400, headers: cors });
+      }
+      if (!reason) {
+        return Response.json({ error: 'Reason required' }, { status: 400, headers: cors });
+      }
+
+      const cashRow = await getCashById(id, sb, sbHeaders);
+      if (!cashRow) {
+        return Response.json({ error: 'Cash entry not found' }, { status: 404, headers: cors });
+      }
+      const ledgerStatus = String(cashRow?.ledger_status || 'posted');
+      if (ledgerStatus === 'voided' || ledgerStatus === 'reversed' || ledgerStatus === 'corrected') {
+        return Response.json({ error: 'Cash entry already corrected' }, { status: 400, headers: cors });
+      }
+      if (String(cashRow?.source_type || '') === 'reversal' || String(cashRow?.reversal_of || '').trim()) {
+        return Response.json({ error: 'Reversal entry cannot be corrected' }, { status: 400, headers: cors });
+      }
+      if (String(cashRow?.source_type || '') === 'correction' || String(cashRow?.correction_of || '').trim()) {
+        return Response.json({ error: 'Correction entry cannot be corrected' }, { status: 400, headers: cors });
+      }
+
+      const oldAmount = Number(cashRow.amount) || 0;
+      const nextAmount = Number(body.amount) || 0;
+      const oldOwner = String(cashRow.cash_owner || cashRow.worker_name || '').trim();
+      const nextOwner = String(body.worker_name || body.cash_owner || oldOwner).trim();
+      const oldAccount = String(cashRow.account_type || cashRow.cash_account || 'cash').trim().toLowerCase();
+      const nextAccount = String(body.account_type || body.cash_account || oldAccount || 'cash').trim().toLowerCase();
+      const nextComment = String(body.comment || '').trim() || reason;
+      const expenseCategory = String(body.expense_category || '').trim() || null;
+      const warehouseName = String(body.warehouse_name || '').trim() || null;
+
+      if (!nextOwner) {
+        return Response.json({ error: 'worker required' }, { status: 400, headers: cors });
+      }
+      if (!nextAmount) {
+        return Response.json({ error: 'Amount required' }, { status: 400, headers: cors });
+      }
+      if (!['cash', 'fop'].includes(nextAccount)) {
+        return Response.json({ error: 'Invalid cash account' }, { status: 400, headers: cors });
+      }
+
+      const nextWorker = await findWorkerByIdentity(nextOwner, sb, sbHeaders);
+      const correctionStamp = Date.now();
+      const ownerChanged = normalizeWorkerIdentityText(oldOwner) !== normalizeWorkerIdentityText(nextOwner) || oldAccount !== nextAccount;
+      const correctionRows = [];
+      const makeCorrectionRow = (amount, owner, account, keySuffix, comment) => {
+        const row = {
+          worker_name: owner,
+          worker_id: keySuffix === 'new' || keySuffix === 'delta' ? (nextWorker?.id || null) : (cashRow.worker_id || null),
+          amount,
+          comment,
+          cash_account: account,
+          fop_confirmed: true,
+          fop_source_key: null,
+          fop_date: cashRow.fop_date || null,
+          manual_payment: false,
+          manual_payment_method: null,
+          cash_owner: owner,
+          cash_owner_id: keySuffix === 'new' || keySuffix === 'delta' ? (nextWorker?.id || null) : (cashRow.cash_owner_id || cashRow.worker_id || null),
+          account_type: account,
+          payment_type: 'correction',
+          payment_method: cashRow.payment_method || null,
+          approval_status: 'not_required',
+          approval_by: null,
+          approval_by_id: null,
+          source_type: 'correction',
+          source_id: id,
+          order_id: cashRow.order_id || null,
+          expense_category: expenseCategory,
+          warehouse_name: warehouseName,
+          source_key: `correction:${id}:${correctionStamp}:${keySuffix}`,
+          ledger_status: 'posted',
+          correction_of: id,
+          correction_reason: reason,
+        };
+        Object.assign(row, buildStructuredCashFields(row));
+        return row;
+      };
+
+      if (ownerChanged) {
+        correctionRows.push(makeCorrectionRow(
+          -oldAmount,
+          oldOwner,
+          oldAccount,
+          'old',
+          `Коррекция: убрать старую запись ${oldAmount.toLocaleString('ru')} ₴. ${reason}`
+        ));
+        correctionRows.push(makeCorrectionRow(
+          nextAmount,
+          nextOwner,
+          nextAccount,
+          'new',
+          `Коррекция: новая запись ${nextAmount.toLocaleString('ru')} ₴. ${nextComment}`
+        ));
+      } else {
+        const delta = nextAmount - oldAmount;
+        if (!delta) {
+          const metadataPatch = {
+            comment: nextComment,
+            source_type: String(body.source_type || cashRow.source_type || '').trim() || undefined,
+            expense_category: expenseCategory,
+            warehouse_name: warehouseName,
+            correction_reason: reason,
+          };
+          Object.assign(metadataPatch, buildStructuredCashFields({ ...cashRow, ...metadataPatch }));
+          const metadataRes = await fetch(`${sb}/rest/v1/cash_log?id=eq.${encodeURIComponent(id)}`, {
+            method: 'PATCH',
+            headers: sbHeaders,
+            body: JSON.stringify(metadataPatch),
+          });
+          const metadataData = await metadataRes.json().catch(() => []);
+          if (!metadataRes.ok) {
+            return Response.json({ error: metadataData?.message || 'Failed to update cash entry metadata', details: metadataData }, { status: metadataRes.status || 400, headers: cors });
+          }
+          return Response.json({ corrections: [], original: Array.isArray(metadataData) ? metadataData[0] : metadataData }, { headers: cors });
+        }
+        correctionRows.push(makeCorrectionRow(
+          delta,
+          nextOwner,
+          nextAccount,
+          'delta',
+          `Коррекция: ${oldAmount.toLocaleString('ru')} → ${nextAmount.toLocaleString('ru')} ₴. ${nextComment}`
+        ));
+      }
+
+      const correctionRes = await fetch(`${sb}/rest/v1/cash_log?on_conflict=source_key`, {
+        method: 'POST',
+        headers: {
+          ...sbHeaders,
+          Prefer: 'resolution=merge-duplicates,return=representation',
+        },
+        body: JSON.stringify(correctionRows),
+      });
+      const correctionData = await correctionRes.json().catch(() => []);
+      if (!correctionRes.ok) {
+        return Response.json({ error: correctionData?.message || 'Failed to create correction', details: correctionData }, { status: correctionRes.status || 400, headers: cors });
+      }
+
+      const markRes = await fetch(`${sb}/rest/v1/cash_log?id=eq.${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: sbHeaders,
+        body: JSON.stringify({
+          ledger_status: 'corrected',
+          correction_reason: reason,
+        }),
+      });
+      const markData = await markRes.json().catch(() => []);
+      if (!markRes.ok) {
+        return Response.json({ error: markData?.message || 'Failed to mark original entry as corrected', details: markData }, { status: markRes.status || 400, headers: cors });
+      }
+
+      return Response.json({ corrections: correctionData, original: Array.isArray(markData) ? markData[0] : markData }, { headers: cors });
     }
 
     if (url.pathname.startsWith('/api/cash/') && url.pathname !== '/api/cash/all' && request.method === 'PATCH') {
@@ -990,40 +1433,29 @@ export default {
       const body = await request.json().catch(() => ({}));
       const patch = {};
       if (authedRole === 'owner') {
-        if (Object.prototype.hasOwnProperty.call(body, 'worker_name')) {
-          patch.worker_name = String(body.worker_name || '').trim();
-        }
-        if (Object.prototype.hasOwnProperty.call(body, 'amount')) {
-          patch.amount = Number(body.amount) || 0;
-        }
-        if (Object.prototype.hasOwnProperty.call(body, 'comment')) {
-          patch.comment = String(body.comment || '').trim();
-        }
-        if (Object.prototype.hasOwnProperty.call(body, 'cash_account')) {
-          const cashAccount = String(body.cash_account || 'cash').trim().toLowerCase();
-          if (!['cash', 'fop'].includes(cashAccount)) {
-            return Response.json({ error: 'Invalid cash account' }, { status: 400, headers: cors });
-          }
-          patch.cash_account = cashAccount;
-        }
         if (Object.prototype.hasOwnProperty.call(body, 'deleted_at')) {
           patch.deleted_at = body.deleted_at ? String(body.deleted_at) : null;
         }
         if (Object.prototype.hasOwnProperty.call(body, 'deleted_by')) {
           patch.deleted_by = body.deleted_by ? String(body.deleted_by) : null;
         }
-        if (Object.prototype.hasOwnProperty.call(patch, 'worker_name') && !patch.worker_name) {
-          return Response.json({ error: 'worker required' }, { status: 400, headers: cors });
-        }
-        if (Object.prototype.hasOwnProperty.call(patch, 'comment') && !patch.comment) {
-          return Response.json({ error: 'Comment required' }, { status: 400, headers: cors });
-        }
-        if (Object.prototype.hasOwnProperty.call(patch, 'amount') && !patch.amount) {
-          return Response.json({ error: 'Amount required' }, { status: 400, headers: cors });
-        }
       }
       if (Object.prototype.hasOwnProperty.call(body, 'fop_confirmed')) {
         patch.fop_confirmed = !!body.fop_confirmed;
+        const nextApprovalStatus = patch.fop_confirmed
+          ? 'confirmed'
+          : ((String(cashRow.cash_account || '').toLowerCase() === 'fop' || isConfirmableCardCashRow(cashRow)) ? 'pending' : 'not_required');
+        patch.approval_status = nextApprovalStatus;
+        if (nextApprovalStatus === 'confirmed') {
+          patch.approval_by = String(session.workerName || '').trim() || null;
+          patch.approval_by_id = sessionWorker?.id || null;
+        } else if (nextApprovalStatus === 'pending') {
+          patch.approval_by = String(cashRow.cash_owner || cashRow.worker_name || '').trim() || null;
+          patch.approval_by_id = cashRow.cash_owner_id || cashRow.worker_id || null;
+        } else {
+          patch.approval_by = null;
+          patch.approval_by_id = null;
+        }
       }
       if (authedRole === 'owner') {
         const nextCashRow = { ...cashRow, ...patch };
@@ -1031,6 +1463,20 @@ export default {
       }
       if (!Object.keys(patch).length) {
         return Response.json({ error: 'No allowed fields' }, { status: 400, headers: cors });
+      }
+
+      if (patch.fop_confirmed === true) {
+        const sourceKey = getCashLedgerSourceKey(cashRow);
+        if (sourceKey) {
+          const dupRes = await fetch(`${sb}/rest/v1/cash_log?${cashSourceEqFilter(sourceKey)}&select=id&limit=100`, { headers: sbHeaders });
+          const dupRows = await dupRes.json().catch(() => []);
+          if (Array.isArray(dupRows) && dupRows.length > 1) {
+            for (const row of dupRows) {
+              if (String(row?.id || '') === String(id)) continue;
+              await voidCashLedgerRow(row.id, `duplicate confirmed cash source: ${sourceKey}`, sb, sbHeaders);
+            }
+          }
+        }
       }
 
       const res = await fetch(`${sb}/rest/v1/cash_log?id=eq.${encodeURIComponent(id)}`, {
@@ -1069,7 +1515,7 @@ export default {
       const sessionWorker = await findWorkerByIdentity(session.workerName, sb, sbHeaders);
 
       for (const sourceKey of sourceKeys) {
-        const res = await fetch(`${sb}/rest/v1/cash_log?fop_source_key=eq.${encodeURIComponent(sourceKey)}&limit=100`, { headers: sbHeaders });
+        const res = await fetch(`${sb}/rest/v1/cash_log?${cashSourceEqFilter(sourceKey)}&limit=100`, { headers: sbHeaders });
         const rows = await res.json().catch(() => []);
         for (const row of (Array.isArray(rows) ? rows : [])) {
           if (authedRole !== 'owner') {
@@ -1080,7 +1526,7 @@ export default {
             if (!isOwnCashEntry) continue;
           }
           if (!row?.id) continue;
-          await fetch(`${sb}/rest/v1/cash_log?id=eq.${encodeURIComponent(row.id)}`, { method: 'DELETE', headers: sbHeaders });
+          await voidCashLedgerRow(row.id, `cash source removed: ${sourceKey}`, sb, sbHeaders);
           deletedIds.push(String(row.id));
         }
       }
@@ -1103,6 +1549,7 @@ export default {
         'ref_supplier_statuses',
         'ref_dropshippers',
         'ref_app_settings',
+        'ref_service_rates',
       ];
 
       if (!allowed.includes(table)) {
@@ -1116,7 +1563,7 @@ export default {
         if (!refId) {
           return Response.json({ error: 'Reference id required' }, { status: 400, headers: cors });
         }
-        if (table !== 'ref_warehouses' && table !== 'ref_dropshippers' && table !== 'ref_app_settings') {
+        if (table !== 'ref_warehouses' && table !== 'ref_dropshippers' && table !== 'ref_app_settings' && table !== 'ref_service_rates') {
           return Response.json({ error: 'Read only reference' }, { status: 400, headers: cors });
         }
 
@@ -1144,6 +1591,14 @@ export default {
         if (table === 'ref_dropshippers' && Object.prototype.hasOwnProperty.call(body, 'worker_name')) {
           patch.worker_name = String(body?.worker_name || '').trim() || null;
         }
+        if (table === 'ref_service_rates') {
+          if (Object.prototype.hasOwnProperty.call(body, 'service_group')) patch.service_group = String(body?.service_group || 'custom').trim() || 'custom';
+          if (Object.prototype.hasOwnProperty.call(body, 'rate')) patch.rate = Number(body?.rate) || 0;
+          if (Object.prototype.hasOwnProperty.call(body, 'salary_category')) patch.salary_category = String(body?.salary_category || 'custom').trim() || 'custom';
+          if (Object.prototype.hasOwnProperty.call(body, 'active')) patch.active = body?.active !== false;
+          if (Object.prototype.hasOwnProperty.call(body, 'sort_order')) patch.sort_order = Number(body?.sort_order) || 0;
+          patch.updated_at = new Date().toISOString();
+        }
         if (!Object.keys(patch).length) {
           return Response.json({ error: 'No fields to update' }, { status: 400, headers: cors });
         }
@@ -1168,7 +1623,7 @@ export default {
           return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
         }
 
-        if (table !== 'ref_warehouses' && table !== 'ref_dropshippers' && table !== 'ref_app_settings') {
+        if (table !== 'ref_warehouses' && table !== 'ref_dropshippers' && table !== 'ref_app_settings' && table !== 'ref_service_rates') {
           return Response.json({ error: 'Read only reference' }, { status: 400, headers: cors });
         }
 
@@ -1245,6 +1700,51 @@ export default {
           return Response.json(createData, { headers: cors });
         }
 
+        if (table === 'ref_service_rates') {
+          const existingRes = await fetch(
+            `${sb}/rest/v1/${table}?name=eq.${encodeURIComponent(name)}&limit=1`,
+            { headers: sbHeaders }
+          );
+          const existingRows = await existingRes.json().catch(() => []);
+          const payload = {
+            name,
+            service_group: String(body?.service_group || 'custom').trim() || 'custom',
+            rate: Number(body?.rate) || 0,
+            salary_category: String(body?.salary_category || body?.service_group || 'custom').trim() || 'custom',
+            active: body?.active !== false,
+            sort_order: Number(body?.sort_order) || 0,
+          };
+          if (Array.isArray(existingRows) && existingRows[0]) {
+            const updateRes = await fetch(`${sb}/rest/v1/${table}?id=eq.${encodeURIComponent(existingRows[0].id)}`, {
+              method: 'PATCH',
+              headers: sbHeaders,
+              body: JSON.stringify({ ...payload, updated_at: new Date().toISOString() }),
+            });
+            const updateData = await updateRes.json().catch(() => []);
+            if (!updateRes.ok) {
+              const message = Array.isArray(updateData)
+                ? 'Не удалось обновить ставку'
+                : (updateData?.message || updateData?.error || 'Не удалось обновить ставку');
+              return Response.json({ error: message }, { status: updateRes.status || 400, headers: cors });
+            }
+            return Response.json(updateData, { headers: cors });
+          }
+
+          const createRes = await fetch(`${sb}/rest/v1/${table}`, {
+            method: 'POST',
+            headers: sbHeaders,
+            body: JSON.stringify(payload),
+          });
+          const createData = await createRes.json().catch(() => []);
+          if (!createRes.ok) {
+            const message = Array.isArray(createData)
+              ? 'Не удалось создать ставку'
+              : (createData?.message || createData?.error || 'Не удалось создать ставку');
+            return Response.json({ error: message }, { status: createRes.status || 400, headers: cors });
+          }
+          return Response.json(createData, { headers: cors });
+        }
+
         const workerName = String(body?.worker_name || '').trim() || null;
         const existingRes = await fetch(
           `${sb}/rest/v1/${table}?name=eq.${encodeURIComponent(name)}&limit=1`,
@@ -1298,6 +1798,23 @@ export default {
 
       const res  = await fetch(`${sb}/rest/v1/${table}?order=created_at.asc&limit=10000`, { headers: sbHeaders });
       const data = await res.json();
+      if (table === 'ref_app_settings' && authedRole !== 'owner' && !workerHasPermission(liveWorker, 'owner_cash_view') && Array.isArray(data)) {
+        const liveWorkerId = String(liveWorker?.id || '').trim();
+        const liveWorkerLabels = [liveWorker?.name, liveWorker?.alias, session.workerName]
+          .map(value => String(value || '').trim().toLowerCase())
+          .filter(Boolean);
+        const safeData = data.map(row => {
+          if (String(row?.key || '').trim() !== CASH_SNAPSHOT_SETTING_KEY) return row;
+          const value = row?.value_json && typeof row.value_json === 'object' ? row.value_json : {};
+          const ownBalances = (Array.isArray(value?.balances) ? value.balances : []).filter(balance => {
+            const rowWorkerId = String(balance?.workerId || '').trim();
+            const rowWorkerName = String(balance?.workerName || '').trim().toLowerCase();
+            return (liveWorkerId && rowWorkerId === liveWorkerId) || (rowWorkerName && liveWorkerLabels.includes(rowWorkerName));
+          });
+          return { ...row, value_json: { ...value, balances: ownBalances } };
+        });
+        return Response.json(safeData, { headers: cors });
+      }
       return Response.json(data, { headers: cors });
     }
 
@@ -1315,6 +1832,10 @@ export default {
     }
 
     if (url.pathname === '/api/car-directory' && request.method === 'POST') {
+      if (authedRole !== 'owner' && !workerHasPermission(liveWorker, 'car_directory_view') && !workerHasPermission(liveWorker, 'orders_create')) {
+        return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
+      }
+
       const { model, eurocode } = await request.json().catch(() => ({}));
       if (!model) {
         return Response.json({ error: 'model required' }, { status: 400, headers: cors });
@@ -1363,7 +1884,7 @@ export default {
         // eslint-disable-next-line no-await-in-loop
         const derived = await buildOrderDerivedCashEntries(order, sb, sbHeaders);
         derived.forEach(entry => {
-          const key = String(entry?.fop_source_key || '').trim();
+          const key = getCashLedgerSourceKey(entry);
           if (!key) return;
           sourceMap.set(key, entry);
         });
@@ -1374,7 +1895,7 @@ export default {
         return Response.json({ ok: true, candidates: 0 }, { headers: cors });
       }
 
-      const saveRes = await fetch(`${sb}/rest/v1/cash_log?on_conflict=fop_source_key`, {
+      const saveRes = await fetch(`${sb}/rest/v1/cash_log?on_conflict=source_key`, {
         method: 'POST',
         headers: {
           ...sbHeaders,
@@ -1414,8 +1935,24 @@ export default {
         return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
       }
 
-      const id = url.pathname.split('/').pop();
-      await fetch(`${sb}/rest/v1/car_directory?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE', headers: sbHeaders });
+      const id = decodeURIComponent(url.pathname.split('/').pop() || '');
+      if (!id) {
+        return Response.json({ error: 'Car id required' }, { status: 400, headers: cors });
+      }
+      const res = await fetch(`${sb}/rest/v1/car_directory?id=eq.${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: sbHeaders,
+      });
+      const data = await res.json().catch(() => []);
+      if (!res.ok) {
+        return Response.json(
+          { error: Array.isArray(data) ? 'Car delete failed' : (data?.message || data?.error || 'Car delete failed') },
+          { status: res.status || 400, headers: cors }
+        );
+      }
+      if (!Array.isArray(data) || !data.length) {
+        return Response.json({ error: 'Car not found' }, { status: 404, headers: cors });
+      }
       return Response.json({ ok: true }, { headers: cors });
     }
 
@@ -1429,6 +1966,7 @@ const SPECIALIST_ORDER_SELECT = [
   'id',
   'date',
   'responsible',
+  'responsible_worker_id',
   'client',
   'phone',
   'address',
@@ -1443,10 +1981,12 @@ const SPECIALIST_ORDER_SELECT = [
   'extra_work',
   'tatu',
   'tatu_status',
+  'tatu_responsible_worker_id',
   'tatu_done',
   'tatu_done_by',
   'toning',
   'toning_status',
+  'toning_responsible_worker_id',
   'toning_done',
   'toning_done_by',
   'delivery',
@@ -1474,10 +2014,14 @@ const SPECIALIST_ORDER_SELECT = [
   'own_warehouse',
   'worker_done',
   'assistant',
+  'assistant_worker_id',
+  'extra_assistant',
+  'extra_assistant_worker_id',
   'is_cancelled',
   'deleted_at',
   'deleted_by',
   'manager',
+  'manager_worker_id',
   'only_sale',
   'rework_data',
   'client_payments',
@@ -1485,43 +2029,73 @@ const SPECIALIST_ORDER_SELECT = [
 ].join(',');
 
 async function fetchOrdersForSession(session, sb, sbHeaders) {
+  await rolloverOverdueInWorkOrdersToToday(sb, sbHeaders);
   if (session.role === 'owner' || session.role === 'manager') {
-    const res = await fetch(`${sb}/rest/v1/orders?order=date.desc&limit=10000`, { headers: sbHeaders });
-    return res.json();
+    return fetchSupabasePagedRows(`${sb}/rest/v1/orders?order=date.desc`, sbHeaders);
   }
 
   const currentWorker = await getWorkerByName(session.workerName, sb, sbHeaders);
   if (workerHasPermission(currentWorker, 'orders_view_all') || workerHasPermission(currentWorker, 'warehouses_view')) {
-    const res = await fetch(
-      `${sb}/rest/v1/orders?select=${SPECIALIST_ORDER_SELECT}&is_cancelled=eq.false&deleted_at=is.null&order=date.desc&limit=10000`,
-      { headers: sbHeaders }
+    return fetchSupabasePagedRows(
+      `${sb}/rest/v1/orders?select=${SPECIALIST_ORDER_SELECT}&is_cancelled=eq.false&deleted_at=is.null&order=date.desc`,
+      sbHeaders
     );
-    return res.json();
   }
 
   const workerName = session.workerName || '';
-  if (workerName === 'Nastya') {
-    const res = await fetch(
-      `${sb}/rest/v1/orders?select=${SPECIALIST_ORDER_SELECT}&is_cancelled=eq.false&deleted_at=is.null&or=${encodeURIComponent('(in_work.eq.true,own_warehouse.eq.true)')}&order=date.desc&limit=10000`,
-      { headers: sbHeaders }
-    );
-    return res.json();
-  }
-
   const workerDropshippers = await getDropshipperNamesForWorker(workerName, sb, sbHeaders);
   const specialistFilters = [
     `and(in_work.eq.true,responsible.eq.${workerName})`,
     `and(in_work.eq.true,assistant.eq.${workerName})`,
+    `and(in_work.eq.true,extra_assistant.eq.${workerName})`,
     ...workerDropshippers.map(name => `drop_shipper.eq.${name}`),
   ];
   if (workerHasSpecialServiceCapability(currentWorker, 'tatu')) specialistFilters.push('and(in_work.eq.true,tatu.gt.0)');
   if (workerHasSpecialServiceCapability(currentWorker, 'toning')) specialistFilters.push('and(in_work.eq.true,toning.gt.0)');
   const ownFilter = encodeURIComponent(`(${specialistFilters.join(',')})`);
-  const res = await fetch(
-    `${sb}/rest/v1/orders?select=${SPECIALIST_ORDER_SELECT}&is_cancelled=eq.false&deleted_at=is.null&or=${ownFilter}&order=date.desc&limit=10000`,
-    { headers: sbHeaders }
+  return fetchSupabasePagedRows(
+    `${sb}/rest/v1/orders?select=${SPECIALIST_ORDER_SELECT}&is_cancelled=eq.false&deleted_at=is.null&or=${ownFilter}&order=date.desc`,
+    sbHeaders
   );
-  return res.json();
+}
+
+async function fetchSupabasePagedRows(baseUrl, sbHeaders, pageSize = 1000) {
+  const rows = [];
+  for (let offset = 0; ; offset += pageSize) {
+    const sep = baseUrl.includes('?') ? '&' : '?';
+    const res = await fetch(`${baseUrl}${sep}offset=${offset}&limit=${pageSize}`, { headers: sbHeaders });
+    const page = await res.json().catch(() => []);
+    if (!res.ok) throw new Error(Array.isArray(page) ? 'Fetch failed' : (page?.message || page?.error || 'Fetch failed'));
+    const items = Array.isArray(page) ? page : [];
+    rows.push(...items);
+    if (items.length < pageSize) break;
+  }
+  return rows;
+}
+
+function getKyivLocalDateString(offsetDays = 0) {
+  const now = new Date();
+  const kyivText = now.toLocaleString('sv-SE', { timeZone: 'Europe/Kiev' }).replace(' ', 'T');
+  const kyivDate = new Date(kyivText);
+  kyivDate.setDate(kyivDate.getDate() + Number(offsetDays || 0));
+  return kyivDate.toISOString().slice(0, 10);
+}
+
+let _lastOverdueOrderRolloverDate = '';
+
+async function rolloverOverdueInWorkOrdersToToday(sb, sbHeaders) {
+  const today = getKyivLocalDateString(0);
+  if (_lastOverdueOrderRolloverDate === today) return;
+  const yesterday = getKyivLocalDateString(-1);
+  await fetch(
+    `${sb}/rest/v1/orders?date=eq.${encodeURIComponent(yesterday)}&in_work=eq.true&worker_done=eq.false&status_done=eq.false&is_cancelled=eq.false&deleted_at=is.null`,
+    {
+      method: 'PATCH',
+      headers: sbHeaders,
+      body: JSON.stringify({ date: today }),
+    }
+  ).catch(() => {});
+  _lastOverdueOrderRolloverDate = today;
 }
 
 async function getDropshipperNamesForWorker(workerName, sb, sbHeaders) {
@@ -1543,6 +2117,27 @@ async function getDropshipperNamesForWorker(workerName, sb, sbHeaders) {
     })
     .map(row => String(row?.name || ''))
     .filter(Boolean);
+}
+
+async function getDropshipperCashWorker(dropshipperName, sb, sbHeaders) {
+  const name = String(dropshipperName || '').trim();
+  if (!name) return null;
+  const [dropshipperRes, workersRes] = await Promise.all([
+    fetch(`${sb}/rest/v1/ref_dropshippers?select=name,worker_name,worker_id&limit=1000`, { headers: sbHeaders }),
+    fetch(`${sb}/rest/v1/workers?select=id,name,alias&limit=1000`, { headers: sbHeaders }),
+  ]);
+  const dropshippers = ensureBuiltInDropshippers(await dropshipperRes.json().catch(() => []));
+  const workers = await workersRes.json().catch(() => []);
+  const row = (Array.isArray(dropshippers) ? dropshippers : []).find(item => String(item?.name || '').trim() === name);
+  const linkedWorkerId = String(row?.worker_id || '').trim();
+  if (linkedWorkerId) {
+    return (Array.isArray(workers) ? workers : []).find(worker => String(worker?.id || '').trim() === linkedWorkerId) || null;
+  }
+  const linkedWorkerName = String(row?.worker_name || '').trim();
+  if (linkedWorkerName) {
+    return (Array.isArray(workers) ? workers : []).find(worker => String(worker?.name || '').trim() === linkedWorkerName) || null;
+  }
+  return (Array.isArray(workers) ? workers : []).find(worker => isDropshipperLinkedToWorkerName(name, worker)) || null;
 }
 
 function ensureBuiltInDropshippers(rows = []) {
@@ -1594,14 +2189,6 @@ function isDropshipperLinkedToWorkerName(dropshipperName, worker) {
   });
 }
 
-function canSashaManagerCreateDropshipperCash(body, session) {
-  if (session?.workerName !== 'Sasha Manager') return false;
-  const targetWorker = String(body?.worker_name || '');
-  if (!['Oleg Starshiy', 'Lyosha'].includes(targetWorker)) return false;
-  const comment = String(body?.comment || '');
-  return comment.startsWith('Выплата дропшипперу ') || comment.startsWith('Корректировка дропшиппера ');
-}
-
 function getOrderIdNumber(id) {
   const match = String(id || '').match(/SG-(\d+)/i);
   return match ? parseInt(match[1], 10) : 0;
@@ -1612,8 +2199,7 @@ function formatOrderId(num) {
 }
 
 async function getNextMonotonicOrderId(sb, sbHeaders, afterId = '') {
-  const res = await fetch(`${sb}/rest/v1/orders?select=id&limit=10000`, { headers: sbHeaders });
-  const rows = await res.json().catch(() => []);
+  const rows = await fetchSupabasePagedRows(`${sb}/rest/v1/orders?select=id`, sbHeaders);
   const maxExisting = Array.isArray(rows)
     ? rows.reduce((max, row) => Math.max(max, getOrderIdNumber(row?.id)), 0)
     : 0;
@@ -1673,7 +2259,7 @@ async function canCreateCashEntryForWorker(body, session, sb, sbHeaders) {
     return session.role === 'manager' || session.role === 'senior' || session.role === 'extra' || canAddCash;
   }
   if (session.role === 'manager') {
-    return body.worker_name === session.workerName || canSashaManagerCreateDropshipperCash(body, session);
+    return body.worker_name === session.workerName || await canAccessWorker(body.worker_name, session, sb, sbHeaders);
   }
   if (session.role === 'senior' || session.role === 'extra' || session.role === 'junior') {
     if (!canAddCash) return false;
@@ -1687,11 +2273,11 @@ async function canCreateOrderCashEntry(cashEntry, rawEntry, session, sb, sbHeade
   if (session.role === 'owner') return true;
   const currentWorker = await getWorkerByName(session.workerName, sb, sbHeaders);
   const canAddCash = workerHasPermission(currentWorker, 'cash_add_entries') || workerHasPermission(currentWorker, 'order_payments_manage');
+  if (isOrderDerivedCashEntry(cashEntry) || String(cashEntry?.source_type || '') === 'order') {
+    return canAddCash && (session.role === 'manager' || session.role === 'senior' || session.role === 'extra');
+  }
   if (session.role === 'manager') {
-    const cashType = String(rawEntry?.cashType || '');
-    const isSashaManagerCardEntry = cashEntry.worker_name === 'Sasha Manager'
-      && ['sasha-card-client', 'sasha-card-supplier'].includes(cashType);
-    return cashEntry.worker_name === session.workerName || isSashaManagerCardEntry;
+    return cashEntry.worker_name === session.workerName;
   }
   if (session.role === 'senior' || session.role === 'extra' || session.role === 'junior') {
     if (!canAddCash) return false;
@@ -1708,28 +2294,59 @@ async function getOrderById(id, sb, sbHeaders) {
 }
 
 function isOwnOrder(order, workerName) {
-  return !!order && !!workerName && (order.responsible === workerName || order.assistant === workerName);
+  return !!order && !!workerName && (order.responsible === workerName || order.assistant === workerName || order.extra_assistant === workerName);
 }
 
 function canPatchSpecialServiceOnly(body, order, session = {}, currentWorker = null) {
   if (!body || !order || order.is_cancelled || !order.in_work) return false;
   const keys = Object.keys(body);
   if (!keys.length) return false;
-  const romaKeys = ['tatu_done', 'tatu_status', 'tatu_done_by'];
-  const lyoshaKeys = ['toning_done', 'toning_status', 'toning_done_by'];
-  const onlyRomaKeys = keys.every(key => romaKeys.includes(key));
-  const onlyLyoshaKeys = keys.every(key => lyoshaKeys.includes(key));
+  const tatuKeys = ['tatu_done', 'tatu_status', 'tatu_done_by'];
+  const toningKeys = ['toning_done', 'toning_status', 'toning_done_by'];
+  const onlyTatuKeys = keys.every(key => tatuKeys.includes(key));
+  const onlyToningKeys = keys.every(key => toningKeys.includes(key));
   const tatuAssigned = getOrderAssignedSpecialist(order, 'tatu');
   const toningAssigned = getOrderAssignedSpecialist(order, 'toning');
-  if (workerHasSpecialServiceCapability(currentWorker || { name: session.workerName, note: '' }, 'tatu') && onlyRomaKeys) {
-    if (tatuAssigned && tatuAssigned !== session.workerName) return false;
-    return (Number(order.tatu) || 0) > 0;
+  if (workerHasSpecialServiceCapability(currentWorker || { name: session.workerName, note: '' }, 'tatu') && onlyTatuKeys) {
+    if ((tatuAssigned || getOrderAssignedSpecialistId(order, 'tatu')) && !isSessionAssignedSpecialist(order, 'tatu', session, currentWorker)) return false;
+    return orderHasSpecialService(order, 'tatu');
   }
-  if (workerHasSpecialServiceCapability(currentWorker || { name: session.workerName, note: '' }, 'toning') && onlyLyoshaKeys) {
-    if (toningAssigned && toningAssigned !== session.workerName) return false;
-    return (Number(order.toning) || 0) > 0 && !order.toning_external;
+  if (workerHasSpecialServiceCapability(currentWorker || { name: session.workerName, note: '' }, 'toning') && onlyToningKeys) {
+    if ((toningAssigned || getOrderAssignedSpecialistId(order, 'toning')) && !isSessionAssignedSpecialist(order, 'toning', session, currentWorker)) return false;
+    return orderHasSpecialService(order, 'toning');
   }
   return false;
+}
+
+function normalizeOrderPaymentForAppendCheck(payment) {
+  return {
+    amount: Number(payment?.amount) || 0,
+    date: String(payment?.date || '').trim(),
+    method: normalizeCashPaymentMethod(payment?.method || ''),
+    timestamp: String(payment?.timestamp || '').trim(),
+  };
+}
+
+function assertOnlyAppendedPayments(nextPayments, prevPayments, label) {
+  const next = Array.isArray(nextPayments) ? nextPayments : [];
+  const prev = Array.isArray(prevPayments) ? prevPayments : [];
+  if (next.length < prev.length) throw new Error(`${label}: delete forbidden`);
+  for (let i = 0; i < prev.length; i += 1) {
+    const a = normalizeOrderPaymentForAppendCheck(next[i]);
+    const b = normalizeOrderPaymentForAppendCheck(prev[i]);
+    if (JSON.stringify(a) !== JSON.stringify(b)) {
+      throw new Error(`${label}: edit forbidden`);
+    }
+  }
+}
+
+function sumAppendedCashPayments(nextPayments, prevPayments) {
+  const next = Array.isArray(nextPayments) ? nextPayments : [];
+  const prevCount = Array.isArray(prevPayments) ? prevPayments.length : 0;
+  return next.slice(prevCount).reduce((sum, payment) => {
+    const method = normalizeCashPaymentMethod(payment?.method || '');
+    return sum + (isCashPaymentMethodForSync(method) ? (Number(payment?.amount) || 0) : 0);
+  }, 0);
 }
 
 function buildSpecialistOrderPatch(body, existingOrder, session = {}, currentWorker = null) {
@@ -1752,36 +2369,43 @@ function buildSpecialistOrderPatch(body, existingOrder, session = {}, currentWor
       throw new Error('Service type required');
     }
     patch.worker_done = !!body.worker_done;
+    if (patch.worker_done) {
+      patch.rework_data = {
+        ...(existingOrder?.rework_data && typeof existingOrder.rework_data === 'object' ? existingOrder.rework_data : {}),
+        completedAt: new Date().toISOString(),
+        completedBy: session.workerName || '',
+      };
+    }
   }
   if (Object.prototype.hasOwnProperty.call(body, 'service_type')) {
     patch.service_type = String(body.service_type || '').trim() || null;
   }
   if (Object.prototype.hasOwnProperty.call(body, 'tatu_done')) {
     if (!workerHasSpecialServiceCapability(currentWorker || { name: session.workerName, note: '' }, 'tatu')) throw new Error('Forbidden');
-    if (getOrderAssignedSpecialist(existingOrder, 'tatu') && getOrderAssignedSpecialist(existingOrder, 'tatu') !== session.workerName) throw new Error('Forbidden');
-    if ((Number(existingOrder?.tatu) || 0) <= 0) throw new Error('Invalid special service');
+    if ((getOrderAssignedSpecialist(existingOrder, 'tatu') || getOrderAssignedSpecialistId(existingOrder, 'tatu')) && !isSessionAssignedSpecialist(existingOrder, 'tatu', session, currentWorker)) throw new Error('Forbidden');
+    if (!orderHasSpecialService(existingOrder, 'tatu')) throw new Error('Invalid special service');
     patch.tatu_done = !!body.tatu_done;
     patch.tatu_done_by = patch.tatu_done ? session.workerName : null;
     patch.tatu_status = patch.tatu_done;
   } else if (Object.prototype.hasOwnProperty.call(body, 'tatu_status')) {
     if (!workerHasSpecialServiceCapability(currentWorker || { name: session.workerName, note: '' }, 'tatu')) throw new Error('Forbidden');
-    if (getOrderAssignedSpecialist(existingOrder, 'tatu') && getOrderAssignedSpecialist(existingOrder, 'tatu') !== session.workerName) throw new Error('Forbidden');
-    if ((Number(existingOrder?.tatu) || 0) <= 0) throw new Error('Invalid special service');
+    if ((getOrderAssignedSpecialist(existingOrder, 'tatu') || getOrderAssignedSpecialistId(existingOrder, 'tatu')) && !isSessionAssignedSpecialist(existingOrder, 'tatu', session, currentWorker)) throw new Error('Forbidden');
+    if (!orderHasSpecialService(existingOrder, 'tatu')) throw new Error('Invalid special service');
     patch.tatu_status = !!body.tatu_status;
     patch.tatu_done = patch.tatu_status;
     patch.tatu_done_by = patch.tatu_status ? session.workerName : null;
   }
   if (Object.prototype.hasOwnProperty.call(body, 'toning_done')) {
     if (!workerHasSpecialServiceCapability(currentWorker || { name: session.workerName, note: '' }, 'toning')) throw new Error('Forbidden');
-    if (getOrderAssignedSpecialist(existingOrder, 'toning') && getOrderAssignedSpecialist(existingOrder, 'toning') !== session.workerName) throw new Error('Forbidden');
-    if ((Number(existingOrder?.toning) || 0) <= 0 || existingOrder?.toning_external) throw new Error('Invalid special service');
+    if ((getOrderAssignedSpecialist(existingOrder, 'toning') || getOrderAssignedSpecialistId(existingOrder, 'toning')) && !isSessionAssignedSpecialist(existingOrder, 'toning', session, currentWorker)) throw new Error('Forbidden');
+    if (!orderHasSpecialService(existingOrder, 'toning')) throw new Error('Invalid special service');
     patch.toning_done = !!body.toning_done;
     patch.toning_done_by = patch.toning_done ? session.workerName : null;
     patch.toning_status = patch.toning_done;
   } else if (Object.prototype.hasOwnProperty.call(body, 'toning_status')) {
     if (!workerHasSpecialServiceCapability(currentWorker || { name: session.workerName, note: '' }, 'toning')) throw new Error('Forbidden');
-    if (getOrderAssignedSpecialist(existingOrder, 'toning') && getOrderAssignedSpecialist(existingOrder, 'toning') !== session.workerName) throw new Error('Forbidden');
-    if ((Number(existingOrder?.toning) || 0) <= 0 || existingOrder?.toning_external) throw new Error('Invalid special service');
+    if ((getOrderAssignedSpecialist(existingOrder, 'toning') || getOrderAssignedSpecialistId(existingOrder, 'toning')) && !isSessionAssignedSpecialist(existingOrder, 'toning', session, currentWorker)) throw new Error('Forbidden');
+    if (!orderHasSpecialService(existingOrder, 'toning')) throw new Error('Invalid special service');
     patch.toning_status = !!body.toning_status;
     patch.toning_done = patch.toning_status;
     patch.toning_done_by = patch.toning_status ? session.workerName : null;
@@ -1790,14 +2414,18 @@ function buildSpecialistOrderPatch(body, existingOrder, session = {}, currentWor
     patch.price_locked = !!body.price_locked;
   }
   if (Array.isArray(clientPayments)) {
+    const prev = existingOrder?.client_payments || [];
+    assertOnlyAppendedPayments(clientPayments, prev, 'client_payments');
     patch.client_payments = clientPayments;
-    patch.debt = sumPaymentAmounts(clientPayments);
+    patch.debt = (Number(existingOrder?.debt) || 0) + sumAppendedCashPayments(clientPayments, prev);
   } else if (Object.prototype.hasOwnProperty.call(body, 'debt')) {
     patch.debt = Number(body.debt) || 0;
   }
   if (Array.isArray(supplierPayments)) {
+    const prev = existingOrder?.supplier_payments || [];
+    assertOnlyAppendedPayments(supplierPayments, prev, 'supplier_payments');
     patch.supplier_payments = supplierPayments;
-    patch.check_sum = sumPaymentAmounts(supplierPayments);
+    patch.check_sum = (Number(existingOrder?.check_sum) || 0) + sumAppendedCashPayments(supplierPayments, prev);
   } else if (checkSumValue !== undefined) {
     patch.check_sum = Number(checkSumValue) || 0;
   }
@@ -1846,11 +2474,49 @@ async function getWorkerByName(workerName, sb, sbHeaders) {
   return Array.isArray(rows) && rows.length ? rows[0] : null;
 }
 
+async function getWorkerById(workerId, sb, sbHeaders) {
+  const id = String(workerId || '').trim();
+  if (!id) return null;
+  const res = await fetch(
+    `${sb}/rest/v1/workers?id=eq.${encodeURIComponent(id)}&limit=1`,
+    { headers: sbHeaders }
+  );
+  const rows = await res.json().catch(() => []);
+  return Array.isArray(rows) && rows.length ? rows[0] : null;
+}
+
 const WORKER_PERMISSIONS_META_PREFIX = '[[CRM_PERMS:';
 const WORKER_PERMISSIONS_META_SUFFIX = ']]';
 const LEGACY_WORKER_PERMISSIONS_META_PREFIX = '\n<!--crm-permissions:';
 const LEGACY_WORKER_PERMISSIONS_META_SUFFIX = ':crm-permissions-->';
 const WORKER_PERMISSION_PRESETS = {
+  owner: {
+    orders_view_all: true,
+    orders_create: true,
+    orders_edit: true,
+    orders_delete: true,
+    clients_view: true,
+    workers_view: true,
+    car_directory_view: true,
+    warehouses_view: true,
+    dropshippers_manage: true,
+    calendar_view: true,
+    groups_view: true,
+    selectable_as_manager: false,
+    personal_cash_view: true,
+    cash_add_entries: true,
+    finance_view: true,
+    owner_cash_view: true,
+    owner_expenses_view: true,
+    owner_payments_view: true,
+    order_payments_manage: true,
+    order_services_edit: true,
+    order_complete: true,
+    special_service_status: true,
+    special_service_tatu: true,
+    special_service_toning: true,
+    own_warehouse_view: true,
+  },
   manager: {
     orders_view_all: true,
     orders_create: true,
@@ -1858,12 +2524,14 @@ const WORKER_PERMISSION_PRESETS = {
     orders_delete: false,
     clients_view: true,
     workers_view: false,
+    car_directory_view: false,
     warehouses_view: true,
     dropshippers_manage: false,
     calendar_view: false,
     groups_view: false,
-    personal_cash_view: false,
-    cash_add_entries: false,
+    selectable_as_manager: true,
+    personal_cash_view: true,
+    cash_add_entries: true,
     finance_view: false,
     owner_cash_view: false,
     owner_expenses_view: false,
@@ -1874,6 +2542,7 @@ const WORKER_PERMISSION_PRESETS = {
     special_service_status: false,
     special_service_tatu: false,
     special_service_toning: false,
+    own_warehouse_view: false,
   },
   senior: {
     orders_view_all: false,
@@ -1882,10 +2551,12 @@ const WORKER_PERMISSION_PRESETS = {
     orders_delete: false,
     clients_view: false,
     workers_view: false,
+    car_directory_view: false,
     warehouses_view: false,
     dropshippers_manage: false,
     calendar_view: false,
     groups_view: false,
+    selectable_as_manager: false,
     personal_cash_view: true,
     cash_add_entries: true,
     finance_view: false,
@@ -1898,6 +2569,7 @@ const WORKER_PERMISSION_PRESETS = {
     special_service_status: false,
     special_service_tatu: false,
     special_service_toning: false,
+    own_warehouse_view: false,
   },
   junior: {
     orders_view_all: false,
@@ -1906,10 +2578,12 @@ const WORKER_PERMISSION_PRESETS = {
     orders_delete: false,
     clients_view: false,
     workers_view: false,
+    car_directory_view: false,
     warehouses_view: false,
     dropshippers_manage: false,
     calendar_view: false,
     groups_view: false,
+    selectable_as_manager: false,
     personal_cash_view: false,
     cash_add_entries: false,
     finance_view: false,
@@ -1922,6 +2596,7 @@ const WORKER_PERMISSION_PRESETS = {
     special_service_status: false,
     special_service_tatu: false,
     special_service_toning: false,
+    own_warehouse_view: false,
   },
   extra: {
     orders_view_all: false,
@@ -1930,10 +2605,12 @@ const WORKER_PERMISSION_PRESETS = {
     orders_delete: false,
     clients_view: false,
     workers_view: false,
+    car_directory_view: false,
     warehouses_view: false,
     dropshippers_manage: false,
     calendar_view: false,
     groups_view: false,
+    selectable_as_manager: false,
     personal_cash_view: true,
     cash_add_entries: true,
     finance_view: false,
@@ -1946,6 +2623,7 @@ const WORKER_PERMISSION_PRESETS = {
     special_service_status: false,
     special_service_tatu: false,
     special_service_toning: false,
+    own_warehouse_view: false,
   },
 };
 
@@ -1962,49 +2640,100 @@ function parseWorkerNoteMeta(rawNote) {
     suffix = LEGACY_WORKER_PERMISSIONS_META_SUFFIX;
   }
   if (start === -1 || end === -1) {
-    return { note: source.trim(), permissions: {}, telegramNick: '' };
+    return { note: source.trim(), permissions: {}, telegramNick: '', orderCardLayout: null, clientCopyFields: null };
   }
 
   const encoded = source.slice(start + prefix.length, end).trim();
   const note = `${source.slice(0, start)}${source.slice(end + suffix.length)}`.trim();
   if (!encoded) {
-    return { note, permissions: {}, telegramNick: '' };
+    return { note, permissions: {}, telegramNick: '', orderCardLayout: null, clientCopyFields: null };
   }
 
   try {
-    const decoded = JSON.parse(atob(encoded));
+    const decoded = JSON.parse(decodeWorkerMetaPayload(encoded));
     const meta = decoded && typeof decoded === 'object' && !Array.isArray(decoded) ? decoded : {};
-    const isLegacyPermissionsOnly = !Object.prototype.hasOwnProperty.call(meta, 'permissions') && !Object.prototype.hasOwnProperty.call(meta, 'telegramNick');
+    const isLegacyPermissionsOnly = !Object.prototype.hasOwnProperty.call(meta, 'permissions')
+      && !Object.prototype.hasOwnProperty.call(meta, 'telegramNick')
+      && !Object.prototype.hasOwnProperty.call(meta, 'orderCardLayout')
+      && !Object.prototype.hasOwnProperty.call(meta, 'clientCopyFields');
     return {
       note,
       permissions: isLegacyPermissionsOnly
         ? meta
         : ((meta.permissions && typeof meta.permissions === 'object' && !Array.isArray(meta.permissions)) ? meta.permissions : {}),
       telegramNick: String(isLegacyPermissionsOnly ? '' : (meta.telegramNick || '')).trim().replace(/^@+/, ''),
+      orderCardLayout: isLegacyPermissionsOnly ? null : (meta.orderCardLayout && typeof meta.orderCardLayout === 'object' ? meta.orderCardLayout : null),
+      clientCopyFields: isLegacyPermissionsOnly ? null : (meta.clientCopyFields && typeof meta.clientCopyFields === 'object' ? meta.clientCopyFields : null),
     };
   } catch (e) {
-    return { note, permissions: {}, telegramNick: '' };
+    return { note, permissions: {}, telegramNick: '', orderCardLayout: null, clientCopyFields: null };
   }
+}
+
+function decodeWorkerMetaPayload(encoded) {
+  const binary = atob(String(encoded || ''));
+  try {
+    if (typeof TextDecoder !== 'undefined') {
+      const bytes = Uint8Array.from(binary, ch => ch.charCodeAt(0));
+      return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    }
+  } catch (e) {}
+  try {
+    return decodeURIComponent(escape(binary));
+  } catch (e) {
+    return binary;
+  }
+}
+
+function encodeWorkerMeta(meta) {
+  return btoa(unescape(encodeURIComponent(JSON.stringify(meta))));
+}
+
+function buildWorkerNoteWithMeta({ note = '', permissions = {}, telegramNick = '', orderCardLayout = null, clientCopyFields = null } = {}) {
+  const cleanNote = String(note || '').trim();
+  const meta = {};
+  if (permissions && typeof permissions === 'object' && !Array.isArray(permissions) && Object.keys(permissions).length) meta.permissions = permissions;
+  const cleanTelegramNick = String(telegramNick || '').trim().replace(/^@+/, '');
+  if (cleanTelegramNick) meta.telegramNick = cleanTelegramNick;
+  if (orderCardLayout && typeof orderCardLayout === 'object' && !Array.isArray(orderCardLayout)) meta.orderCardLayout = orderCardLayout;
+  if (clientCopyFields && typeof clientCopyFields === 'object' && !Array.isArray(clientCopyFields)) meta.clientCopyFields = clientCopyFields;
+  if (!Object.keys(meta).length) return cleanNote;
+  return `${cleanNote}${cleanNote ? '\n' : ''}${WORKER_PERMISSIONS_META_PREFIX}${encodeWorkerMeta(meta)}${WORKER_PERMISSIONS_META_SUFFIX}`;
+}
+
+function normalizeWorkerClientCopyFields(value) {
+  const fields = Array.isArray(value?.fields) ? value.fields : [];
+  const cleanFields = fields
+    .map((field, index) => ({
+      key: String(field?.key || `worker-copy-${index + 1}`).trim() || `worker-copy-${index + 1}`,
+      title: String(field?.title || '').trim(),
+      text: String(field?.text || '').trim(),
+    }))
+    .filter(field => field.title && field.text)
+    .slice(0, 50);
+  return cleanFields.length ? { fields: cleanFields, updatedAt: new Date().toISOString() } : null;
 }
 
 function getWorkerTelegramNick(workerRow) {
   return String(workerRow?.telegram_nick || parseWorkerNoteMeta(workerRow?.note).telegramNick || '').trim().replace(/^@+/, '');
 }
 
-async function sendTelegramText(env, text) {
+async function sendTelegramText(env, text, chatIdOverride = '', options = {}) {
   const token = String(env.TELEGRAM_BOT_TOKEN || '').trim();
-  const chatId = String(env.TELEGRAM_CHAT_ID || '').trim();
+  const chatId = String(chatIdOverride || env.TELEGRAM_CHAT_ID || '').trim();
   if (!token || !chatId || !text) {
     return { ok: false, error: 'Telegram env missing or empty text' };
   }
+  const payload = {
+    chat_id: chatId,
+    text: String(text),
+    disable_web_page_preview: true,
+  };
+  if (options.parseMode) payload.parse_mode = options.parseMode;
   const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text: String(text),
-      disable_web_page_preview: true,
-    }),
+    body: JSON.stringify(payload),
   });
   const bodyText = await res.text().catch(() => '');
   return {
@@ -2014,11 +2743,19 @@ async function sendTelegramText(env, text) {
   };
 }
 
+function escapeTelegramHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 async function buildPlannerTelegramMessage(orderRow, sb, sbHeaders) {
   if (!orderRow?.id) return '';
   const names = [
     orderRow.responsible,
     orderRow.assistant,
+    orderRow.extra_assistant,
     orderRow.manager,
     getOrderAssignedSpecialist(orderRow, 'tatu'),
     getOrderAssignedSpecialist(orderRow, 'toning'),
@@ -2041,6 +2778,71 @@ async function buildPlannerTelegramMessage(orderRow, sb, sbHeaders) {
   return lines.join('\n');
 }
 
+async function buildCompletedTelegramMessage(orderRow, sb, sbHeaders) {
+  if (!orderRow?.id) return '';
+  const services = getCompletedOrderServicesText(orderRow);
+  const total = getCompletedOrderClientTotal(orderRow);
+  const lines = [
+    [orderRow.id, orderRow.date].filter(Boolean).join(', '),
+    orderRow.car ? `Автомобиль: ${orderRow.car}` : 'Автомобиль: —',
+    `Услуги: ${services || '—'}`,
+    `Общая сумма: ${total.toLocaleString('ru-RU')} ₴`,
+  ].filter(Boolean);
+  return lines.join('\n');
+}
+
+function getCompletedOrderServicesText(orderRow) {
+  const services = parseOrderServiceTypeNames(orderRow?.service_type);
+  if (Number(orderRow?.tatu) > 0) services.push('Тату');
+  if (Number(orderRow?.toning) > 0) services.push('Тонировка');
+  if (Number(orderRow?.extra_work) > 0) services.push('Доп. работы');
+  if (!services.length && orderRow?.only_sale) services.push('Продажа');
+  return [...new Set(services)].join(', ');
+}
+
+function getCompletedOrderClientTotal(orderRow) {
+  return (Number(orderRow?.total) || 0)
+    + (Number(orderRow?.income) || 0)
+    + (Number(orderRow?.delivery) || 0);
+}
+
+function parseOrderServiceTypeNames(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return [];
+  if (raw.startsWith('[') || raw.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(raw);
+      const rows = Array.isArray(parsed) ? parsed : [parsed];
+      return rows
+        .map(item => {
+          if (typeof item === 'string') return item.trim();
+          const name = String(item?.name || item?.label || item?.title || '').trim();
+          const qty = Number(item?.qty || item?.quantity || 0);
+          return name && qty > 1 ? `${name} x${qty}` : name;
+        })
+        .filter(Boolean);
+    } catch (e) {}
+  }
+  return raw
+    .split(',')
+    .map(item => item.trim())
+    .filter(Boolean);
+}
+
+function orderHasSpecialService(order, type) {
+  if (!order) return false;
+  if (type === 'tatu' && Number(order.tatu) > 0) return true;
+  if (type === 'toning' && Number(order.toning) > 0 && !order.toning_external) return true;
+  const services = parseOrderServiceTypeNames(order.service_type)
+    .map(item => String(item || '').trim().toLowerCase());
+  if (type === 'tatu') return services.some(item => item === 'тату' || item.startsWith('тату '));
+  if (type === 'toning') {
+    if (order.toning_external) return false;
+    return services.some(item => item === 'тонировка' || item.startsWith('тонировка '));
+  }
+  return false;
+}
+
 async function maybeNotifyPlannerOrder(previousOrder, savedOrder, sb, sbHeaders, env) {
   if (!savedOrder?.in_work) return;
   if (previousOrder?.in_work) return;
@@ -2048,6 +2850,27 @@ async function maybeNotifyPlannerOrder(previousOrder, savedOrder, sb, sbHeaders,
     const text = await buildPlannerTelegramMessage(savedOrder, sb, sbHeaders);
     if (text) await sendTelegramText(env, text);
   } catch (e) {}
+}
+
+async function maybeNotifyCompletedOrder(previousOrder, savedOrder, sb, sbHeaders, env) {
+  const becameWorkerDone = savedOrder?.worker_done === true && previousOrder?.worker_done !== true;
+  const becameStatusDone = savedOrder?.status_done === true && previousOrder?.status_done !== true;
+  if (!becameWorkerDone && !becameStatusDone) return;
+  const doneChatId = String(env.TELEGRAM_DONE_CHAT_ID || '').trim();
+  if (!doneChatId) return;
+  try {
+    const text = await buildCompletedTelegramMessage(savedOrder, sb, sbHeaders);
+    const phone = String(savedOrder?.phone || '').trim();
+    const message = phone
+      ? `<pre>${escapeTelegramHtml(text)}</pre>\nТелефон: ${escapeTelegramHtml(phone)}`
+      : `<pre>${escapeTelegramHtml(text)}</pre>`;
+    if (text) await sendTelegramText(env, message, doneChatId, { parseMode: 'HTML' });
+  } catch (e) {}
+}
+
+async function maybeNotifyOrderTransitions(previousOrder, savedOrder, sb, sbHeaders, env) {
+  await maybeNotifyPlannerOrder(previousOrder, savedOrder, sb, sbHeaders, env);
+  await maybeNotifyCompletedOrder(previousOrder, savedOrder, sb, sbHeaders, env);
 }
 
 function getWorkerPermissionPreset(systemRole) {
@@ -2087,9 +2910,25 @@ function getOrderAssignedSpecialist(order, type) {
   return token ? token.slice(prefix.length).trim() : '';
 }
 
+function getOrderAssignedSpecialistId(order, type) {
+  return type === 'tatu'
+    ? String(order?.tatu_responsible_worker_id || '').trim()
+    : String(order?.toning_responsible_worker_id || '').trim();
+}
+
+function isSessionAssignedSpecialist(order, type, session = {}, currentWorker = null) {
+  const assignedId = getOrderAssignedSpecialistId(order, type);
+  if (assignedId && currentWorker?.id && String(currentWorker.id) === assignedId) return true;
+  const assignedName = getOrderAssignedSpecialist(order, type);
+  if (!assignedName) return false;
+  return normalizeWorkerIdentityText(assignedName) === normalizeWorkerIdentityText(session.workerName)
+    || normalizeWorkerIdentityText(assignedName) === normalizeWorkerIdentityText(currentWorker?.name)
+    || normalizeWorkerIdentityText(assignedName) === normalizeWorkerIdentityText(currentWorker?.alias);
+}
+
 async function getWorkersIdentityRows(sb, sbHeaders) {
   const res = await fetch(
-    `${sb}/rest/v1/workers?select=name,alias,assistant,system_role&limit=1000`,
+    `${sb}/rest/v1/workers?select=id,name,alias,assistant,note,role,system_role&limit=1000`,
     { headers: sbHeaders }
   );
   const rows = await res.json().catch(() => []);
@@ -2120,12 +2959,13 @@ async function findWorkerByIdentity(label, sb, sbHeaders) {
 async function isOwnOrderForSession(order, session, sb, sbHeaders) {
   if (!order || !session?.workerName) return false;
   if (isOwnOrder(order, session.workerName)) return true;
-  if (getOrderAssignedSpecialist(order, 'tatu') === session.workerName) return true;
-  if (getOrderAssignedSpecialist(order, 'toning') === session.workerName) return true;
   const sessionWorker = await findWorkerByIdentity(session.workerName, sb, sbHeaders);
   if (!sessionWorker) return false;
+  if (isSessionAssignedSpecialist(order, 'tatu', session, sessionWorker)) return true;
+  if (isSessionAssignedSpecialist(order, 'toning', session, sessionWorker)) return true;
   return workerIdentityMatchesLabel(sessionWorker, order.responsible)
     || workerIdentityMatchesLabel(sessionWorker, order.assistant)
+    || workerIdentityMatchesLabel(sessionWorker, order.extra_assistant)
     || workerIdentityMatchesLabel(sessionWorker, getOrderAssignedSpecialist(order, 'tatu'))
     || workerIdentityMatchesLabel(sessionWorker, getOrderAssignedSpecialist(order, 'toning'));
 }
@@ -2145,6 +2985,95 @@ async function getSalaryByWorkerOrder(workerName, orderId, sb, sbHeaders) {
   );
   const rows = await res.json().catch(() => []);
   return Array.isArray(rows) && rows.length ? rows[0] : null;
+}
+
+function isAttendanceSalaryBody(body) {
+  return !!body
+    && String(body.order_id || '') === 'Выход в работу'
+    && Number(body.amount) > 0
+    && !!String(body.worker_name || '').trim();
+}
+
+async function getActiveAttendanceSalary(workerName, date, sb, sbHeaders) {
+  if (!workerName || !date) return null;
+  const res = await fetch(
+    `${sb}/rest/v1/worker_salaries?worker_name=eq.${encodeURIComponent(workerName)}&date=eq.${encodeURIComponent(date)}&order=created_at.desc&limit=100`,
+    { headers: sbHeaders }
+  );
+  const rows = await res.json().catch(() => []);
+  const list = Array.isArray(rows) ? rows : [];
+  const attendanceRows = list.filter(row =>
+    String(row?.order_id || '') === 'Выход в работу' &&
+    Number(row?.amount) > 0
+  );
+  if (!attendanceRows.length) return null;
+  const activeTotal = list.reduce((sum, row) => {
+    const amount = Number(row?.amount) || 0;
+    const orderId = String(row?.order_id || '');
+    const comment = String(row?.comment || '');
+    if (orderId === 'Выход в работу' && amount > 0) return sum + amount;
+    if (amount < 0 && orderId.startsWith('Отмена ЗП') && comment.includes('Отмена выхода в работу')) return sum + amount;
+    return sum;
+  }, 0);
+  return activeTotal > 0 ? attendanceRows[0] : null;
+}
+
+async function createSalaryReversalRow(row, session, sb, sbHeaders, reason = 'Отмена записи ЗП') {
+  if (!row?.id) throw new Error('Salary not found');
+  const amount = Number(row.amount) || 0;
+  if (!amount) return [];
+  const payload = {
+    worker_name: row.worker_name,
+    worker_id: row.worker_id || null,
+    date: new Date().toISOString().slice(0, 10),
+    amount: -amount,
+    order_id: `Отмена ЗП · ${row.order_id || row.id}`,
+    entry_type: 'manual',
+    comment: `${reason}: ${row.comment || row.order_id || row.id || ''}`.trim(),
+    created_by: session?.workerName || 'system',
+  };
+  if (!payload.worker_id && payload.worker_name) {
+    const worker = await getWorkerByName(payload.worker_name, sb, sbHeaders);
+    if (worker?.id) payload.worker_id = worker.id;
+  }
+  const res = await fetch(`${sb}/rest/v1/worker_salaries`, {
+    method: 'POST',
+    headers: sbHeaders,
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json().catch(() => []);
+  if (!res.ok) throw new Error(data?.message || 'Failed to create salary reversal');
+  return data;
+}
+
+async function createSalaryCorrectionRow(row, nextAmount, reason, session, sb, sbHeaders) {
+  if (!row?.id) throw new Error('Salary not found');
+  const currentAmount = Number(row.amount) || 0;
+  const amount = Number(nextAmount) || 0;
+  const delta = amount - currentAmount;
+  if (!delta) return [row];
+  const payload = {
+    worker_name: row.worker_name,
+    worker_id: row.worker_id || null,
+    date: new Date().toISOString().slice(0, 10),
+    amount: delta,
+    order_id: `Коррекция ЗП · ${row.order_id || row.id}`,
+    entry_type: 'manual',
+    comment: String(reason || `Коррекция ЗП: было ${currentAmount}, стало ${amount}`).trim(),
+    created_by: session?.workerName || 'owner',
+  };
+  if (!payload.worker_id && payload.worker_name) {
+    const worker = await getWorkerByName(payload.worker_name, sb, sbHeaders);
+    if (worker?.id) payload.worker_id = worker.id;
+  }
+  const res = await fetch(`${sb}/rest/v1/worker_salaries`, {
+    method: 'POST',
+    headers: sbHeaders,
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json().catch(() => []);
+  if (!res.ok) throw new Error(data?.message || 'Failed to create salary correction');
+  return data;
 }
 
 function isLockedOrderSalaryId(orderId) {
@@ -2185,6 +3114,20 @@ async function getCashById(id, sb, sbHeaders) {
   const res = await fetch(`${sb}/rest/v1/cash_log?id=eq.${encodeURIComponent(id)}&limit=1`, { headers: sbHeaders });
   const rows = await res.json().catch(() => []);
   return Array.isArray(rows) && rows.length ? rows[0] : null;
+}
+
+function getCashLedgerSourceKey(rowOrBody = {}) {
+  return String(rowOrBody?.source_key || rowOrBody?.fop_source_key || rowOrBody?.source_id || '').trim();
+}
+
+function cashSourceEqFilter(sourceKey) {
+  const key = encodeURIComponent(String(sourceKey || '').trim());
+  return `or=(source_key.eq.${key},fop_source_key.eq.${key})`;
+}
+
+function cashSourceLikeFilter(sourcePattern) {
+  const pattern = encodeURIComponent(String(sourcePattern || '').trim());
+  return `or=(source_key.like.${pattern},fop_source_key.like.${pattern})`;
 }
 
 function getPaymentMethodFromCashSourceKey(sourceKey) {
@@ -2228,18 +3171,9 @@ function getCashPaymentMethod(rowOrBody = {}) {
   return String(
     rowOrBody?.payment_method
     || rowOrBody?.manual_payment_method
-    || getPaymentMethodFromCashSourceKey(rowOrBody?.fop_source_key)
+    || getPaymentMethodFromCashSourceKey(getCashLedgerSourceKey(rowOrBody))
     || ''
   ).trim();
-}
-
-function getCashApprovalOwner(method = '', cashAccount = 'cash') {
-  // Keep legacy heuristic if ref_payment_methods is not available.
-  const normalizedMethod = normalizeCashPaymentMethod(method);
-  const normalizedAccount = String(cashAccount || 'cash').trim().toLowerCase();
-  if (normalizedAccount === 'fop') return 'Oleg Starshiy';
-  if (normalizedMethod && normalizedMethod !== '🪙 Наличка') return 'Maksim';
-  return null;
 }
 
 function deriveCashSourceType(body = {}) {
@@ -2247,7 +3181,7 @@ function deriveCashSourceType(body = {}) {
   if (body?.manual_payment === true) return 'manual';
   if (parseExpenseCommentMeta(body?.comment)) return 'expense';
   if (isCurrencyComment(body?.comment)) return 'exchange';
-  if (String(body?.fop_source_key || '').startsWith('order:')) return 'order';
+  if (getCashLedgerSourceKey(body).startsWith('order:')) return 'order';
   if (String(body?.comment || '').startsWith('Выплата дропшипперу ') || String(body?.comment || '').startsWith('Корректировка дропшиппера ')) return 'dropshipper';
   if (String(body?.comment || '').startsWith('Снятие ЗП') || String(body?.comment || '').startsWith('снял ')) return 'salary';
   return 'manual';
@@ -2274,6 +3208,47 @@ function isCurrencyComment(comment = '') {
   return String(comment || '').startsWith('FXUSD|');
 }
 
+function parseCurrencyComment(comment = '') {
+  const raw = String(comment || '');
+  if (!raw.startsWith('FXUSD|')) return null;
+  const parts = raw.split('|');
+  const data = {};
+  for (const part of parts) {
+    const idx = part.indexOf('=');
+    if (idx === -1) continue;
+    data[part.slice(0, idx)] = part.slice(idx + 1);
+  }
+  const usdAmount = Number(data.usd) || 0;
+  if (!usdAmount) return null;
+  return {
+    usdAmount,
+    rate: Number(data.rate) || 0,
+    uahAmount: Number(data.uah) || 0,
+    note: decodeURIComponent(String(data.note || '')),
+  };
+}
+
+function buildCurrencyComment({ usdAmount, rate = 0, uahAmount = 0, note = '' } = {}) {
+  return [
+    'FXUSD|usd=' + String(Number(usdAmount) || 0),
+    'rate=' + String(Number(rate) || 0),
+    'uah=' + String(Number(uahAmount) || 0),
+    'note=' + encodeURIComponent(String(note || '').trim()),
+  ].join('|');
+}
+
+function buildReversedCurrencyCashComment(comment = '', reason = '') {
+  const parsed = parseCurrencyComment(comment);
+  if (!parsed) return '';
+  const note = ['Отмена', parsed.note, reason].filter(Boolean).join(': ');
+  return buildCurrencyComment({
+    usdAmount: -parsed.usdAmount,
+    rate: parsed.rate,
+    uahAmount: parsed.uahAmount,
+    note,
+  });
+}
+
 function normalizePaymentMethodType(value) {
   const normalized = String(value || '').trim().toLowerCase();
   return ['cash', 'card', 'fop'].includes(normalized) ? normalized : '';
@@ -2282,26 +3257,60 @@ function normalizePaymentMethodType(value) {
 async function buildPaymentMethodRoute(methodLabel, fallbackWorkerName, sb, sbHeaders) {
   const label = normalizeCashPaymentMethod(methodLabel);
   const targetWorkerName = String(fallbackWorkerName || '').trim();
+  const targetWorker = targetWorkerName ? await getWorkerByName(targetWorkerName, sb, sbHeaders).catch(() => null) : null;
   if (!label) {
-    return { worker_name: targetWorkerName, cash_account: 'cash', requires_confirmation: false };
+    return { worker_name: targetWorkerName, worker_id: targetWorker?.id || null, cash_account: 'cash', requires_confirmation: false };
   }
   if (label === '🪙 Наличка') {
-    return { worker_name: targetWorkerName, cash_account: 'cash', requires_confirmation: false };
+    return { worker_name: targetWorkerName, worker_id: targetWorker?.id || null, cash_account: 'cash', requires_confirmation: false };
   }
   const row = await findPaymentMethodRowByLabel(label, sb, sbHeaders);
   if (!row) {
     // Unknown method: treat as confirmable card by default (safe).
-    return { worker_name: targetWorkerName, cash_account: 'cash', requires_confirmation: true };
+    return { worker_name: targetWorkerName, worker_id: targetWorker?.id || null, cash_account: 'cash', requires_confirmation: true };
   }
   const type = normalizePaymentMethodType(row.method_type);
   if (type === 'cash') {
-    return { worker_name: targetWorkerName, cash_account: 'cash', requires_confirmation: false };
+    return { worker_name: targetWorkerName, worker_id: targetWorker?.id || null, cash_account: 'cash', requires_confirmation: false };
   }
-  const owner = String(row.worker_name || '').trim() || targetWorkerName;
+  const resolvedOwner = row.worker_id
+    ? await getWorkerById(String(row.worker_id).trim(), sb, sbHeaders).catch(() => null)
+    : (row.worker_name ? await getWorkerByName(String(row.worker_name).trim(), sb, sbHeaders).catch(() => null) : null);
+  const owner = String(resolvedOwner?.name || row.worker_name || '').trim() || targetWorkerName;
   return {
     worker_name: owner,
+    worker_id: resolvedOwner?.id || row.worker_id || null,
     cash_account: type === 'fop' ? 'fop' : 'cash',
-    requires_confirmation: true,
+    requires_confirmation: row.requires_confirmation !== false,
+    payment_type: type === 'fop' ? 'transfer' : 'card',
+  };
+}
+
+async function resolveOrderPaymentCashRoute({ order = null, payment = null, paymentType = 'client', method = '', fallbackWorkerName = '', sb, sbHeaders } = {}) {
+  const normalized = normalizeCashPaymentMethod(method || payment?.method);
+  let routeFallbackWorkerName = String(fallbackWorkerName || order?.responsible || '').trim();
+  let reason = 'payment method route';
+
+  if (isCashPaymentMethodForSync(normalized) && payment?.cashWorker) {
+    routeFallbackWorkerName = String(payment.cashWorker || '').trim() || routeFallbackWorkerName;
+    reason = 'owner selected cash worker';
+  }
+
+  if (paymentType === 'dropshipper' && isCashPaymentMethodForSync(normalized)) {
+    const dropshipperWorker = await getDropshipperCashWorker(order?.drop_shipper || order?.dropshipper, sb, sbHeaders).catch(() => null);
+    if (dropshipperWorker?.name) {
+      routeFallbackWorkerName = String(dropshipperWorker.name || '').trim() || routeFallbackWorkerName;
+      reason = 'dropshipper cash worker';
+    }
+  }
+
+  const route = await buildPaymentMethodRoute(normalized, routeFallbackWorkerName, sb, sbHeaders);
+  return {
+    ...route,
+    method: normalized,
+    payment_type_key: paymentType,
+    route_fallback_worker_name: routeFallbackWorkerName,
+    route_reason: reason,
   };
 }
 
@@ -2310,7 +3319,8 @@ function buildStructuredCashFields(body = {}) {
   const paymentMethod = getCashPaymentMethod(body);
   const expenseMeta = parseExpenseCommentMeta(body?.comment);
   const sourceType = deriveCashSourceType(body);
-  const orderId = String(body?.order_id || extractOrderIdFromSourceKey(body?.fop_source_key) || '').trim() || null;
+  const sourceKey = getCashLedgerSourceKey(body);
+  const orderId = String(body?.order_id || extractOrderIdFromSourceKey(sourceKey) || '').trim() || null;
   const confirmable = cashAccount === 'fop' || isConfirmableCardCashMethod(paymentMethod);
   const approvalStatus = body?.approval_status
     ? String(body.approval_status).trim()
@@ -2322,6 +3332,7 @@ function buildStructuredCashFields(body = {}) {
   if (!paymentType) {
     if (expenseMeta) paymentType = 'expense';
     else if (isCurrencyComment(body?.comment)) paymentType = 'transfer';
+    else if (cashAccount === 'fop') paymentType = 'transfer';
     else if (isCashPaymentMethodForSync(paymentMethod)) paymentType = 'cash';
     else if (paymentMethod) paymentType = 'card';
     else paymentType = 'cash';
@@ -2329,13 +3340,18 @@ function buildStructuredCashFields(body = {}) {
 
   return {
     cash_owner: String(body?.cash_owner || body?.worker_name || '').trim() || null,
+    worker_id: body?.worker_id || null,
+    cash_owner_id: body?.cash_owner_id || body?.worker_id || null,
     account_type: cashAccount,
     payment_type: paymentType,
     payment_method: paymentMethod || null,
     approval_status: approvalStatus,
-    approval_by: body?.approval_by !== undefined ? (String(body.approval_by || '').trim() || null) : getCashApprovalOwner(paymentMethod, cashAccount),
+    approval_by: body?.approval_by !== undefined
+      ? (String(body.approval_by || '').trim() || null)
+      : (approvalStatus === 'pending' ? (String(body?.cash_owner || body?.worker_name || '').trim() || null) : null),
+    approval_by_id: body?.approval_by_id || (approvalStatus === 'pending' ? (body?.cash_owner_id || body?.worker_id || null) : null),
     source_type: sourceType,
-    source_id: String(body?.source_id || body?.fop_source_key || orderId || '').trim() || null,
+    source_id: String(body?.source_id || sourceKey || orderId || '').trim() || null,
     order_id: orderId,
     expense_category: String(body?.expense_category || expenseMeta?.category || '').trim() || null,
     warehouse_name: String(body?.warehouse_name || expenseMeta?.warehouse || '').trim() || null,
@@ -2345,11 +3361,76 @@ function buildStructuredCashFields(body = {}) {
 function isConfirmableCardCashRow(row) {
   const cashAccount = String(row?.cash_account || '').trim().toLowerCase();
   if (cashAccount !== 'cash') return false;
-  return isConfirmableCardCashMethod(getPaymentMethodFromCashSourceKey(row?.fop_source_key));
+  return isConfirmableCardCashMethod(getPaymentMethodFromCashSourceKey(getCashLedgerSourceKey(row)));
 }
 
 function isOrderDerivedCashEntry(body) {
-  return String(body?.fop_source_key || '').startsWith('order:');
+  return getCashLedgerSourceKey(body).startsWith('order:');
+}
+
+function isActiveCashLedgerRow(row) {
+  if (!row || String(row.deleted_at || '').trim()) return false;
+  const status = String(row.ledger_status || 'posted').trim().toLowerCase();
+  return status !== 'voided' && status !== 'reversed';
+}
+
+function chooseCanonicalOrderCashEntry(rows = []) {
+  return [...rows].sort((a, b) => {
+    const aConfirmed = a?.fop_confirmed === true || String(a?.approval_status || '') === 'confirmed';
+    const bConfirmed = b?.fop_confirmed === true || String(b?.approval_status || '') === 'confirmed';
+    if (aConfirmed !== bConfirmed) return aConfirmed ? -1 : 1;
+    const at = a?.created_at ? new Date(a.created_at).getTime() : 0;
+    const bt = b?.created_at ? new Date(b.created_at).getTime() : 0;
+    if (at !== bt) return at - bt;
+    return String(a?.id || '').localeCompare(String(b?.id || ''));
+  })[0] || null;
+}
+
+async function voidCashLedgerRow(id, reason, sb, sbHeaders) {
+  if (!id) return;
+  await fetch(`${sb}/rest/v1/cash_log?id=eq.${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: sbHeaders,
+    body: JSON.stringify({
+      ledger_status: 'voided',
+      reversal_reason: reason,
+      reversed_by: 'system',
+      reversed_at: new Date().toISOString(),
+    }),
+  }).catch(() => {});
+}
+
+async function voidDuplicateOrderCashEntries(rows = [], sb, sbHeaders, debug = null) {
+  const activeRows = (rows || []).filter(isActiveCashLedgerRow);
+  const groups = new Map();
+  activeRows.forEach(row => {
+    const key = getCashLedgerSourceKey(row);
+    if (!key) return;
+    const list = groups.get(key) || [];
+    list.push(row);
+    groups.set(key, list);
+  });
+
+  const keepIds = new Set();
+  for (const [key, list] of groups.entries()) {
+    const canonical = chooseCanonicalOrderCashEntry(list);
+    if (!canonical?.id) continue;
+    keepIds.add(String(canonical.id));
+    for (const row of list) {
+      if (!row?.id || String(row.id) === String(canonical.id)) continue;
+      await voidCashLedgerRow(row.id, `duplicate order cash source: ${key}`, sb, sbHeaders);
+      debug?.push?.({
+        type: 'duplicate-voided',
+        sourceKey: key,
+        keptId: canonical.id,
+        voidedId: row.id,
+        amount: Number(row.amount) || 0,
+        cashOwner: row.cash_owner || row.worker_name || null,
+      });
+    }
+  }
+
+  return activeRows.filter(row => !row?.id || keepIds.has(String(row.id)) || !getCashLedgerSourceKey(row));
 }
 
 function normalizeOrderSaveCashEntry(entry) {
@@ -2360,14 +3441,28 @@ function normalizeOrderSaveCashEntry(entry) {
   if (!workerName || !amount || !comment) return null;
   const normalized = {
     worker_name: workerName,
+    worker_id: entry.worker_id || null,
     amount,
     comment,
-    cash_account: 'cash',
-    fop_confirmed: false,
-    fop_source_key: null,
-    fop_date: null,
-    manual_payment: false,
-    manual_payment_method: null,
+    cash_account: String(entry.cash_account || entry.account_type || 'cash').trim().toLowerCase(),
+    fop_confirmed: entry.fop_confirmed === true,
+    fop_source_key: entry.fop_source_key || entry.source_key || entry.source_id || null,
+    fop_date: entry.fop_date || null,
+    manual_payment: entry.manual_payment === true,
+    manual_payment_method: entry.manual_payment_method || entry.payment_method || null,
+    cash_owner: entry.cash_owner || workerName,
+    cash_owner_id: entry.cash_owner_id || entry.worker_id || null,
+    account_type: entry.account_type || entry.cash_account || 'cash',
+    payment_method: entry.payment_method || entry.manual_payment_method || null,
+    payment_type: entry.payment_type || null,
+    approval_status: entry.approval_status || null,
+    approval_by: entry.approval_by || null,
+    approval_by_id: entry.approval_by_id || null,
+    source_type: entry.source_type || null,
+    source_id: entry.source_id || entry.source_key || entry.fop_source_key || null,
+    order_id: entry.order_id || null,
+    source_key: getCashLedgerSourceKey(entry) || null,
+    ledger_status: 'posted',
   };
   return { ...normalized, ...buildStructuredCashFields(normalized) };
 }
@@ -2387,41 +3482,72 @@ function buildOrderPaymentSourceKey(orderId, method, paymentType = 'client', pay
   ].join('|');
 }
 
+function ensureUniqueOrderCashEntrySourceKeys(entries = []) {
+  const seen = new Map();
+  return (entries || []).map(entry => {
+    const baseKey = getCashLedgerSourceKey(entry);
+    if (!baseKey) return entry;
+    const nextCount = (seen.get(baseKey) || 0) + 1;
+    seen.set(baseKey, nextCount);
+    if (nextCount === 1) return entry;
+    const uniqueKey = `${baseKey}|seq:${nextCount}`;
+    const nextEntry = {
+      ...entry,
+      fop_source_key: uniqueKey,
+      source_key: uniqueKey,
+      source_id: uniqueKey,
+    };
+    return { ...nextEntry, ...buildStructuredCashFields(nextEntry) };
+  });
+}
+
+function pushDuplicateSourceKeyDebug(beforeEntries = [], afterEntries = [], debug = null) {
+  if (!debug?.push) return;
+  beforeEntries.forEach((entry, index) => {
+    const beforeKey = getCashLedgerSourceKey(entry);
+    const afterKey = getCashLedgerSourceKey(afterEntries?.[index]);
+    if (beforeKey && afterKey && beforeKey !== afterKey) {
+      debug.push({
+        type: 'source-key-sequenced',
+        originalSourceKey: beforeKey,
+        sourceKey: afterKey,
+        reason: 'duplicate payment source key inside same order',
+      });
+    }
+  });
+}
+
 function isCashPaymentMethodForSync(method) {
   return normalizeCashPaymentMethod(method) === '🪙 Наличка';
 }
 
-function isFopPaymentMethodForSync(method) {
-  return normalizeCashPaymentMethod(method) === '📂 БЕЗНАЛ БАБЕНКО';
+function normalizeOrderCashSyncPaymentTypes(value) {
+  if (!Array.isArray(value) || !value.length) return null;
+  const allowed = new Set(['client', 'supplier', 'dropshipper']);
+  const types = value
+    .map(item => String(item || '').trim().toLowerCase())
+    .filter(item => allowed.has(item));
+  return types.length ? new Set(types) : null;
 }
 
-function isSashaCardPaymentMethodForSync(method) {
-  return normalizeCashPaymentMethod(method) === '👤 Шепель Александр 💳 4149 4975 1422 9980 (PRIVAT)';
+function orderCashSyncIncludes(paymentTypes, type) {
+  return !paymentTypes || paymentTypes.has(type);
 }
 
-function isOlegCardPaymentMethodForSync(method) {
-  return normalizeCashPaymentMethod(method) === '👤 Бабенко Олег 💳 5457 0825 0103 4743 (PRIVAT)';
-}
-
-function isOwnerCardPaymentMethodForSync(method) {
-  return [
-    '👤 Киртока Максим 💳 4441 1144 6035 9811 (MONO)',
-    '👤 Киртока Анастасия 💳 4149 6090 2872 4237 (PRIVAT)',
-  ].includes(normalizeCashPaymentMethod(method));
-}
-
-function getOrderPaymentCashRouteForSync(method, fallbackWorkerName = '') {
-  const normalized = normalizeCashPaymentMethod(method);
-  const targetWorkerName = String(fallbackWorkerName || '').trim();
-  if (isCashPaymentMethodForSync(normalized)) {
-    return { worker_name: targetWorkerName, cash_account: 'cash', fop_confirmed: false };
+function getOrderPaymentTypeFromSourceKey(sourceKey = '') {
+  const match = String(sourceKey || '').match(/(?:^|\|)type:([^|]+)/);
+  if (!match) return '';
+  try {
+    return decodeURIComponent(match[1]);
+  } catch (e) {
+    return match[1];
   }
-  // Legacy fallback (will be overridden by dynamic lookup in buildOrderDerivedCashEntries).
-  return { worker_name: targetWorkerName, cash_account: 'cash', fop_confirmed: false };
 }
 
-async function buildOrderDerivedCashEntries(order, sb, sbHeaders) {
+async function buildOrderDerivedCashEntries(order, sb, sbHeaders, options = {}) {
   if (!order?.id) return [];
+  const paymentTypes = options?.paymentTypes || null;
+  const debug = options?.debug || null;
   const entries = [];
   const fallbackWorkerName = String(order?.responsible || '').trim();
   const orderId = order.id;
@@ -2432,9 +3558,27 @@ async function buildOrderDerivedCashEntries(order, sb, sbHeaders) {
   const appendEntry = async (payment, paymentType) => {
     const amount = Number(payment?.amount) || 0;
     const method = normalizeCashPaymentMethod(payment?.method);
-    if (!amount || !method || isCashPaymentMethodForSync(method)) return;
-    const route = await buildPaymentMethodRoute(method, fallbackWorkerName, sb, sbHeaders);
-    if (!route.worker_name) return;
+    if (payment?.adjustment === true) {
+      debug?.push?.({ type: 'payment-skipped', reason: 'adjustment', orderId, paymentType, payment });
+      return;
+    }
+    if (!amount || !method) {
+      debug?.push?.({ type: 'payment-skipped', reason: !amount ? 'empty amount' : 'empty method', orderId, paymentType, payment });
+      return;
+    }
+    const route = await resolveOrderPaymentCashRoute({
+      order,
+      payment,
+      paymentType,
+      method,
+      fallbackWorkerName,
+      sb,
+      sbHeaders,
+    });
+    if (!route.worker_name) {
+      debug?.push?.({ type: 'payment-skipped', reason: 'no route worker', orderId, paymentType, method, routeFallbackWorkerName: route.route_fallback_worker_name, payment });
+      return;
+    }
     const paymentDate = String(payment?.date || orderDate || '').trim();
     const dateLabel = paymentDate
       ? new Date(`${paymentDate}T00:00:00`).toLocaleDateString('ru-RU')
@@ -2443,22 +3587,50 @@ async function buildOrderDerivedCashEntries(order, sb, sbHeaders) {
     const actionLabel = paymentType === 'supplier'
       ? 'Оплата поставщику'
       : (paymentType === 'dropshipper' ? 'Выплата дропшипперу' : 'Оплата клиента');
+    const sourceKey = buildOrderPaymentSourceKey(orderId, method, paymentType, payment);
     entries.push({
       worker_name: route.worker_name,
+      cash_owner: route.worker_name,
+      worker_id: route.worker_id || null,
+      cash_owner_id: route.worker_id || null,
       amount: signedAmount,
       comment: `${actionLabel} ${method} ${orderId}, ${dateLabel}, клиент: ${clientLabel}, авто: ${carLabel}`,
       cash_account: route.cash_account,
+      account_type: route.cash_account,
+      payment_method: method,
+      payment_type: isCashPaymentMethodForSync(method) ? 'cash' : (route.payment_type || 'card'),
+      approval_status: route.requires_confirmation ? 'pending' : 'not_required',
+      approval_by: route.requires_confirmation ? route.worker_name : null,
+      approval_by_id: route.requires_confirmation ? (route.worker_id || null) : null,
       fop_confirmed: false,
-      fop_source_key: buildOrderPaymentSourceKey(orderId, method, paymentType, payment),
+      fop_source_key: sourceKey,
       fop_date: paymentDate || null,
       manual_payment: false,
       manual_payment_method: null,
+      source_type: 'order',
       order_id: orderId,
+      ledger_status: 'posted',
     });
+    entries[entries.length - 1].source_key = entries[entries.length - 1].fop_source_key;
     entries[entries.length - 1] = {
       ...entries[entries.length - 1],
       ...buildStructuredCashFields(entries[entries.length - 1]),
     };
+    debug?.push?.({
+      type: 'payment-routed',
+      orderId,
+      paymentType,
+      method,
+      amount: signedAmount,
+      sourceKey,
+      selectedCashWorker: String(payment?.cashWorker || '').trim() || null,
+      routeFallbackWorker: route.route_fallback_worker_name || null,
+      cashOwner: route.worker_name,
+      cashOwnerId: route.worker_id || null,
+      account: route.cash_account,
+      approvalStatus: entries[entries.length - 1].approval_status,
+      reason: route.route_reason || 'payment method route',
+    });
   };
 
   // NOTE: This function is called in sync flows where sb/sbHeaders are in scope.
@@ -2466,19 +3638,27 @@ async function buildOrderDerivedCashEntries(order, sb, sbHeaders) {
   const clientPayments = Array.isArray(order.client_payments) ? order.client_payments : [];
   const supplierPayments = Array.isArray(order.supplier_payments) ? order.supplier_payments : [];
   const dropshipperPayments = Array.isArray(order.drop_shipper_payments) ? order.drop_shipper_payments : [];
-  for (const payment of clientPayments) {
-    // eslint-disable-next-line no-await-in-loop
-    await appendEntry(payment, 'client');
+  if (orderCashSyncIncludes(paymentTypes, 'client')) {
+    for (const payment of clientPayments) {
+      // eslint-disable-next-line no-await-in-loop
+      await appendEntry(payment, 'client');
+    }
   }
-  for (const payment of supplierPayments) {
-    // eslint-disable-next-line no-await-in-loop
-    await appendEntry(payment, 'supplier');
+  if (orderCashSyncIncludes(paymentTypes, 'supplier')) {
+    for (const payment of supplierPayments) {
+      // eslint-disable-next-line no-await-in-loop
+      await appendEntry(payment, 'supplier');
+    }
   }
-  for (const payment of dropshipperPayments) {
-    // eslint-disable-next-line no-await-in-loop
-    await appendEntry(payment, 'dropshipper');
+  if (orderCashSyncIncludes(paymentTypes, 'dropshipper')) {
+    for (const payment of dropshipperPayments) {
+      // eslint-disable-next-line no-await-in-loop
+      await appendEntry(payment, 'dropshipper');
+    }
   }
-  return entries;
+  const uniqueEntries = ensureUniqueOrderCashEntrySourceKeys(entries);
+  pushDuplicateSourceKeyDebug(entries, uniqueEntries, debug);
+  return uniqueEntries;
 }
 
 async function rollbackOrderSaveWithCash({ sb, sbHeaders, orderId, isNew, rollbackOrder, savedCashEntries }) {
@@ -2511,12 +3691,86 @@ async function rollbackOrderSaveWithCash({ sb, sbHeaders, orderId, isNew, rollba
   }
 }
 
-async function syncOrderFopCashEntries(order, sb, sbHeaders) {
-  await deleteUnconfirmedOrderFopCashEntries(order?.id, sb, sbHeaders);
-  if (!order?.id || order?.is_cancelled || !order?.in_work) return [];
-  const entries = await buildOrderDerivedCashEntries(order, sb, sbHeaders);
-  if (!entries.length) return [];
-  await fetch(`${sb}/rest/v1/cash_log?on_conflict=fop_source_key`, {
+async function syncOrderFopCashEntries(order, sb, sbHeaders, options = {}) {
+  const orderId = order?.id;
+  if (!orderId) return [];
+  const paymentTypes = options?.paymentTypes || null;
+  const debug = options?.debug || null;
+  const existingRaw = await fetchOrderDerivedCashEntries(orderId, sb, sbHeaders);
+  const existing = await voidDuplicateOrderCashEntries(existingRaw, sb, sbHeaders, debug);
+  const legacy = await fetchLegacyOrderDerivedCashEntries(orderId, sb, sbHeaders);
+  debug?.push?.({
+    type: 'sync-start',
+    orderId,
+    paymentTypes: paymentTypes ? [...paymentTypes] : ['client', 'supplier', 'dropshipper'],
+    existingRows: existingRaw.length,
+    activeRowsAfterDedupe: existing.length,
+    legacyRows: legacy.length,
+  });
+  if (!order?.id) {
+    return [];
+  }
+  const entries = await buildOrderDerivedCashEntries(order, sb, sbHeaders, { paymentTypes, debug });
+  const nextKeys = new Set(entries.map(entry => getCashLedgerSourceKey(entry)).filter(Boolean));
+  const existingByKey = new Map((existing || []).map(entry => [getCashLedgerSourceKey(entry), entry]).filter(([key]) => key));
+  const legacyBuckets = new Map();
+  (legacy || []).forEach(entry => {
+    const key = buildLegacyOrderDerivedCashMatchKey(entry);
+    if (!key) return;
+    const list = legacyBuckets.get(key) || [];
+    list.push(entry);
+    legacyBuckets.set(key, list);
+  });
+  for (const oldEntry of existing || []) {
+    const key = getCashLedgerSourceKey(oldEntry);
+    if (!key || nextKeys.has(key)) continue;
+    if (paymentTypes && !paymentTypes.has(getOrderPaymentTypeFromSourceKey(key))) continue;
+    await voidCashLedgerRow(oldEntry.id, `order payment removed: ${key}`, sb, sbHeaders);
+    debug?.push?.({ type: 'entry-voided', reason: 'payment removed from order', orderId, id: oldEntry.id, sourceKey: key, amount: Number(oldEntry.amount) || 0 });
+  }
+  if (!entries.length) {
+    debug?.push?.({ type: 'sync-finish', orderId, upsertedRows: 0, reason: 'no derived entries' });
+    return [];
+  }
+  for (const entry of entries) {
+    const key = getCashLedgerSourceKey(entry);
+    if (!key || existingByKey.has(key)) continue;
+    const legacyKey = buildLegacyOrderDerivedCashMatchKey(entry);
+    const legacyMatches = legacyBuckets.get(legacyKey) || [];
+    const legacyEntry = legacyMatches.shift();
+    if (!legacyEntry?.id) continue;
+    legacyBuckets.set(legacyKey, legacyMatches);
+    await fetch(`${sb}/rest/v1/cash_log?id=eq.${encodeURIComponent(legacyEntry.id)}`, {
+      method: 'PATCH',
+      headers: sbHeaders,
+      body: JSON.stringify({
+        fop_source_key: entry.fop_source_key,
+        source_key: entry.source_key || entry.fop_source_key,
+        fop_date: entry.fop_date || legacyEntry.fop_date || null,
+        payment_method: entry.payment_method || legacyEntry.payment_method || null,
+        payment_type: entry.payment_type || legacyEntry.payment_type || null,
+        account_type: entry.account_type || legacyEntry.account_type || legacyEntry.cash_account || 'cash',
+        cash_owner: entry.cash_owner || legacyEntry.cash_owner || null,
+        cash_owner_id: entry.cash_owner_id || legacyEntry.cash_owner_id || null,
+        worker_id: entry.worker_id || legacyEntry.worker_id || null,
+        source_type: 'order',
+        source_id: entry.source_id || entry.fop_source_key || null,
+        order_id: orderId,
+      }),
+    }).catch(() => {});
+    existingByKey.set(key, { ...legacyEntry, source_key: key, fop_source_key: key });
+  }
+  entries.forEach(entry => {
+    const oldEntry = existingByKey.get(getCashLedgerSourceKey(entry));
+    if (!oldEntry) return;
+    if (oldEntry.fop_confirmed === true || oldEntry.approval_status === 'confirmed') {
+      entry.fop_confirmed = true;
+      entry.approval_status = 'confirmed';
+      entry.approval_by = oldEntry.approval_by || entry.approval_by || null;
+      entry.approval_by_id = oldEntry.approval_by_id || entry.approval_by_id || null;
+    }
+  });
+  await fetch(`${sb}/rest/v1/cash_log?on_conflict=source_key`, {
     method: 'POST',
     headers: {
       ...sbHeaders,
@@ -2524,7 +3778,49 @@ async function syncOrderFopCashEntries(order, sb, sbHeaders) {
     },
     body: JSON.stringify(entries),
   });
+  debug?.push?.({ type: 'sync-finish', orderId, upsertedRows: entries.length, sourceKeys: entries.map(entry => getCashLedgerSourceKey(entry)).filter(Boolean) });
   return [];
+}
+
+async function fetchOrderDerivedCashEntries(orderId, sb, sbHeaders) {
+  if (!orderId) return [];
+  const prefixes = [...getOrderSourcePrefixes(orderId), `order:${orderId}|*`];
+  const rows = [];
+  const seen = new Set();
+  for (const sourcePrefix of prefixes) {
+    const res = await fetch(
+      `${sb}/rest/v1/cash_log?${cashSourceLikeFilter(sourcePrefix)}&limit=1000`,
+      { headers: sbHeaders }
+    );
+    const data = await res.json().catch(() => []);
+    (Array.isArray(data) ? data : []).forEach(row => {
+      const id = String(row?.id || '');
+      if (!id || seen.has(id)) return;
+      seen.add(id);
+      rows.push(row);
+    });
+  }
+  return rows;
+}
+
+async function fetchLegacyOrderDerivedCashEntries(orderId, sb, sbHeaders) {
+  if (!orderId) return [];
+  const res = await fetch(
+    `${sb}/rest/v1/cash_log?order_id=eq.${encodeURIComponent(orderId)}&source_type=eq.order&fop_source_key=is.null&limit=1000`,
+    { headers: sbHeaders }
+  );
+  const data = await res.json().catch(() => []);
+  return Array.isArray(data) ? data : [];
+}
+
+function buildLegacyOrderDerivedCashMatchKey(entry) {
+  if (!entry) return '';
+  const method = normalizeCashPaymentMethod(entry.payment_method || entry.manual_payment_method || getPaymentMethodFromCashSourceKey(getCashLedgerSourceKey(entry)) || '');
+  const amount = Number(entry.amount) || 0;
+  const paymentType = String(entry.payment_type || '').trim().toLowerCase();
+  const date = String(entry.fop_date || '').trim().slice(0, 10);
+  const account = String(entry.account_type || entry.cash_account || 'cash').trim().toLowerCase();
+  return [method, amount, paymentType, date, account].join('|');
 }
 
 function getOrderSourcePrefixes(orderId, suffix = '*') {
@@ -2544,11 +3840,11 @@ async function deleteUnconfirmedOrderFopCashEntries(orderId, sb, sbHeaders) {
   ];
   for (const sourcePrefix of prefixes) {
     await fetch(
-      `${sb}/rest/v1/cash_log?cash_account=eq.fop&fop_confirmed=eq.false&fop_source_key=like.${encodeURIComponent(sourcePrefix)}`,
+      `${sb}/rest/v1/cash_log?cash_account=eq.fop&fop_confirmed=eq.false&${cashSourceLikeFilter(sourcePrefix)}`,
       { method: 'DELETE', headers: sbHeaders }
     );
     await fetch(
-      `${sb}/rest/v1/cash_log?cash_account=eq.cash&fop_confirmed=eq.false&fop_source_key=like.${encodeURIComponent(sourcePrefix)}`,
+      `${sb}/rest/v1/cash_log?cash_account=eq.cash&fop_confirmed=eq.false&${cashSourceLikeFilter(sourcePrefix)}`,
       { method: 'DELETE', headers: sbHeaders }
     );
   }
@@ -2619,7 +3915,7 @@ async function canManageSalaryEntryForOrder(orderId, session, sb, sbHeaders) {
 async function getAccessibleAssistantsForLead(workerName, sb, sbHeaders) {
   if (!workerName) return new Set();
 
-  const url = `${sb}/rest/v1/orders?select=responsible,assistant,rework_data,is_cancelled&limit=10000`;
+  const url = `${sb}/rest/v1/orders?select=responsible,assistant,extra_assistant,rework_data,is_cancelled&limit=10000`;
   const res = await fetch(url, { headers: sbHeaders });
   const rows = await res.json().catch(() => []);
   const assistants = new Set();
@@ -2629,6 +3925,9 @@ async function getAccessibleAssistantsForLead(workerName, sb, sbHeaders) {
     if (row?.responsible === workerName && row?.assistant) {
       assistants.add(row.assistant);
     }
+    if (row?.responsible === workerName && row?.extra_assistant) {
+      assistants.add(row.extra_assistant);
+    }
     const reworkAssistant = row?.rework_data?.assistant;
     if (row?.rework_data?.responsible === workerName && reworkAssistant) {
       assistants.add(reworkAssistant);
@@ -2636,6 +3935,148 @@ async function getAccessibleAssistantsForLead(workerName, sb, sbHeaders) {
   }
 
   return assistants;
+}
+
+const CASH_SNAPSHOT_SETTING_KEY = 'cash_snapshot_v1';
+
+async function getCashSnapshotValue(sb, sbHeaders) {
+  const res = await fetch(
+    `${sb}/rest/v1/ref_app_settings?key=eq.${encodeURIComponent(CASH_SNAPSHOT_SETTING_KEY)}&select=value_json&limit=1`,
+    { headers: sbHeaders }
+  );
+  if (!res.ok) return null;
+  const rows = await res.json().catch(() => []);
+  const value = Array.isArray(rows) ? rows[0]?.value_json : null;
+  return value && typeof value === 'object' ? value : null;
+}
+
+async function getCashSnapshotPendingRows(snapshot, sb, sbHeaders) {
+  const ids = Array.isArray(snapshot?.pendingEntryIds)
+    ? snapshot.pendingEntryIds.map(id => String(id || '').trim()).filter(Boolean)
+    : [];
+  if (!ids.length) return [];
+  const rows = [];
+  for (let index = 0; index < ids.length; index += 100) {
+    const batch = ids.slice(index, index + 100).map(id => encodeURIComponent(id)).join(',');
+    const res = await fetch(
+      `${sb}/rest/v1/cash_log?id=in.(${batch})&deleted_at=is.null&order=created_at.desc&limit=100`,
+      { headers: sbHeaders }
+    );
+    const data = await res.json().catch(() => []);
+    if (!res.ok || !Array.isArray(data)) continue;
+    rows.push(...data.filter(row => String(row?.ledger_status || 'posted').trim().toLowerCase() !== 'voided'));
+  }
+  return rows;
+}
+
+async function upsertCashSnapshotValue(value, sb, sbHeaders) {
+  const res = await fetch(`${sb}/rest/v1/ref_app_settings?on_conflict=key`, {
+    method: 'POST',
+    headers: {
+      ...sbHeaders,
+      Prefer: 'resolution=merge-duplicates,return=representation',
+    },
+    body: JSON.stringify({
+      key: CASH_SNAPSHOT_SETTING_KEY,
+      value_json: value,
+      updated_at: new Date().toISOString(),
+    }),
+  });
+  const rows = await res.json().catch(() => []);
+  if (!res.ok) {
+    const error = new Error(rows?.message || rows?.error || 'Не удалось сохранить снапшот кассы');
+    error.status = res.status || 500;
+    throw error;
+  }
+  return (Array.isArray(rows) ? rows[0]?.value_json : null) || value;
+}
+
+function isCashSnapshotPendingRow(row) {
+  const status = String(row?.approval_status || '').trim().toLowerCase();
+  if (status) return status === 'pending';
+  const account = String(row?.account_type || row?.cash_account || 'cash').trim().toLowerCase();
+  if (account === 'fop') return row?.fop_confirmed !== true;
+  const paymentMethod = getCashPaymentMethod(row);
+  return account === 'cash' && isConfirmableCardCashMethod(paymentMethod) && row?.fop_confirmed !== true;
+}
+
+function parseCashSnapshotUsdAmount(row) {
+  const raw = String(row?.comment || '');
+  if (!raw.startsWith('FXUSD|')) return 0;
+  const token = raw.split('|').find(part => part.startsWith('usd='));
+  return Number(token ? token.slice(4) : 0) || 0;
+}
+
+async function fetchCashRowsBeforeSnapshot(cutoffAt, sb, sbHeaders) {
+  const pageSize = 1000;
+  const rows = [];
+  for (let offset = 0; ; offset += pageSize) {
+    const res = await fetch(
+      `${sb}/rest/v1/cash_log?deleted_at=is.null&created_at=lt.${encodeURIComponent(cutoffAt)}&order=created_at.asc&offset=${offset}&limit=${pageSize}`,
+      { headers: sbHeaders }
+    );
+    const page = await res.json().catch(() => []);
+    if (!res.ok) {
+      const error = new Error(page?.message || page?.error || 'Не удалось прочитать журнал кассы');
+      error.status = res.status || 500;
+      throw error;
+    }
+    const list = Array.isArray(page) ? page : [];
+    rows.push(...list);
+    if (list.length < pageSize) break;
+  }
+  return rows;
+}
+
+async function buildCashSnapshotValue(session, sb, sbHeaders) {
+  // Небольшой буфер не даёт потерять проводку, созданную одновременно со снапшотом.
+  const cutoffAt = new Date(Date.now() - 10000).toISOString();
+  const sourceRows = await fetchCashRowsBeforeSnapshot(cutoffAt, sb, sbHeaders);
+  const activeRows = sourceRows.filter(row => {
+    const ledgerStatus = String(row?.ledger_status || 'posted').trim().toLowerCase();
+    return ledgerStatus !== 'voided' && row?.manual_payment !== true;
+  });
+  const pendingRows = activeRows.filter(isCashSnapshotPendingRow);
+  const balanceRows = activeRows.filter(row => !isCashSnapshotPendingRow(row));
+
+  const grouped = new Map();
+  const confirmedPaymentKeys = new Set();
+  balanceRows.forEach(row => {
+    const workerId = String(row?.cash_owner_id || row?.worker_id || '').trim();
+    const workerName = String(row?.cash_owner || row?.worker_name || '').trim();
+    if (!workerId && !workerName) return;
+    const identityKey = workerId ? `id:${workerId}` : `name:${workerName.toLowerCase()}`;
+    if (!grouped.has(identityKey)) {
+      grouped.set(identityKey, { workerId: workerId || null, workerName, cash: 0, fop: 0, usd: 0, expenses: 0 });
+    }
+    const balance = grouped.get(identityKey);
+    if (!balance.workerName && workerName) balance.workerName = workerName;
+    const account = String(row?.account_type || row?.cash_account || 'cash').trim().toLowerCase();
+    const amount = Number(row?.amount) || 0;
+    if (account === 'fop') balance.fop += amount;
+    else if (account === 'cash') balance.cash += amount;
+    balance.usd += parseCashSnapshotUsdAmount(row);
+    if (row?.expense_category || String(row?.comment || '').trim().startsWith('Расход(')) {
+      balance.expenses += Math.abs(amount);
+    }
+    const sourceKey = getCashLedgerSourceKey(row);
+    const approvalStatus = String(row?.approval_status || '').trim().toLowerCase();
+    if (sourceKey && (row?.fop_confirmed === true || approvalStatus === 'confirmed')) {
+      confirmedPaymentKeys.add(sourceKey);
+    }
+  });
+
+  return {
+    version: 1,
+    active: true,
+    cutoffAt,
+    createdAt: new Date().toISOString(),
+    createdBy: String(session?.workerName || '').trim() || 'owner',
+    sourceRows: sourceRows.length,
+    balances: Array.from(grouped.values()),
+    confirmedPaymentKeys: Array.from(confirmedPaymentKeys),
+    pendingEntryIds: pendingRows.map(row => String(row?.id || '').trim()).filter(Boolean),
+  };
 }
 
 async function sha256(message) {

@@ -1612,7 +1612,11 @@ async function openWorkerCashModal(workerName) {
 
 function _renderWorkerCashModal() {
   const log = _ownerCashLog || [];
-  const balance = log.reduce((s, e) => s + Number(e.amount), 0);
+  const worker = typeof getWorkerRecordByName === 'function' ? getWorkerRecordByName(_cashModalWorkerName) : null;
+  const snapshotBase = shouldApplyCashSnapshotBase('personal')
+    ? getCashSnapshotBalance(worker || _cashModalWorkerName, 'cash') + getCashSnapshotBalance(worker || _cashModalWorkerName, 'fop')
+    : 0;
+  const balance = snapshotBase + log.reduce((s, e) => s + Number(e.amount), 0);
 
   const balEl = document.getElementById('wcm-balance');
   if (balEl) {
