@@ -246,9 +246,9 @@ export default {
       const body = await request.json().catch(() => ({}));
       const isNew = body.is_new === true;
       const orderBody = body.order || {};
-      const rollbackOrder = body.rollback_order || null;
       const cashEntries = Array.isArray(body.cash_entries) ? body.cash_entries : [];
       const syncPaymentTypes = normalizeOrderCashSyncPaymentTypes(body.sync_payment_types);
+      const operationId = String(body.operation_id || '').trim().slice(0, 200) || `order-save:${Date.now()}:${crypto.randomUUID()}`;
       const financeDebug = [];
       const canCreateOrders = authedRole === 'owner' || authedRole === 'manager' || workerHasPermission(liveWorker, 'orders_create');
 
@@ -283,69 +283,55 @@ export default {
         }
       }
 
-      const savedCashEntries = [];
-      let savedOrder = null;
-
       try {
-        const orderRes = isNew
-          ? { ok: true, status: 200, json: async () => await insertNewOrderWithMonotonicId(orderBody, sb, sbHeaders) }
-          : await fetch(`${sb}/rest/v1/orders?id=eq.${encodeURIComponent(orderBody.id)}`, {
-              method: 'PATCH',
-              headers: sbHeaders,
-              body: JSON.stringify(patchBody),
-            });
-
-        if (!orderRes.ok) {
-          return Response.json(await orderRes.text(), { status: orderRes.status, headers: cors });
-        }
-
-        const orderRows = await orderRes.json();
-        savedOrder = Array.isArray(orderRows) ? orderRows[0] : null;
-        if (savedOrder && previousOrder) {
-          savedOrder = { ...previousOrder, ...savedOrder };
-        }
-        if (!savedOrder) {
-          throw new Error('Order was not saved');
-        }
-
+        const normalizedExplicitEntries = [];
         for (const rawEntry of cashEntries) {
           const cashEntry = normalizeOrderSaveCashEntry(rawEntry);
           if (!cashEntry) continue;
           if (!(await canCreateOrderCashEntry(cashEntry, rawEntry, session, sb, sbHeaders))) {
             throw new Error('Forbidden cash entry');
           }
-
-          const hasSourceKey = !!getCashLedgerSourceKey(cashEntry);
-          const cashRes = await fetch(`${sb}/rest/v1/cash_log${hasSourceKey ? '?on_conflict=source_key' : ''}`, {
-            method: 'POST',
-            headers: hasSourceKey ? {
-              ...sbHeaders,
-              Prefer: 'resolution=merge-duplicates,return=representation',
-            } : sbHeaders,
-            body: JSON.stringify(cashEntry),
-          });
-          if (!cashRes.ok) {
-            throw new Error(await cashRes.text());
-          }
-          const cashRows = await cashRes.json();
-          if (Array.isArray(cashRows) && cashRows[0]) savedCashEntries.push(cashRows[0]);
+          normalizedExplicitEntries.push(cashEntry);
         }
 
-        await syncOrderFopCashEntries(savedOrder, sb, sbHeaders, { paymentTypes: syncPaymentTypes, debug: financeDebug });
-        const sashaCashEntries = await syncOrderSashaManagerCashEntries(savedOrder, sb, sbHeaders);
-        savedCashEntries.push(...sashaCashEntries);
-        await maybeNotifyOrderTransitions(previousOrder, savedOrder, sb, sbHeaders, env);
-        return Response.json({ order: savedOrder, cash_entries: savedCashEntries, finance_debug: financeDebug }, { headers: cors });
+        let afterId = String(orderBody.id || '').trim();
+        const attempts = isNew ? 20 : 1;
+        for (let attempt = 0; attempt < attempts; attempt += 1) {
+          const candidateOrder = isNew
+            ? { ...orderBody, id: await getNextMonotonicOrderId(sb, sbHeaders, afterId) }
+            : { ...previousOrder, ...patchBody, id: orderBody.id };
+          const plan = await prepareAtomicOrderCashPlan(candidateOrder, normalizedExplicitEntries, syncPaymentTypes, session, sb, sbHeaders, financeDebug);
+          const rpcResult = await callAtomicOrderCashRpc({
+            operationId,
+            isNew,
+            order: isNew ? candidateOrder : { ...patchBody, id: orderBody.id },
+            cashEntries: plan.entries,
+            cashPatches: plan.patches,
+          }, sb, sbHeaders);
+          if (rpcResult.ok) {
+            const savedOrder = rpcResult.data?.order;
+            if (!savedOrder) throw new Error('Order was not saved');
+            if (rpcResult.data?.replayed !== true) {
+              await maybeNotifyOrderTransitions(previousOrder, savedOrder, sb, sbHeaders, env);
+            }
+            return Response.json({
+              order: savedOrder,
+              cash_entries: rpcResult.data?.cash_entries || [],
+              finance_debug: financeDebug,
+              atomic: true,
+            }, { headers: cors });
+          }
+          if (isNew && isDuplicateOrderInsertError(rpcResult.error)) {
+            afterId = candidateOrder.id;
+            continue;
+          }
+          const error = new Error(rpcResult.error || 'Atomic order save failed');
+          error.status = rpcResult.status;
+          throw error;
+        }
+        throw new Error('Failed to allocate next order id');
       } catch (e) {
-        await rollbackOrderSaveWithCash({
-          sb,
-          sbHeaders,
-          orderId: savedOrder?.id || orderBody.id,
-          isNew,
-          rollbackOrder,
-          savedCashEntries,
-        });
-        return Response.json({ ok: false, error: e.message || String(e) }, { status: 500, headers: cors });
+        return Response.json({ ok: false, error: e.message || String(e) }, { status: Number(e?.status) || 500, headers: cors });
       }
     }
 
@@ -983,6 +969,7 @@ export default {
       const workerName = url.searchParams.get('worker');
       const deletedMode = url.searchParams.get('deleted') || 'active';
       const historyMode = url.searchParams.get('history') || 'snapshot';
+      const envelopeRequested = url.searchParams.get('format') === 'envelope';
       const offset = Math.max(0, Number(url.searchParams.get('offset')) || 0);
       const limit = Math.min(1000, Math.max(1, Number(url.searchParams.get('limit')) || 1000));
       if (!workerName) {
@@ -1022,6 +1009,17 @@ export default {
       const snapshotQuery = snapshot?.active === true && snapshot?.cutoffAt
         ? `&created_at=gte.${encodeURIComponent(snapshot.cutoffAt)}`
         : '';
+      const snapshotWorkerLabels = new Set(uniqueLabels.map(label => String(label || '').trim().toLowerCase()).filter(Boolean));
+      const responseSnapshot = snapshot?.active === true
+        ? {
+            ...snapshot,
+            balances: (Array.isArray(snapshot?.balances) ? snapshot.balances : []).filter(balance => {
+              const balanceWorkerId = String(balance?.workerId || '').trim();
+              const balanceWorkerName = String(balance?.workerName || '').trim().toLowerCase();
+              return (targetWorkerId && balanceWorkerId === targetWorkerId) || (balanceWorkerName && snapshotWorkerLabels.has(balanceWorkerName));
+            }),
+          }
+        : null;
       const res = await fetch(
         `${sb}/rest/v1/cash_log?or=(${orParts.join(',')})${deletedQuery}${snapshotQuery}&order=created_at.desc&offset=${offset}&limit=${limit}`,
         { headers: sbHeaders }
@@ -1044,17 +1042,22 @@ export default {
           merged.push(row);
         });
         merged.sort((a, b) => String(b?.created_at || '').localeCompare(String(a?.created_at || '')));
-        return Response.json(merged, { headers: cors });
+        return Response.json(envelopeRequested ? buildCashPageEnvelope(merged, responseSnapshot, historyMode, offset) : merged, { headers: cors });
       }
-      return Response.json(data, { headers: cors });
+      return Response.json(envelopeRequested ? buildCashPageEnvelope(data, responseSnapshot, historyMode, offset) : data, { headers: cors });
     }
 
     if (url.pathname === '/api/cash/all' && request.method === 'GET') {
       const deletedMode = url.searchParams.get('deleted') || 'active';
       const historyMode = url.searchParams.get('history') || 'snapshot';
+      const envelopeRequested = url.searchParams.get('format') === 'envelope';
       const offset = Math.max(0, Number(url.searchParams.get('offset')) || 0);
       const limit = Math.min(1000, Math.max(1, Number(url.searchParams.get('limit')) || 1000));
-      if (authedRole !== 'owner') {
+      const canViewAllCash = authedRole === 'owner'
+        || workerHasPermission(liveWorker, 'owner_cash_view')
+        || workerHasPermission(liveWorker, 'owner_expenses_view')
+        || workerHasPermission(liveWorker, 'owner_payments_view');
+      if (!canViewAllCash) {
         return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
       }
 
@@ -1082,9 +1085,31 @@ export default {
           merged.push(row);
         });
         merged.sort((a, b) => String(b?.created_at || '').localeCompare(String(a?.created_at || '')));
-        return Response.json(merged, { headers: cors });
+        return Response.json(envelopeRequested ? buildCashPageEnvelope(merged, snapshot, historyMode, offset) : merged, { headers: cors });
       }
-      return Response.json(data, { headers: cors });
+      return Response.json(envelopeRequested ? buildCashPageEnvelope(data, snapshot, historyMode, offset) : data, { headers: cors });
+    }
+
+    if (url.pathname === '/api/reports/daily-finance' && request.method === 'GET') {
+      if (authedRole !== 'owner') {
+        return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
+      }
+      const from = normalizeIsoDateParam(url.searchParams.get('from'));
+      const to = normalizeIsoDateParam(url.searchParams.get('to')) || from;
+      if (!from || !to) {
+        return Response.json({ error: 'Valid report dates are required' }, { status: 400, headers: cors });
+      }
+      const start = from <= to ? from : to;
+      const end = from <= to ? to : from;
+      if (daysBetweenIsoDates(start, end) > 370) {
+        return Response.json({ error: 'Report range is too large' }, { status: 400, headers: cors });
+      }
+      try {
+        const rows = await fetchDailyReportCashRows(start, end, sb, sbHeaders);
+        return Response.json({ from: start, to: end, rows }, { headers: cors });
+      } catch (error) {
+        return Response.json({ error: error?.message || 'Failed to load report finance data' }, { status: 500, headers: cors });
+      }
     }
 
     if (url.pathname === '/api/cash' && request.method === 'POST') {
@@ -1225,7 +1250,7 @@ export default {
         cash_account: String(cashRow.cash_account || cashRow.account_type || 'cash').trim().toLowerCase(),
         fop_confirmed: cashRow.fop_confirmed === true,
         fop_source_key: null,
-        fop_date: cashRow.fop_date || null,
+        fop_date: getKyivLocalDateString(0),
         manual_payment: false,
         manual_payment_method: null,
         cash_owner: cashRow.cash_owner || cashRow.worker_name || null,
@@ -1247,35 +1272,25 @@ export default {
         reversal_reason: reason,
       };
 
-      const reverseRes = await fetch(`${sb}/rest/v1/cash_log?on_conflict=source_key`, {
-        method: 'POST',
-        headers: {
-          ...sbHeaders,
-          Prefer: 'resolution=merge-duplicates,return=representation',
-        },
-        body: JSON.stringify(reversalPayload),
-      });
-      const reverseData = await reverseRes.json().catch(() => []);
-      if (!reverseRes.ok) {
-        return Response.json({ error: reverseData?.message || 'Failed to create reversal', details: reverseData }, { status: reverseRes.status || 400, headers: cors });
-      }
-
-      const voidRes = await fetch(`${sb}/rest/v1/cash_log?id=eq.${encodeURIComponent(id)}`, {
-        method: 'PATCH',
-        headers: sbHeaders,
-        body: JSON.stringify({
+      const mutation = await callAtomicCashMutationRpc({
+        operationId: `reverse:${id}`,
+        cashEntries: [reversalPayload],
+        cashPatches: [{
+          id,
           ledger_status: 'reversed',
           reversal_reason: reason,
           reversed_by: session.workerName || null,
           reversed_at: now,
-        }),
-      });
-      const voidData = await voidRes.json().catch(() => []);
-      if (!voidRes.ok) {
-        return Response.json({ error: voidData?.message || 'Failed to mark original entry as reversed', details: voidData }, { status: voidRes.status || 400, headers: cors });
+        }],
+      }, sb, sbHeaders);
+      if (!mutation.ok) {
+        return Response.json({ error: mutation.error }, { status: mutation.status || 500, headers: cors });
       }
-
-      return Response.json({ reversal: Array.isArray(reverseData) ? reverseData[0] : reverseData, original: Array.isArray(voidData) ? voidData[0] : voidData }, { headers: cors });
+      return Response.json({
+        reversal: mutation.data?.cash_entries?.[0] || reversalPayload,
+        original: mutation.data?.cash_patches?.[0] || cashRow,
+        atomic: true,
+      }, { headers: cors });
     }
 
     if (url.pathname.startsWith('/api/cash/') && url.pathname.endsWith('/correct') && request.method === 'POST') {
@@ -1342,7 +1357,7 @@ export default {
           cash_account: account,
           fop_confirmed: true,
           fop_source_key: null,
-          fop_date: cashRow.fop_date || null,
+          fop_date: getKyivLocalDateString(0),
           manual_payment: false,
           manual_payment_method: null,
           cash_owner: owner,
@@ -1413,33 +1428,23 @@ export default {
         ));
       }
 
-      const correctionRes = await fetch(`${sb}/rest/v1/cash_log?on_conflict=source_key`, {
-        method: 'POST',
-        headers: {
-          ...sbHeaders,
-          Prefer: 'resolution=merge-duplicates,return=representation',
-        },
-        body: JSON.stringify(correctionRows),
-      });
-      const correctionData = await correctionRes.json().catch(() => []);
-      if (!correctionRes.ok) {
-        return Response.json({ error: correctionData?.message || 'Failed to create correction', details: correctionData }, { status: correctionRes.status || 400, headers: cors });
-      }
-
-      const markRes = await fetch(`${sb}/rest/v1/cash_log?id=eq.${encodeURIComponent(id)}`, {
-        method: 'PATCH',
-        headers: sbHeaders,
-        body: JSON.stringify({
+      const mutation = await callAtomicCashMutationRpc({
+        operationId: `correct:${id}:${correctionStamp}`,
+        cashEntries: correctionRows,
+        cashPatches: [{
+          id,
           ledger_status: 'corrected',
           correction_reason: reason,
-        }),
-      });
-      const markData = await markRes.json().catch(() => []);
-      if (!markRes.ok) {
-        return Response.json({ error: markData?.message || 'Failed to mark original entry as corrected', details: markData }, { status: markRes.status || 400, headers: cors });
+        }],
+      }, sb, sbHeaders);
+      if (!mutation.ok) {
+        return Response.json({ error: mutation.error }, { status: mutation.status || 500, headers: cors });
       }
-
-      return Response.json({ corrections: correctionData, original: Array.isArray(markData) ? markData[0] : markData }, { headers: cors });
+      return Response.json({
+        corrections: mutation.data?.cash_entries || correctionRows,
+        original: mutation.data?.cash_patches?.[0] || cashRow,
+        atomic: true,
+      }, { headers: cors });
     }
 
     if (url.pathname.startsWith('/api/cash/') && url.pathname !== '/api/cash/all' && request.method === 'PATCH') {
@@ -1467,6 +1472,17 @@ export default {
       }
 
       const body = await request.json().catch(() => ({}));
+      if (authedRole === 'owner' && Object.prototype.hasOwnProperty.call(body, 'deleted_at')) {
+        const snapshot = await getCashSnapshotValue(sb, sbHeaders);
+        if (isCashRowBeforeSnapshot(cashRow, snapshot)) {
+          return Response.json({
+            error: body.deleted_at
+              ? 'Snapshot cash rows must be reversed instead of deleted'
+              : 'Snapshot cash rows cannot be restored directly',
+            code: 'CASH_SNAPSHOT_IMMUTABLE',
+          }, { status: 409, headers: cors });
+        }
+      }
       const patch = {};
       if (authedRole === 'owner') {
         if (Object.prototype.hasOwnProperty.call(body, 'deleted_at')) {
@@ -1530,7 +1546,22 @@ export default {
       }
 
       const id = url.pathname.split('/').pop();
-      await fetch(`${sb}/rest/v1/cash_log?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE', headers: sbHeaders });
+      const cashRow = await getCashById(id, sb, sbHeaders);
+      if (!cashRow) {
+        return Response.json({ error: 'Cash entry not found' }, { status: 404, headers: cors });
+      }
+      const snapshot = await getCashSnapshotValue(sb, sbHeaders);
+      if (isCashRowBeforeSnapshot(cashRow, snapshot)) {
+        return Response.json({
+          error: 'Snapshot cash rows cannot be permanently deleted',
+          code: 'CASH_SNAPSHOT_IMMUTABLE',
+        }, { status: 409, headers: cors });
+      }
+      const deleteRes = await fetch(`${sb}/rest/v1/cash_log?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE', headers: sbHeaders });
+      if (!deleteRes.ok) {
+        const details = await deleteRes.json().catch(() => ({}));
+        return Response.json({ error: details?.message || 'Failed to delete cash entry' }, { status: deleteRes.status || 400, headers: cors });
+      }
       return Response.json({ ok: true }, { headers: cors });
     }
 
@@ -3697,34 +3728,206 @@ async function buildOrderDerivedCashEntries(order, sb, sbHeaders, options = {}) 
   return uniqueEntries;
 }
 
-async function rollbackOrderSaveWithCash({ sb, sbHeaders, orderId, isNew, rollbackOrder, savedCashEntries }) {
-  for (const entry of savedCashEntries || []) {
-    if (!entry?.id) continue;
-    await fetch(`${sb}/rest/v1/cash_log?id=eq.${encodeURIComponent(entry.id)}`, {
-      method: 'DELETE',
-      headers: sbHeaders,
-    }).catch(() => {});
+async function callAtomicOrderCashRpc({ operationId, isNew, order, cashEntries, cashPatches }, sb, sbHeaders) {
+  const res = await fetch(`${sb}/rest/v1/rpc/crm_save_order_with_cash`, {
+    method: 'POST',
+    headers: sbHeaders,
+    body: JSON.stringify({
+      p_operation_id: `order:${String(operationId || '').trim()}`,
+      p_is_new: !!isNew,
+      p_order: order || {},
+      p_cash_entries: Array.isArray(cashEntries) ? cashEntries : [],
+      p_cash_patches: Array.isArray(cashPatches) ? cashPatches : [],
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.ok) return { ok: true, status: res.status, data };
+  const code = String(data?.code || '').trim();
+  const migrationMissing = code === 'PGRST202' || code === '42883' || String(data?.message || '').includes('crm_save_order_with_cash');
+  return {
+    ok: false,
+    status: migrationMissing ? 503 : (res.status || 500),
+    error: migrationMissing
+      ? 'Финансовая миграция не завершена: выполните три SQL-шага preflight, add_atomic_finance_operations и create_atomic_finance_unique_index'
+      : (data?.message || data?.details || data?.error || 'Atomic order save failed'),
+  };
+}
+
+async function callAtomicCashMutationRpc({ operationId, cashEntries, cashPatches }, sb, sbHeaders) {
+  const res = await fetch(`${sb}/rest/v1/rpc/crm_apply_cash_mutation`, {
+    method: 'POST',
+    headers: sbHeaders,
+    body: JSON.stringify({
+      p_operation_id: `cash:${String(operationId || '').trim()}`,
+      p_cash_entries: Array.isArray(cashEntries) ? cashEntries : [],
+      p_cash_patches: Array.isArray(cashPatches) ? cashPatches : [],
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.ok) return { ok: true, status: res.status, data };
+  const code = String(data?.code || '').trim();
+  const migrationMissing = code === 'PGRST202' || code === '42883' || String(data?.message || '').includes('crm_apply_cash_mutation');
+  return {
+    ok: false,
+    status: migrationMissing ? 503 : (res.status || 500),
+    error: migrationMissing
+      ? 'Финансовая миграция не завершена: выполните три SQL-шага preflight, add_atomic_finance_operations и create_atomic_finance_unique_index'
+      : (data?.message || data?.details || data?.error || 'Atomic cash mutation failed'),
+  };
+}
+
+function buildAtomicCashRemoval(row, snapshot, session) {
+  const id = String(row?.id || '').trim();
+  if (!id) return { entries: [], patches: [] };
+  const reason = 'Платёж удалён или заменён при сохранении заказа';
+  if (!isCashRowBeforeSnapshot(row, snapshot)) {
+    return {
+      entries: [],
+      patches: [{
+        id,
+        ledger_status: 'voided',
+        reversal_reason: reason,
+        reversed_by: String(session?.workerName || '').trim() || 'system',
+        reversed_at: new Date().toISOString(),
+      }],
+    };
   }
 
-  if (isNew) {
-    await fetch(`${sb}/rest/v1/orders?id=eq.${encodeURIComponent(orderId)}`, {
-      method: 'DELETE',
-      headers: sbHeaders,
-    }).catch(() => {});
-    await deleteUnconfirmedOrderFopCashEntries(orderId, sb, sbHeaders).catch(() => {});
-    await deleteOrderSashaManagerCashEntries(orderId, sb, sbHeaders).catch(() => {});
-    return;
-  }
+  const account = String(row?.account_type || row?.cash_account || 'cash').trim().toLowerCase();
+  const reversal = {
+    worker_name: row.worker_name,
+    worker_id: row.worker_id || null,
+    amount: -(Number(row.amount) || 0),
+    comment: `Компенсация после снапшота: ${String(row.comment || '').trim()} — ${reason}`,
+    cash_account: account,
+    fop_confirmed: true,
+    fop_source_key: `snapshot-reversal:${id}`,
+    fop_date: getKyivLocalDateString(0),
+    manual_payment: false,
+    manual_payment_method: null,
+    cash_owner: row.cash_owner || row.worker_name || null,
+    cash_owner_id: row.cash_owner_id || row.worker_id || null,
+    account_type: account,
+    payment_type: row.payment_type || 'correction',
+    payment_method: row.payment_method || null,
+    approval_status: 'not_required',
+    approval_by: null,
+    approval_by_id: null,
+    source_type: 'reversal',
+    source_id: id,
+    order_id: row.order_id || null,
+    expense_category: row.expense_category || null,
+    warehouse_name: row.warehouse_name || null,
+    source_key: `snapshot-reversal:${id}`,
+    ledger_status: 'posted',
+    reversal_of: id,
+    reversal_reason: reason,
+  };
+  Object.assign(reversal, buildStructuredCashFields(reversal));
+  return {
+    entries: [reversal],
+    patches: [{
+      id,
+      ledger_status: 'reversed',
+      reversal_reason: reason,
+      reversed_by: String(session?.workerName || '').trim() || 'system',
+      reversed_at: new Date().toISOString(),
+    }],
+  };
+}
 
-  if (rollbackOrder?.id) {
-    await fetch(`${sb}/rest/v1/orders?id=eq.${encodeURIComponent(rollbackOrder.id)}`, {
-      method: 'PATCH',
-      headers: sbHeaders,
-      body: JSON.stringify(rollbackOrder),
-    }).catch(() => {});
-    await syncOrderFopCashEntries(rollbackOrder, sb, sbHeaders).catch(() => {});
-    await syncOrderSashaManagerCashEntries(rollbackOrder, sb, sbHeaders).catch(() => {});
-  }
+async function prepareAtomicOrderCashPlan(order, explicitEntries, paymentTypes, session, sb, sbHeaders, debug = null) {
+  const desiredEntries = await buildOrderDerivedCashEntries(order, sb, sbHeaders, { paymentTypes, debug });
+  const existingRows = order?.id ? await fetchOrderDerivedCashEntries(order.id, sb, sbHeaders) : [];
+  const legacyRows = order?.id ? await fetchLegacyOrderDerivedCashEntries(order.id, sb, sbHeaders) : [];
+  const snapshot = await getCashSnapshotValue(sb, sbHeaders);
+  const activeExisting = (existingRows || []).filter(row => {
+    if (!row || String(row?.deleted_at || '').trim()) return false;
+    return String(row?.ledger_status || 'posted').trim().toLowerCase() === 'posted';
+  });
+  const activeLegacy = (legacyRows || []).filter(row => {
+    if (!row || String(row?.deleted_at || '').trim()) return false;
+    return String(row?.ledger_status || 'posted').trim().toLowerCase() === 'posted';
+  });
+  const existingByKey = new Map();
+  const usedLegacyIds = new Set();
+  const removals = [];
+  activeExisting.forEach(row => {
+    const key = getCashLedgerSourceKey(row);
+    if (!key) return;
+    if (!existingByKey.has(key)) existingByKey.set(key, row);
+    else removals.push(row);
+  });
+  const legacyPatches = [];
+  const migratedDesiredKeys = new Set();
+  desiredEntries.forEach(entry => {
+    const sourceKey = getCashLedgerSourceKey(entry);
+    let existing = existingByKey.get(sourceKey);
+    if (!existing) {
+      existing = takeLegacyOrderDerivedCashMatch(entry, activeLegacy, usedLegacyIds);
+      if (existing?.id) {
+        migratedDesiredKeys.add(sourceKey);
+        legacyPatches.push({
+          ...entry,
+          id: existing.id,
+          created_at: undefined,
+        });
+        debug?.push?.({
+          type: 'legacy-entry-migrated',
+          orderId: order?.id || null,
+          id: existing.id,
+          sourceKey,
+          amount: Number(existing.amount) || 0,
+        });
+      }
+    }
+    if (!existing) return;
+    if (existing.fop_confirmed === true || String(existing.approval_status || '') === 'confirmed') {
+      entry.fop_confirmed = true;
+      entry.approval_status = 'confirmed';
+      entry.approval_by = existing.approval_by || entry.approval_by || null;
+      entry.approval_by_id = existing.approval_by_id || entry.approval_by_id || null;
+      const legacyPatch = legacyPatches[legacyPatches.length - 1];
+      if (legacyPatch?.id === existing.id) {
+        legacyPatch.fop_confirmed = true;
+        legacyPatch.approval_status = 'confirmed';
+        legacyPatch.approval_by = entry.approval_by;
+        legacyPatch.approval_by_id = entry.approval_by_id;
+      }
+    }
+  });
+
+  const desiredKeys = new Set(desiredEntries.map(getCashLedgerSourceKey).filter(Boolean));
+  activeExisting.forEach(row => {
+    const key = getCashLedgerSourceKey(row);
+    if (!key || desiredKeys.has(key)) return;
+    if (paymentTypes && !paymentTypes.has(getOrderPaymentTypeFromSourceKey(key))) return;
+    removals.push(row);
+  });
+
+  const entries = [
+    ...(explicitEntries || []),
+    ...desiredEntries.filter(entry => !migratedDesiredKeys.has(getCashLedgerSourceKey(entry))),
+  ];
+  const patches = [...legacyPatches];
+  const removalIds = new Set();
+  removals.forEach(row => {
+    const id = String(row?.id || '').trim();
+    if (!id || removalIds.has(id)) return;
+    removalIds.add(id);
+    const removal = buildAtomicCashRemoval(row, snapshot, session);
+    entries.push(...removal.entries);
+    patches.push(...removal.patches);
+  });
+  debug?.push?.({
+    type: 'atomic-plan',
+    orderId: order?.id || null,
+    upsertedRows: entries.length,
+    patchedRows: patches.length,
+    migratedLegacyRows: legacyPatches.length,
+    snapshotCompensations: entries.filter(entry => String(entry?.source_key || '').startsWith('snapshot-reversal:')).length,
+  });
+  return { entries: ensureUniqueOrderCashEntrySourceKeys(entries), patches };
 }
 
 async function syncOrderFopCashEntries(order, sb, sbHeaders, options = {}) {
@@ -3749,14 +3952,7 @@ async function syncOrderFopCashEntries(order, sb, sbHeaders, options = {}) {
   const entries = await buildOrderDerivedCashEntries(order, sb, sbHeaders, { paymentTypes, debug });
   const nextKeys = new Set(entries.map(entry => getCashLedgerSourceKey(entry)).filter(Boolean));
   const existingByKey = new Map((existing || []).map(entry => [getCashLedgerSourceKey(entry), entry]).filter(([key]) => key));
-  const legacyBuckets = new Map();
-  (legacy || []).forEach(entry => {
-    const key = buildLegacyOrderDerivedCashMatchKey(entry);
-    if (!key) return;
-    const list = legacyBuckets.get(key) || [];
-    list.push(entry);
-    legacyBuckets.set(key, list);
-  });
+  const usedLegacyIds = new Set();
   for (const oldEntry of existing || []) {
     const key = getCashLedgerSourceKey(oldEntry);
     if (!key || nextKeys.has(key)) continue;
@@ -3771,11 +3967,8 @@ async function syncOrderFopCashEntries(order, sb, sbHeaders, options = {}) {
   for (const entry of entries) {
     const key = getCashLedgerSourceKey(entry);
     if (!key || existingByKey.has(key)) continue;
-    const legacyKey = buildLegacyOrderDerivedCashMatchKey(entry);
-    const legacyMatches = legacyBuckets.get(legacyKey) || [];
-    const legacyEntry = legacyMatches.shift();
+    const legacyEntry = takeLegacyOrderDerivedCashMatch(entry, legacy, usedLegacyIds);
     if (!legacyEntry?.id) continue;
-    legacyBuckets.set(legacyKey, legacyMatches);
     await fetch(`${sb}/rest/v1/cash_log?id=eq.${encodeURIComponent(legacyEntry.id)}`, {
       method: 'PATCH',
       headers: sbHeaders,
@@ -3857,6 +4050,84 @@ function buildLegacyOrderDerivedCashMatchKey(entry) {
   const date = String(entry.fop_date || '').trim().slice(0, 10);
   const account = String(entry.account_type || entry.cash_account || 'cash').trim().toLowerCase();
   return [method, amount, paymentType, date, account].join('|');
+}
+
+function getOrderCashPaymentKind(entry) {
+  const sourceKind = getOrderPaymentTypeFromSourceKey(getCashLedgerSourceKey(entry));
+  if (sourceKind) return sourceKind;
+  const comment = String(entry?.comment || '').trim().toLowerCase();
+  if (comment.includes('оплата клиента')) return 'client';
+  if (comment.includes('оплата поставщику')) return 'supplier';
+  if (comment.includes('выплата дропшипперу')) return 'dropshipper';
+  return Number(entry?.amount) > 0 ? 'client' : '';
+}
+
+function takeLegacyOrderDerivedCashMatch(desiredEntry, legacyRows = [], usedIds = new Set()) {
+  if (!desiredEntry) return null;
+  const desiredAmount = Number(desiredEntry.amount) || 0;
+  const desiredAccount = String(desiredEntry.account_type || desiredEntry.cash_account || 'cash').trim().toLowerCase();
+  const desiredMethod = normalizeCashPaymentMethod(
+    desiredEntry.payment_method
+    || desiredEntry.manual_payment_method
+    || getPaymentMethodFromCashSourceKey(getCashLedgerSourceKey(desiredEntry))
+    || ''
+  );
+  const desiredPaymentType = String(desiredEntry.payment_type || '').trim().toLowerCase();
+  const desiredDate = String(desiredEntry.fop_date || '').trim().slice(0, 10);
+  const desiredKind = getOrderCashPaymentKind(desiredEntry);
+  const desiredOwner = String(desiredEntry.cash_owner || desiredEntry.worker_name || '').trim().toLowerCase();
+  const desiredStrictKey = buildLegacyOrderDerivedCashMatchKey(desiredEntry);
+
+  const candidates = (Array.isArray(legacyRows) ? legacyRows : [])
+    .filter(row => {
+      const id = String(row?.id || '').trim();
+      if (!id || usedIds.has(id)) return false;
+      if (String(row?.deleted_at || '').trim()) return false;
+      if (String(row?.ledger_status || 'posted').trim().toLowerCase() !== 'posted') return false;
+      if (Math.abs((Number(row?.amount) || 0) - desiredAmount) > 0.000001) return false;
+
+      const account = String(row?.account_type || row?.cash_account || '').trim().toLowerCase();
+      if (account && desiredAccount && account !== desiredAccount) return false;
+
+      const method = normalizeCashPaymentMethod(
+        row?.payment_method
+        || row?.manual_payment_method
+        || getPaymentMethodFromCashSourceKey(getCashLedgerSourceKey(row))
+        || ''
+      );
+      if (method && desiredMethod && method !== desiredMethod) return false;
+
+      const paymentType = String(row?.payment_type || '').trim().toLowerCase();
+      if (paymentType && desiredPaymentType && paymentType !== desiredPaymentType) return false;
+
+      const date = String(row?.fop_date || '').trim().slice(0, 10);
+      if (date && desiredDate && date !== desiredDate) return false;
+
+      const kind = getOrderCashPaymentKind(row);
+      if (kind && desiredKind && kind !== desiredKind) return false;
+      return true;
+    })
+    .map(row => {
+      const method = normalizeCashPaymentMethod(row?.payment_method || row?.manual_payment_method || '');
+      const paymentType = String(row?.payment_type || '').trim().toLowerCase();
+      const date = String(row?.fop_date || '').trim().slice(0, 10);
+      const kind = getOrderCashPaymentKind(row);
+      const owner = String(row?.cash_owner || row?.worker_name || '').trim().toLowerCase();
+      let score = buildLegacyOrderDerivedCashMatchKey(row) === desiredStrictKey ? 100 : 0;
+      if (method && desiredMethod && method === desiredMethod) score += 20;
+      if (kind && desiredKind && kind === desiredKind) score += 16;
+      if (date && desiredDate && date === desiredDate) score += 12;
+      if (paymentType && desiredPaymentType && paymentType === desiredPaymentType) score += 8;
+      if (owner && desiredOwner && owner === desiredOwner) score += 4;
+      return { row, score };
+    })
+    .sort((a, b) => b.score - a.score
+      || String(a.row?.created_at || '').localeCompare(String(b.row?.created_at || ''))
+      || String(a.row?.id || '').localeCompare(String(b.row?.id || '')));
+
+  const match = candidates[0]?.row || null;
+  if (match?.id) usedIds.add(String(match.id));
+  return match;
 }
 
 function getOrderSourcePrefixes(orderId, suffix = '*') {
@@ -3974,6 +4245,97 @@ async function getAccessibleAssistantsForLead(workerName, sb, sbHeaders) {
 }
 
 const CASH_SNAPSHOT_SETTING_KEY = 'cash_snapshot_v1';
+
+function buildCashPageEnvelope(rows, snapshot, historyMode = 'snapshot', offset = 0) {
+  const activeSnapshot = snapshot?.active === true && String(snapshot?.cutoffAt || '').trim()
+    ? snapshot
+    : null;
+  return {
+    mode: activeSnapshot && historyMode !== 'full' ? 'snapshot' : 'full',
+    snapshot: activeSnapshot,
+    offset: Math.max(0, Number(offset) || 0),
+    rows: Array.isArray(rows) ? rows : [],
+  };
+}
+
+function isCashRowBeforeSnapshot(row, snapshot) {
+  if (snapshot?.active !== true || !String(snapshot?.cutoffAt || '').trim()) return false;
+  const rowTime = new Date(row?.created_at || 0).getTime();
+  const cutoffTime = new Date(snapshot.cutoffAt).getTime();
+  return Number.isFinite(rowTime) && Number.isFinite(cutoffTime) && rowTime < cutoffTime;
+}
+
+function normalizeIsoDateParam(value) {
+  const date = String(value || '').trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return '';
+  const parsed = new Date(`${date}T00:00:00Z`);
+  return Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date ? '' : date;
+}
+
+function daysBetweenIsoDates(start, end) {
+  const startTime = new Date(`${start}T00:00:00Z`).getTime();
+  const endTime = new Date(`${end}T00:00:00Z`).getTime();
+  return Math.floor(Math.abs(endTime - startTime) / 86400000);
+}
+
+function getCashRowReportDate(row) {
+  const explicit = normalizeIsoDateParam(row?.fop_date);
+  if (explicit) return explicit;
+  const createdAt = String(row?.created_at || '').trim();
+  if (!createdAt) return '';
+  const parsed = new Date(createdAt);
+  if (Number.isNaN(parsed.getTime())) return '';
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Kiev',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(parsed).reduce((acc, part) => {
+    if (part.type !== 'literal') acc[part.type] = part.value;
+    return acc;
+  }, {});
+  return `${parts.year || ''}-${parts.month || ''}-${parts.day || ''}`;
+}
+
+function isDailyReportExpenseCashRow(row) {
+  if (!row || String(row?.deleted_at || '').trim() || row?.manual_payment === true) return false;
+  const ledgerStatus = String(row?.ledger_status || 'posted').trim().toLowerCase();
+  if (ledgerStatus === 'voided') return false;
+  const paymentType = String(row?.payment_type || '').trim().toLowerCase();
+  const sourceType = String(row?.source_type || '').trim().toLowerCase();
+  return paymentType === 'expense'
+    || sourceType === 'expense'
+    || !!String(row?.expense_category || '').trim()
+    || String(row?.comment || '').trim().startsWith('Расход(');
+}
+
+async function fetchDailyReportCashRows(start, end, sb, sbHeaders) {
+  // The UTC window is deliberately one day wider on both sides. Final filtering
+  // uses the Kyiv calendar date, so DST and entries without fop_date stay correct.
+  const utcStart = new Date(`${start}T00:00:00Z`);
+  utcStart.setUTCDate(utcStart.getUTCDate() - 1);
+  const utcEnd = new Date(`${end}T00:00:00Z`);
+  utcEnd.setUTCDate(utcEnd.getUTCDate() + 2);
+  const baseUrl = `${sb}/rest/v1/cash_log?deleted_at=is.null&created_at=gte.${encodeURIComponent(utcStart.toISOString())}&created_at=lt.${encodeURIComponent(utcEnd.toISOString())}&order=created_at.asc`;
+  const createdRows = await fetchSupabasePagedRows(baseUrl, sbHeaders);
+
+  // fop_date can intentionally differ from created_at, so fetch that range too.
+  const datedRows = await fetchSupabasePagedRows(
+    `${sb}/rest/v1/cash_log?deleted_at=is.null&fop_date=gte.${encodeURIComponent(start)}&fop_date=lte.${encodeURIComponent(end)}&order=created_at.asc`,
+    sbHeaders
+  );
+  const byId = new Map();
+  [...createdRows, ...datedRows].forEach(row => {
+    const id = String(row?.id || '').trim();
+    if (id) byId.set(id, row);
+  });
+  return Array.from(byId.values())
+    .filter(row => {
+      const date = getCashRowReportDate(row);
+      return date >= start && date <= end && isDailyReportExpenseCashRow(row);
+    })
+    .sort((a, b) => String(a?.created_at || '').localeCompare(String(b?.created_at || '')));
+}
 
 async function getCashSnapshotValue(sb, sbHeaders) {
   const res = await fetch(
@@ -4093,7 +4455,7 @@ async function buildCashSnapshotValue(session, sb, sbHeaders) {
     else if (account === 'cash') balance.cash += amount;
     balance.usd += parseCashSnapshotUsdAmount(row);
     if (row?.expense_category || String(row?.comment || '').trim().startsWith('Расход(')) {
-      balance.expenses += Math.abs(amount);
+      balance.expenses += -amount;
     }
     const sourceKey = getCashLedgerSourceKey(row);
     const approvalStatus = String(row?.approval_status || '').trim().toLowerCase();
@@ -4103,7 +4465,7 @@ async function buildCashSnapshotValue(session, sb, sbHeaders) {
   });
 
   return {
-    version: 1,
+    version: 2,
     active: true,
     cutoffAt,
     createdAt: new Date().toISOString(),

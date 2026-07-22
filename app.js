@@ -106,6 +106,10 @@ function clearCacheAndReload() {
   if (typeof currentSupplierPayments !== 'undefined') currentSupplierPayments = [];
   if (typeof window !== 'undefined') {
     window.allCashLog = [];
+    window.cashLoadState = 'idle';
+    window.cashLoadError = '';
+    window.cashLogUsesSnapshot = false;
+    window.cashSnapshotNeedsRebuild = false;
   }
 
   location.reload();
@@ -116,7 +120,8 @@ async function initApp() {
   updateThemeToggleButton();
   const minDelay = new Promise(r => setTimeout(r, 2000));
   const refDataTask = loadRefData();
-  const tasks = [loadOrders(), loadWorkers(), refDataTask, loadWorkerSalaries(), minDelay];
+  const workersTask = loadWorkers();
+  const tasks = [loadOrders(), workersTask, refDataTask, loadWorkerSalaries(), minDelay];
   if (typeof loadManualClients === 'function' && canViewClients()) {
     tasks.push(loadManualClients());
   }
@@ -129,11 +134,18 @@ async function initApp() {
       paymentMethods = [];
     }
   })());
+  tasks.push((async () => {
+    await Promise.all([refDataTask, workersTask]);
+    if (canViewOwnerCash() || canViewOwnerExpenses() || canViewOwnerPayments()) {
+      try {
+        window.allCashLog = await sbFetchAllCashLog();
+      } catch(e) {
+        window.allCashLog = [];
+        showToast('Касса не загружена: ' + e.message, 'error');
+      }
+    }
+  })());
   if (currentRole === 'owner') {
-    tasks.push((async () => {
-      await refDataTask;
-      try { window.allCashLog = await sbFetchAllCashLog(); } catch(e) { window.allCashLog = []; }
-    })());
     tasks.push((async () => {
       try {
         if (typeof loadAllSalaries === 'function') await loadAllSalaries();
@@ -276,14 +288,24 @@ function openOwnerSettingsScreen() {
 
 async function openOwnerCashScreen() {
   if (!canViewOwnerCash()) return;
-  try { window.allCashLog = await sbFetchAllCashLog(); } catch(e) { window.allCashLog = window.allCashLog || []; }
+  try {
+    window.allCashLog = await sbFetchAllCashLog();
+  } catch(e) {
+    window.allCashLog = [];
+    showToast('Касса не загружена: ' + e.message, 'error');
+  }
   renderOwnerCashScreen();
   showScreen('owner-cash');
 }
 
 async function openOwnerExpensesScreen() {
   if (!canViewOwnerExpenses()) return;
-  try { window.allCashLog = await sbFetchAllCashLog('active', { fullHistory: true }); } catch(e) { window.allCashLog = window.allCashLog || []; }
+  try {
+    window.allCashLog = await sbFetchAllCashLog('active', { fullHistory: true });
+  } catch(e) {
+    window.allCashLog = [];
+    showToast('Расходы не загружены: ' + e.message, 'error');
+  }
   renderOwnerExpensesScreen();
   showScreen('owner-expenses');
 }
@@ -994,7 +1016,11 @@ function isDateInDailyReportRange(date, range) {
   return !!key && key >= range.start && key <= range.end;
 }
 
-function getDailyReportData(startDate, endDate = '') {
+let dailyReportFinanceRows = [];
+let dailyReportFinanceRangeKey = '';
+let dailyReportRenderSequence = 0;
+
+function getDailyReportData(startDate, endDate = '', financeRows = []) {
   const range = normalizeDailyReportRange(startDate, endDate);
   const scheduled = (orders || []).filter(order => isOrderFinanciallyActive(order) && isDateInDailyReportRange(order.date, range));
   const activeOrders = (orders || []).filter(order => isOrderFinanciallyActive(order));
@@ -1018,7 +1044,7 @@ function getDailyReportData(startDate, endDate = '') {
       if (!groupsMap.has(key)) groupsMap.set(key, { label: _ownerTodayGroupLabel({ responsible: order.responsible || 'Без ответственного', assistant: order.assistant || '' }), orders: [] });
       groupsMap.get(key).orders.push(order);
     });
-  const expenses = (typeof getOwnerExpenseLogs === 'function' ? getOwnerExpenseLogs() : [])
+  const expenses = (Array.isArray(financeRows) ? financeRows : [])
     .filter(entry => isDateInDailyReportRange(entry?.fop_date || _ownerCashEntryDate(entry), range));
   const expensesTotal = expenses.reduce((sum, entry) => sum + getExpenseCashAmount(entry), 0);
   const orderValue = completed.reduce((sum, order) => sum + getOrderClientTotalAmount(order), 0);
@@ -1045,17 +1071,51 @@ function openDailyReportModal() {
 
 function closeDailyReportModal() { document.getElementById('daily-report-modal')?.classList.remove('active'); }
 
-function renderDailyReportFromInputs() {
+async function renderDailyReportFromInputs() {
   renderDailyReportModal(
     document.getElementById('daily-report-date')?.value || getLocalDateString(),
     document.getElementById('daily-report-end-date')?.value || document.getElementById('daily-report-date')?.value || getLocalDateString()
   );
 }
 
-function renderDailyReportModal(startDate, endDate = '') {
-  const report = getDailyReportData(startDate, endDate);
+async function renderDailyReportModal(startDate, endDate = '') {
   const container = document.getElementById('daily-report-content');
   if (!container) return;
+  const range = normalizeDailyReportRange(startDate, endDate);
+  const rangeKey = `${range.start}:${range.end}`;
+  const sequence = ++dailyReportRenderSequence;
+  const copyButton = document.getElementById('daily-report-copy-btn');
+  if (copyButton) copyButton.disabled = true;
+  container.innerHTML = `
+    <div class="empty-state">
+      <div class="empty-state-icon">${icon('loader')}</div>
+      <h3>Собираю финансовую сводку</h3>
+      <p>Проверяем кассовые записи за выбранный период</p>
+    </div>
+  `;
+  initIcons();
+  try {
+    const financeRows = await sbFetchDailyReportCash(range.start, range.end);
+    if (sequence !== dailyReportRenderSequence) return;
+    dailyReportFinanceRows = financeRows;
+    dailyReportFinanceRangeKey = rangeKey;
+  } catch (error) {
+    if (sequence !== dailyReportRenderSequence) return;
+    dailyReportFinanceRows = [];
+    dailyReportFinanceRangeKey = '';
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state-icon">${icon('alert-triangle')}</div>
+        <h3>Отчёт не собран</h3>
+        <p>${escapeHtml(error?.message || 'Не удалось загрузить финансовые данные')}</p>
+        <button type="button" class="btn-primary" onclick="renderDailyReportFromInputs()">Повторить</button>
+      </div>
+    `;
+    initIcons();
+    return;
+  }
+  const report = getDailyReportData(range.start, range.end, dailyReportFinanceRows);
+  if (copyButton) copyButton.disabled = false;
   const money = value => `${Number(value || 0).toLocaleString('ru')} ₴`;
   const renderOrder = order => `<button type="button" class="daily-report-order" onclick="openOrderFromDailyReport('${escapeAttr(order.id)}')"><span class="daily-report-order-status ${order.workerDone ? 'is-done' : ''}"></span><div><strong>${escapeHtml(order.id || '—')} · ${escapeHtml(order.car || order.client || 'Без названия')}</strong><small>${order.workerDone ? 'Выполнен' : 'Не выполнен'}${report.isRange && order.date ? ' · ' + escapeHtml(formatDate(order.date)) : ''}${order.time ? ' · ' + escapeHtml(order.time) : ''}</small></div><strong>${money(getOrderClientTotalAmount(order))}</strong></button>`;
   container.innerHTML = `
@@ -1085,8 +1145,8 @@ function openOrderFromDailyReport(orderId) {
   openOrderModal(orderId);
 }
 
-function buildDailyReportText(startDate, endDate = '') {
-  const report = getDailyReportData(startDate, endDate);
+function buildDailyReportText(startDate, endDate = '', financeRows = []) {
+  const report = getDailyReportData(startDate, endDate, financeRows);
   const money = value => `${Number(value || 0).toLocaleString('ru')} ₴`;
   const lines = [`ОТЧЁТ ЗА ${report.label}`, '', `Заказов: ${report.scheduled.length}`, `Выполнено: ${report.completed.length}`, `Не выполнено: ${report.unfinished.length}`, `Перенесено: ${report.transferred.length}`, ''];
   report.groups.forEach(group => {
@@ -1113,10 +1173,16 @@ function buildDailyReportText(startDate, endDate = '') {
   return lines.join('\n');
 }
 
-function copyDailyReport() {
+async function copyDailyReport() {
   const start = document.getElementById('daily-report-date')?.value || getLocalDateString();
   const end = document.getElementById('daily-report-end-date')?.value || start;
-  const text = buildDailyReportText(start, end);
+  const range = normalizeDailyReportRange(start, end);
+  const rangeKey = `${range.start}:${range.end}`;
+  if (dailyReportFinanceRangeKey !== rangeKey) {
+    showToast('Сначала дождитесь загрузки отчёта', 'error');
+    return;
+  }
+  const text = buildDailyReportText(range.start, range.end, dailyReportFinanceRows);
   copyOrderClientContent({ text, html: `<pre style="white-space:pre-wrap;font-family:Arial,sans-serif">${escapeHtml(text)}</pre>` });
 }
 
@@ -1249,30 +1315,32 @@ function renderHome() {
   }
 
   if (canViewOwnerCash()) {
-    const totalCash = getOwnerCurrentCashTotal();
+    const cashUnavailable = window.cashLoadState === 'error';
+    const totalCash = cashUnavailable ? null : getOwnerCurrentCashTotal();
     container.innerHTML += `
       <div class="home-card" onclick="openOwnerCashScreen()">
         <div class="home-card-icon-wrap home-card-icon-dim">
           <i data-lucide="wallet" style="width:22px;height:22px;"></i>
         </div>
         <h3>Касса</h3>
-        <p>Сумма на руках</p>
-        <div class="home-card-count" style="font-size:22px; color: var(--accent);">${totalCash.toLocaleString('ru')} ₴</div>
+        <p>${cashUnavailable ? 'Не удалось загрузить данные' : 'Сумма на руках'}</p>
+        <div class="home-card-count" style="font-size:22px; color:${cashUnavailable ? 'var(--red)' : 'var(--accent)'};">${cashUnavailable ? 'Недоступно' : `${totalCash.toLocaleString('ru')} ₴`}</div>
       </div>
     `;
   }
 
   if (canViewOwnerExpenses()) {
-    const snapshotExpenseTotal = shouldApplyCashSnapshotBase() ? getCashSnapshotTotal('expenses') : 0;
-    const expenseTotal = snapshotExpenseTotal + getOwnerExpenseLogs().reduce((sum, entry) => sum + getExpenseCashAmount(entry), 0);
+    const cashUnavailable = window.cashLoadState === 'error' || window.cashSnapshotNeedsRebuild === true;
+    const snapshotExpenseTotal = !cashUnavailable && shouldApplyCashSnapshotBase() ? getCashSnapshotTotal('expenses') : 0;
+    const expenseTotal = cashUnavailable ? null : snapshotExpenseTotal + getOwnerExpenseLogs().reduce((sum, entry) => sum + getExpenseCashAmount(entry), 0);
     container.innerHTML += `
       <div class="home-card" onclick="openOwnerExpensesScreen()">
         <div class="home-card-icon-wrap home-card-icon-dim">
           <i data-lucide="receipt" style="width:22px;height:22px;"></i>
         </div>
         <h3>Расходы</h3>
-        <p>Затраты по сотрудникам</p>
-        <div class="home-card-count" style="font-size:22px; color: var(--red);">${expenseTotal.toLocaleString('ru')} ₴</div>
+        <p>${window.cashSnapshotNeedsRebuild === true ? 'Пересоздайте кассовый снапшот' : (cashUnavailable ? 'Не удалось загрузить данные' : 'Затраты по сотрудникам')}</p>
+        <div class="home-card-count" style="font-size:22px; color: var(--red);">${cashUnavailable ? 'Недоступно' : `${expenseTotal.toLocaleString('ru')} ₴`}</div>
       </div>
     `;
   }
@@ -2493,10 +2561,27 @@ function closeOwnerExpenseHistoryModal() {
   ownerExpenseSelectedWorker = '';
 }
 
+function isOwnerCashEntryBeforeSnapshot(entry) {
+  const snapshot = typeof getActiveCashSnapshot === 'function' ? getActiveCashSnapshot() : null;
+  if (!entry || snapshot?.active !== true || !snapshot?.cutoffAt) return false;
+  const entryTime = new Date(entry.created_at || 0).getTime();
+  const cutoffTime = new Date(snapshot.cutoffAt).getTime();
+  return Number.isFinite(entryTime) && Number.isFinite(cutoffTime) && entryTime < cutoffTime;
+}
+
 async function deleteOwnerCashEntry(id) {
   if (currentRole !== 'owner' || !id) return;
   const entry = (window.allCashLog || []).find(item => String(item.id) === String(id));
   const hardDelete = !!String(entry?.deleted_at || '').trim();
+  if (isOwnerCashEntryBeforeSnapshot(entry)) {
+    if (hardDelete) {
+      showToast('Старую запись нельзя удалить: она входит в снапшот кассы', 'error');
+      return;
+    }
+    showToast('Запись входит в снапшот — используем безопасную обратную проводку');
+    await reverseOwnerCashEntry(id);
+    return;
+  }
   const message = hardDelete
     ? 'Удалить эту запись кассы безвозвратно? Восстановить ее уже не получится.'
     : 'Переместить эту запись кассы в удаленные? Ее можно будет восстановить позже.';
@@ -2569,6 +2654,11 @@ async function reverseOwnerCashEntry(id) {
 
 async function restoreOwnerCashEntry(id) {
   if (currentRole !== 'owner' || !id) return;
+  const entry = (window.allCashLog || []).find(item => String(item.id) === String(id));
+  if (isOwnerCashEntryBeforeSnapshot(entry)) {
+    showToast('Старую запись нельзя восстановить напрямую: сначала пересоздайте снапшот после сверки кассы', 'error');
+    return;
+  }
   try {
     const saved = await sbUpdateCashEntry(id, {
       deleted_at: null,
@@ -3814,6 +3904,18 @@ function renderOwnerPaymentsScreen() {
 function renderOwnerCashScreen() {
   const container = document.getElementById('owner-cash-content');
   if (!container) return;
+  if (window.cashLoadState === 'error') {
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state-icon">${icon('alert-triangle')}</div>
+        <h3>Касса не загружена</h3>
+        <p>${escapeHtml(window.cashLoadError || 'Не удалось получить подтверждённые данные кассы')}</p>
+        <button type="button" class="btn-primary" onclick="openOwnerCashScreen()">Повторить загрузку</button>
+      </div>
+    `;
+    initIcons();
+    return;
+  }
 
   const workerDescriptors = getOwnerCashWorkerDescriptors();
   const balanceLogs = getOwnerCashBalanceLogs()

@@ -4670,6 +4670,7 @@ async function saveOrder() {
   const newCashClientPaid = newFinanciallyActive ? getCashClientPaidForOrderSnapshot({ ...data, clientPayments: newClientPayments }) : 0;
   const cashClientDiff = newFinanciallyActive ? (newCashClientPaid - oldCashClientPaid) : 0;
   const cashEntries = [];
+  const saveOperationId = globalThis.crypto?.randomUUID?.() || `order-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
   try {
     const result = isNew
@@ -4680,6 +4681,7 @@ async function saveOrder() {
               isNew: true,
               cashEntries: currentCashEntries,
               rollbackOrder: existingOrder,
+              operationId: saveOperationId,
             });
           },
           { cashEntries }
@@ -4688,6 +4690,7 @@ async function saveOrder() {
             isNew: false,
             cashEntries,
             rollbackOrder: existingOrder,
+            operationId: saveOperationId,
           });
     const saved = result.order;
     logFinanceDebug(isNew ? 'order create' : 'order save', result);

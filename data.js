@@ -581,7 +581,8 @@ async function sbUpdateOrder(o) {
   return rows[0] ? rowToOrder(rows[0]) : o;
 }
 
-async function sbSaveOrderWithCash(o, { isNew = false, cashEntries = [], rollbackOrder = null, syncPaymentTypes = null } = {}) {
+async function sbSaveOrderWithCash(o, { isNew = false, cashEntries = [], rollbackOrder = null, syncPaymentTypes = null, operationId = '' } = {}) {
+  const resolvedOperationId = String(operationId || (globalThis.crypto?.randomUUID?.() || `order-${Date.now()}-${Math.random().toString(16).slice(2)}`));
   const res = await fetch(`${WORKER_URL}/api/orders/save-with-cash`, {
     method: 'POST',
     headers: getHeaders(),
@@ -591,6 +592,7 @@ async function sbSaveOrderWithCash(o, { isNew = false, cashEntries = [], rollbac
       rollback_order: rollbackOrder ? orderToRowSparse(rollbackOrder) : null,
       cash_entries: cashEntries,
       sync_payment_types: Array.isArray(syncPaymentTypes) ? syncPaymentTypes : null,
+      operation_id: resolvedOperationId,
     }),
   });
   if (!res.ok) await throwApiError(res);
@@ -920,12 +922,12 @@ async function sbFetchCashLog(workerName, deletedMode = 'active', options = {}) 
   const allRows = [];
   for (let offset = 0; ; offset += pageSize) {
     const res = await fetch(
-      `${WORKER_URL}/api/cash?worker=${encodeURIComponent(resolvedWorkerName)}&deleted=${encodeURIComponent(mode)}&history=${fullHistory ? 'full' : 'snapshot'}&offset=${offset}&limit=${pageSize}`,
+      `${WORKER_URL}/api/cash?worker=${encodeURIComponent(resolvedWorkerName)}&deleted=${encodeURIComponent(mode)}&history=${fullHistory ? 'full' : 'snapshot'}&format=envelope&offset=${offset}&limit=${pageSize}`,
       { headers: getHeaders() }
     );
     if (!res.ok) await throwApiError(res);
-    const rows = await res.json();
-    const rawPage = Array.isArray(rows) ? rows : [];
+    const envelope = await res.json();
+    const rawPage = parseCashPageEnvelope(envelope, { fullHistory, offset });
     const page = rawPage.filter(entry => String(entry?.ledger_status || 'posted') !== 'voided');
     allRows.push(...page);
     if (rawPage.length < pageSize) break;
@@ -936,19 +938,63 @@ async function sbFetchCashLog(workerName, deletedMode = 'active', options = {}) 
 async function sbFetchAllCashLog(deletedMode = 'active', options = {}) {
   const mode = deletedMode === 'only' ? 'only' : deletedMode === 'all' ? 'all' : 'active';
   const fullHistory = options?.fullHistory === true;
-  window.cashLogUsesSnapshot = mode === 'active' && !fullHistory && !!getActiveCashSnapshot();
+  window.cashLoadState = 'loading';
+  window.cashLoadError = '';
   const pageSize = 1000;
   const allRows = [];
-  for (let offset = 0; ; offset += pageSize) {
-    const res = await fetch(`${WORKER_URL}/api/cash/all?deleted=${encodeURIComponent(mode)}&history=${fullHistory ? 'full' : 'snapshot'}&offset=${offset}&limit=${pageSize}`, { headers: getHeaders() });
-    if (!res.ok) await throwApiError(res);
-    const rows = await res.json();
-    const rawPage = Array.isArray(rows) ? rows : [];
-    const page = rawPage.filter(entry => String(entry?.ledger_status || 'posted') !== 'voided');
-    allRows.push(...page);
-    if (rawPage.length < pageSize) break;
+  try {
+    for (let offset = 0; ; offset += pageSize) {
+      const res = await fetch(`${WORKER_URL}/api/cash/all?deleted=${encodeURIComponent(mode)}&history=${fullHistory ? 'full' : 'snapshot'}&format=envelope&offset=${offset}&limit=${pageSize}`, { headers: getHeaders() });
+      if (!res.ok) await throwApiError(res);
+      const envelope = await res.json();
+      const rawPage = parseCashPageEnvelope(envelope, { fullHistory, offset });
+      const page = rawPage.filter(entry => String(entry?.ledger_status || 'posted') !== 'voided');
+      allRows.push(...page);
+      if (rawPage.length < pageSize) break;
+    }
+    window.cashLoadState = 'ready';
+    return allRows;
+  } catch (error) {
+    window.cashLogUsesSnapshot = false;
+    window.cashLoadState = 'error';
+    window.cashLoadError = error?.message || 'Не удалось загрузить кассу';
+    throw error;
   }
-  return allRows;
+}
+
+function parseCashPageEnvelope(envelope, { fullHistory = false, offset = 0 } = {}) {
+  if (!envelope || Array.isArray(envelope) || !Array.isArray(envelope.rows)) {
+    throw new Error('Worker кассы не обновлён: отсутствует защищённый формат ответа');
+  }
+  if (offset === 0) {
+    const snapshot = envelope.snapshot;
+    const snapshotMode = !fullHistory && envelope.mode === 'snapshot';
+    if (snapshotMode) {
+      if (!snapshot || snapshot.active !== true || !String(snapshot.cutoffAt || '').trim() || !Array.isArray(snapshot.balances)) {
+        throw new Error('Снапшот кассы загружен не полностью');
+      }
+      appSettings = appSettings && typeof appSettings === 'object' ? appSettings : {};
+      appSettings[CASH_SNAPSHOT_SETTING_KEY] = snapshot;
+      cashSnapshotConfirmedKeysCache = null;
+      cashSnapshotConfirmedKeysSource = null;
+      window.cashLogUsesSnapshot = true;
+      window.cashSnapshotNeedsRebuild = (Number(snapshot.version) || 1) < 2;
+    } else {
+      window.cashLogUsesSnapshot = false;
+      window.cashSnapshotNeedsRebuild = false;
+    }
+  }
+  return envelope.rows;
+}
+
+async function sbFetchDailyReportCash(startDate, endDate = startDate) {
+  const from = String(startDate || '').slice(0, 10);
+  const to = String(endDate || from).slice(0, 10);
+  const res = await fetch(`${WORKER_URL}/api/reports/daily-finance?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, { headers: getHeaders() });
+  if (!res.ok) await throwApiError(res);
+  const payload = await res.json();
+  if (!payload || !Array.isArray(payload.rows)) throw new Error('Некорректный ответ финансового отчёта');
+  return payload.rows;
 }
 
 async function sbCreateCashSnapshot() {
@@ -1214,7 +1260,9 @@ function isExpenseCashEntry(entry) {
 }
 
 function getExpenseCashAmount(entry) {
-  return Math.abs(Number(entry?.amount) || 0);
+  // Expenses are stored as negative ledger movements. Returning the inverse
+  // preserves the sign of reversals/corrections instead of counting them twice.
+  return -(Number(entry?.amount) || 0);
 }
 
 function getCashEntryDisplayComment(entry) {
