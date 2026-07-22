@@ -746,7 +746,7 @@
     <div class="modal-body daily-report-body" id="daily-report-content"></div>
     <div class="modal-footer">
       <button type="button" class="btn-secondary" onclick="closeDailyReportModal()">Закрыть</button>
-      <button type="button" class="btn-primary" id="daily-report-copy-btn" onclick="copyDailyReport()"><i data-lucide="copy" style="width:14px;height:14px;"></i> Копировать отчёт</button>
+      <button type="button" class="btn-primary" onclick="copyDailyReport()"><i data-lucide="copy" style="width:14px;height:14px;"></i> Копировать отчёт</button>
     </div>
   </div>
 </div>
@@ -789,17 +789,6 @@
     </div>
 
     <div class="modal-body">
-
-      <div class="order-public-comment-panel">
-        <div class="order-public-comment-head">
-          <div>
-            <label class="form-label" for="f-public-comment">💬 Общий комментарий к заказу</label>
-            <div class="order-public-comment-hint" id="f-public-comment-meta">Его видят и могут изменять все сотрудники, которым доступен заказ</div>
-          </div>
-          <button type="button" class="btn-secondary" id="f-public-comment-save" onclick="saveOrderPublicComment(editingOrderId, 'f-public-comment')">Сохранить комментарий</button>
-        </div>
-        <textarea class="form-input" id="f-public-comment" rows="3" maxlength="4000" placeholder="Общая информация, уточнения или договорённости по заказу"></textarea>
-      </div>
 
       <!-- ── СЕКЦИЯ 1: ОСНОВНАЯ ИНФОРМАЦИЯ ── -->
       <div class="form-section" data-order-modal-panel="order">
@@ -904,6 +893,15 @@
             <label class="form-label">🏭 Производитель</label>
             <select class="form-select" id="f-glass-manufacturer">
               <option value="">— выбрать —</option>
+              <option value="🇨🇳 XYG (Китай)">🇨🇳 XYG (Китай)</option>
+              <option value="🇨🇳 BENSON (Китай)">🇨🇳 BENSON (Китай)</option>
+              <option value="🇨🇳 LAMINATED (Китай)">🇨🇳 LAMINATED (Китай)</option>
+              <option value="🇨🇳 GLASPO (Китай)">🇨🇳 GLASPO (Китай)</option>
+              <option value="🇪🇺 Saint-Gobain Sekurit (Европа)">🇪🇺 Saint-Gobain Sekurit (Европа)</option>
+              <option value="🇪🇺 Pilkington (Европа)">🇪🇺 Pilkington (Европа)</option>
+              <option value="🇺🇸 GUARDIAN">🇺🇸 GUARDIAN</option>
+              <option value="🇵🇱Carlex">🇵🇱Carlex</option>
+              <option value="🇹🇷🇪🇺GLAVISTA">🇹🇷🇪🇺GLAVISTA</option>
             </select>
           </div>
           <div class="form-group">

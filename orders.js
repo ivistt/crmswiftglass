@@ -81,7 +81,7 @@ const SERVICE_TYPE_OPTIONS = new Proxy([], {
   }
 });
 const CUSTOM_SERVICE_TYPE_NAME = 'Нестандартные работы';
-const DEFAULT_GLASS_MANUFACTURERS = [
+const GLASS_MANUFACTURERS = [
   {
     name: '🇨🇳 XYG (Китай)',
     description: 'Средний сегмент (хороший аналог)\nГеометрия уступает европейским производителям\nМассово используется на рынке',
@@ -119,26 +119,7 @@ const DEFAULT_GLASS_MANUFACTURERS = [
     description: 'турецко-европейский производитель автостекла',
   },
 ];
-
-function getGlassManufacturers() {
-  const configured = appSettings?.glass_manufacturers?.items;
-  const source = Array.isArray(configured) ? configured : DEFAULT_GLASS_MANUFACTURERS;
-  return source
-    .map((item, index) => ({
-      key: String(item?.key || `manufacturer-${index + 1}`),
-      name: String(item?.name || '').trim(),
-      description: String(item?.description || item?.comment || '').trim(),
-    }))
-    .filter(item => item.name);
-}
-
-function getGlassManufacturerClientCopyBlocks() {
-  return getGlassManufacturers().map((item, index) => ({
-    key: `glass-manufacturer-${item.key || index + 1}`,
-    title: item.name,
-    text: item.description ? `*${item.name}*\n\n${item.description}` : `*${item.name}*`,
-  }));
-}
+const GLASS_MANUFACTURER_BY_NAME = Object.fromEntries(GLASS_MANUFACTURERS.map(item => [item.name, item]));
 
 const SERVICE_TYPE_BY_NAME = new Proxy({}, {
   get(_target, prop) {
@@ -388,7 +369,7 @@ function _escapeAttr(value) {
 }
 
 function getGlassManufacturerCopyText(name) {
-  const manufacturer = getGlassManufacturers().find(item => item.name === name);
+  const manufacturer = GLASS_MANUFACTURER_BY_NAME[name];
   if (!name) return '';
   return manufacturer?.description
     ? `Производитель стекла: ${name}\n${manufacturer.description}`
@@ -645,9 +626,7 @@ function goBackFromOrdersList() {
 // ---------- РЕНДЕР КАРТОЧКИ ЗАКАЗА ----------
 function renderOrderCard(o) {
   const canOpenModal = canCurrentUserOpenOrderModal(o);
-  const cardClickAction = canOpenModal
-    ? `openOrderModal('${escapeAttr(o.id)}')`
-    : `openOrderDetail('${escapeAttr(o.id)}')`;
+  const cardClickAction = canOpenModal ? `openOrderModal('${escapeAttr(o.id)}')` : '';
   const primaryTitle = o.client || '—';
   const clientTotal = getOrderClientTotal(o);
   const clientPaidAmount = getOrderClientPaidAmount(o);
@@ -685,7 +664,7 @@ function renderOrderCard(o) {
     ? ' order-card-priority-highlight'
     : '';
   return `
-    <div class="order-card ${getOrderCardStateClass(o)}${specialistPriorityClass}" onclick="${cardClickAction}" style="cursor:pointer;">
+    <div class="order-card ${getOrderCardStateClass(o)}${specialistPriorityClass}" ${canOpenModal ? `onclick="${cardClickAction}" style="cursor:pointer;"` : 'style="cursor:default;"'}>
       <div class="order-card-top">
         <div class="order-card-left">
           <div class="order-card-status-row">
@@ -697,7 +676,6 @@ function renderOrderCard(o) {
       </div>
       <div class="order-card-primary-group">
         ${layoutHtml}
-        ${getOrderPublicComment(o) ? `<div class="order-card-public-comment">${icon('message-square')} <span>${escapeHtml(getOrderPublicComment(o))}</span></div>` : ''}
       </div>
     </div>
   `;
@@ -1725,17 +1703,6 @@ function openOrderDetail(id) {
       </div>
     </div>
 
-    <div class="detail-section order-detail-public-comment">
-      <div class="order-public-comment-head">
-        <div>
-          <div class="detail-section-title" style="margin-bottom:4px;">${icon('message-square')} Общий комментарий</div>
-          <div class="order-public-comment-hint">${escapeHtml(getOrderPublicCommentMeta(o))}</div>
-        </div>
-        <button type="button" class="btn-secondary" id="order-detail-public-comment-save" onclick="saveOrderPublicComment('${escapeAttr(o.id)}', 'order-detail-public-comment')">Сохранить комментарий</button>
-      </div>
-      <textarea class="form-input" id="order-detail-public-comment" rows="3" maxlength="4000" placeholder="Общая информация, уточнения или договорённости по заказу">${escapeHtml(getOrderPublicComment(o))}</textarea>
-    </div>
-
     <div class="detail-section">
       <div class="detail-section-title">${icon('user')} Клиент</div>
       <div class="detail-grid">
@@ -2641,17 +2608,6 @@ async function rememberCarDirectoryFromOrder(order) {
 function populateRefSelects() {
   // Марки авто — теперь datalist
   populateCarDatalist();
-
-  const manufacturerSel = document.getElementById('f-glass-manufacturer');
-  if (manufacturerSel) {
-    const current = manufacturerSel.value;
-    manufacturerSel.innerHTML = '<option value="">— выбрать —</option>' + getGlassManufacturers()
-      .map(item => `<option value="${escapeAttr(item.name)}">${escapeHtml(item.name)}</option>`)
-      .join('');
-    if (current && Array.from(manufacturerSel.options).some(option => option.value === current)) {
-      manufacturerSel.value = current;
-    }
-  }
 
   // Способы оплаты (dynamic, from Supabase)
   const paymentMethods = (typeof getPaymentMethods === 'function' ? getPaymentMethods() : [])
@@ -3566,54 +3522,6 @@ function getOrderReminderComment(order = null) {
   return String(order?.reminderComment || order?.reworkData?.reminderComment || '').trim();
 }
 
-function getOrderPublicComment(order = null) {
-  return String(order?.publicComment || order?.reworkData?.publicComment || '').trim();
-}
-
-function getOrderPublicCommentMeta(order = null) {
-  const by = String(order?.reworkData?.publicCommentUpdatedBy || '').trim();
-  const at = String(order?.reworkData?.publicCommentUpdatedAt || '').trim();
-  if (!by && !at) return 'Его видят и могут изменять все сотрудники, которым доступен заказ';
-  const dateLabel = at
-    ? new Date(at).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' })
-    : '';
-  return `Последнее изменение${by ? `: ${getWorkerDisplayName(by) || by}` : ''}${dateLabel ? ` · ${dateLabel}` : ''}`;
-}
-
-async function saveOrderPublicComment(orderId, inputId = 'f-public-comment') {
-  const id = String(orderId || '').trim();
-  if (!id) return showToast('Комментарий сохранится вместе с новым заказом', 'error');
-  const order = (orders || []).find(item => String(item?.id || '') === id);
-  if (!order) return showToast('Заказ не найден', 'error');
-  const input = document.getElementById(inputId);
-  const button = inputId === 'f-public-comment'
-    ? document.getElementById('f-public-comment-save')
-    : document.getElementById(`${inputId}-save`);
-  if (button) {
-    button.disabled = true;
-    button.textContent = 'Сохраняю…';
-  }
-  try {
-    const saved = await sbUpdateOrderPublicComment(id, input?.value || '');
-    const index = orders.findIndex(item => String(item?.id || '') === id);
-    const updated = index === -1 ? saved : { ...orders[index], ...saved };
-    if (index !== -1) orders[index] = updated;
-    if (input) input.value = getOrderPublicComment(updated);
-    const meta = document.getElementById('f-public-comment-meta');
-    if (meta && inputId === 'f-public-comment') meta.textContent = getOrderPublicCommentMeta(updated);
-    if (typeof refreshActiveOrdersViews === 'function') refreshActiveOrdersViews();
-    else renderOrders();
-    showToast('Общий комментарий сохранён ✓');
-  } catch (e) {
-    showToast('Ошибка комментария: ' + e.message, 'error');
-  } finally {
-    if (button?.isConnected) {
-      button.disabled = false;
-      button.textContent = 'Сохранить комментарий';
-    }
-  }
-}
-
 function buildOrderReminderPatch(existingOrder = null, checked = false, comment = null) {
   const canEditReminder = canCurrentUserUseOrderReminder();
   const reminder = canEditReminder ? !!checked : getCurrentOrderReminderChecked(existingOrder);
@@ -3684,7 +3592,6 @@ function getOrderDraftFromForm(baseOrder = null) {
   order.reminder = reminderPatch.reminder;
   order.reminderWorkers = reminderPatch.reminderWorkers;
   order.reminderComment = reminderPatch.reminderComment;
-  order.publicComment = String(document.getElementById('f-public-comment')?.value || baseOrder?.publicComment || '').trim();
   order.total = getN('f-total');
   order.income = getN('f-income');
   order.purchase = getN('f-purchase');
@@ -3996,17 +3903,6 @@ function updateOrderModalAccess(order = null) {
 
   updateOrderModalTabsAccess(existingOrder);
 
-  const publicCommentInput = document.getElementById('f-public-comment');
-  setElementDisabledState(publicCommentInput, false);
-  const publicCommentSaveBtn = document.getElementById('f-public-comment-save');
-  if (publicCommentSaveBtn) publicCommentSaveBtn.style.display = editingOrderId && existingOrder ? '' : 'none';
-  const publicCommentMeta = document.getElementById('f-public-comment-meta');
-  if (publicCommentMeta) {
-    publicCommentMeta.textContent = editingOrderId && existingOrder
-      ? getOrderPublicCommentMeta(existingOrder)
-      : 'Комментарий сохранится вместе с новым заказом';
-  }
-
   const basicFieldIds = [
     'f-date','f-time','f-responsible','f-assistant','f-manager','f-client','f-phone','f-address',
     'f-vin','f-extra-note','f-car','f-code','f-glass-manufacturer','f-new-post','f-warehouse',
@@ -4222,18 +4118,7 @@ function fillOrderForm(o) {
   set('f-car', o.car);
   set('f-code', o.code);
   set('f-glass-manufacturer', o.glassManufacturer);
-  const manufacturerEl = document.getElementById('f-glass-manufacturer');
-  if (manufacturerEl && o.glassManufacturer && !Array.from(manufacturerEl.options).some(option => option.value === o.glassManufacturer)) {
-    const legacyOption = document.createElement('option');
-    legacyOption.value = o.glassManufacturer;
-    legacyOption.textContent = `${o.glassManufacturer} · сохранён в заказе`;
-    manufacturerEl.appendChild(legacyOption);
-    manufacturerEl.value = o.glassManufacturer;
-  }
   set('f-notes', o.notes);
-  set('f-public-comment', getOrderPublicComment(o));
-  const publicCommentMeta = document.getElementById('f-public-comment-meta');
-  if (publicCommentMeta) publicCommentMeta.textContent = getOrderPublicCommentMeta(o);
   set('f-mount', o.mount);
   set('f-molding', o.molding);
   set('f-extra-work', o.extraWork);
@@ -4357,7 +4242,7 @@ function clearOrderForm() {
     'f-payout-dropshipper','f-payout-manager-glass','f-payout-resp-glass',
     'f-payout-lesha','f-payout-roma','f-payout-extra-resp','f-payout-extra-assist',
     'f-payout-molding-resp','f-payout-molding-assist','f-assistant','f-extra-assistant','f-manager','f-tatu-responsible','f-toning-responsible',
-    'f-new-payment-amount','f-new-payment-date','f-new-supplier-payment-amount','f-new-supplier-payment-date','f-new-supplier-payment-method','f-public-comment'
+    'f-new-payment-amount','f-new-payment-date','f-new-supplier-payment-amount','f-new-supplier-payment-date','f-new-supplier-payment-method'
   ];
   ids.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   currentClientPayments = [];
@@ -4569,7 +4454,6 @@ async function saveOrder() {
     reminder:        reminderPatch.reminder,
     reminderWorkers: reminderPatch.reminderWorkers,
     reminderComment: reminderPatch.reminderComment,
-    publicComment:   get('f-public-comment'),
     delivery:        getN('f-delivery'),
     warehouse:       get('f-warehouse'),
     warehouseCode:   get('f-warehouse-code'),
@@ -4628,11 +4512,6 @@ async function saveOrder() {
     supplierPayments: currentSupplierPayments,
   };
 
-  if (data.publicComment !== getOrderPublicComment(existingOrder)) {
-    data.reworkData.publicCommentUpdatedAt = new Date().toISOString();
-    data.reworkData.publicCommentUpdatedBy = currentWorkerName || currentRole || '';
-  }
-
   if (existingOrder?.date && data.date && existingOrder.date !== data.date) {
     const history = Array.isArray(data.reworkData?.rescheduleHistory)
       ? [...data.reworkData.rescheduleHistory]
@@ -4670,7 +4549,6 @@ async function saveOrder() {
   const newCashClientPaid = newFinanciallyActive ? getCashClientPaidForOrderSnapshot({ ...data, clientPayments: newClientPayments }) : 0;
   const cashClientDiff = newFinanciallyActive ? (newCashClientPaid - oldCashClientPaid) : 0;
   const cashEntries = [];
-  const saveOperationId = globalThis.crypto?.randomUUID?.() || `order-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
   try {
     const result = isNew
@@ -4681,7 +4559,6 @@ async function saveOrder() {
               isNew: true,
               cashEntries: currentCashEntries,
               rollbackOrder: existingOrder,
-              operationId: saveOperationId,
             });
           },
           { cashEntries }
@@ -4690,7 +4567,6 @@ async function saveOrder() {
             isNew: false,
             cashEntries,
             rollbackOrder: existingOrder,
-            operationId: saveOperationId,
           });
     const saved = result.order;
     logFinanceDebug(isNew ? 'order create' : 'order save', result);

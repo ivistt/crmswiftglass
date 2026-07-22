@@ -581,8 +581,7 @@ async function sbUpdateOrder(o) {
   return rows[0] ? rowToOrder(rows[0]) : o;
 }
 
-async function sbSaveOrderWithCash(o, { isNew = false, cashEntries = [], rollbackOrder = null, syncPaymentTypes = null, operationId = '' } = {}) {
-  const resolvedOperationId = String(operationId || (globalThis.crypto?.randomUUID?.() || `order-${Date.now()}-${Math.random().toString(16).slice(2)}`));
+async function sbSaveOrderWithCash(o, { isNew = false, cashEntries = [], rollbackOrder = null, syncPaymentTypes = null } = {}) {
   const res = await fetch(`${WORKER_URL}/api/orders/save-with-cash`, {
     method: 'POST',
     headers: getHeaders(),
@@ -592,7 +591,6 @@ async function sbSaveOrderWithCash(o, { isNew = false, cashEntries = [], rollbac
       rollback_order: rollbackOrder ? orderToRowSparse(rollbackOrder) : null,
       cash_entries: cashEntries,
       sync_payment_types: Array.isArray(syncPaymentTypes) ? syncPaymentTypes : null,
-      operation_id: resolvedOperationId,
     }),
   });
   if (!res.ok) await throwApiError(res);
@@ -602,17 +600,6 @@ async function sbSaveOrderWithCash(o, { isNew = false, cashEntries = [], rollbac
     cashEntries: Array.isArray(body?.cash_entries) ? body.cash_entries : [],
     financeDebug: Array.isArray(body?.finance_debug) ? body.finance_debug : [],
   };
-}
-
-async function sbUpdateOrderPublicComment(orderId, publicComment) {
-  const res = await fetch(`${WORKER_URL}/api/orders/${encodeURIComponent(orderId)}/public-comment`, {
-    method: 'PATCH',
-    headers: getHeaders(),
-    body: JSON.stringify({ publicComment: String(publicComment || '').slice(0, 4000) }),
-  });
-  if (!res.ok) await throwApiError(res);
-  const rows = await res.json();
-  return rowToOrder(Array.isArray(rows) ? rows[0] : rows);
 }
 
 async function sbBackfillOrderCashEntries() {
@@ -852,67 +839,8 @@ async function sbDeleteWorkerSalary(id) {
 
 // ── CASH LOG ─────────────────────────────────────────────────
 
-const CASH_SNAPSHOT_SETTING_KEY = 'cash_snapshot_v1';
-
-function getActiveCashSnapshot() {
-  const snapshot = appSettings?.[CASH_SNAPSHOT_SETTING_KEY];
-  if (!snapshot || snapshot.active !== true || !String(snapshot.cutoffAt || '').trim()) return null;
-  return snapshot;
-}
-
-function getCashSnapshotBalance(workerIdentity, account = 'cash') {
-  const snapshot = getActiveCashSnapshot();
-  if (!snapshot) return 0;
-  const workerId = String(workerIdentity?.workerId || workerIdentity?.id || '').trim();
-  const workerName = String(
-    workerIdentity?.workerName
-    || workerIdentity?.name
-    || (typeof workerIdentity === 'string' ? workerIdentity : '')
-    || ''
-  ).trim().toLowerCase();
-  const key = account === 'usd' ? 'usd' : (account === 'fop' ? 'fop' : (account === 'expenses' ? 'expenses' : 'cash'));
-  return (Array.isArray(snapshot.balances) ? snapshot.balances : []).reduce((sum, row) => {
-    const rowId = String(row?.workerId || '').trim();
-    const rowName = String(row?.workerName || '').trim().toLowerCase();
-    const matches = (workerId && rowId && workerId === rowId) || (workerName && rowName && workerName === rowName);
-    return matches ? sum + (Number(row?.[key]) || 0) : sum;
-  }, 0);
-}
-
-function getCashSnapshotTotal(account = 'uah') {
-  const snapshot = getActiveCashSnapshot();
-  if (!snapshot) return 0;
-  return (Array.isArray(snapshot.balances) ? snapshot.balances : []).reduce((sum, row) => {
-    if (account === 'usd') return sum + (Number(row?.usd) || 0);
-    if (account === 'cash') return sum + (Number(row?.cash) || 0);
-    if (account === 'fop') return sum + (Number(row?.fop) || 0);
-    if (account === 'expenses') return sum + (Number(row?.expenses) || 0);
-    return sum + (Number(row?.cash) || 0) + (Number(row?.fop) || 0);
-  }, 0);
-}
-
-let cashSnapshotConfirmedKeysCache = null;
-let cashSnapshotConfirmedKeysSource = null;
-
-function cashSnapshotHasConfirmedSourceKey(sourceKey) {
-  const snapshot = getActiveCashSnapshot();
-  if (!snapshot || !sourceKey) return false;
-  if (cashSnapshotConfirmedKeysSource !== snapshot) {
-    cashSnapshotConfirmedKeysSource = snapshot;
-    cashSnapshotConfirmedKeysCache = new Set(Array.isArray(snapshot.confirmedPaymentKeys) ? snapshot.confirmedPaymentKeys : []);
-  }
-  return cashSnapshotConfirmedKeysCache.has(String(sourceKey));
-}
-
-function shouldApplyCashSnapshotBase(scope = 'owner') {
-  if (!getActiveCashSnapshot()) return false;
-  if (scope === 'personal') return true;
-  return window.cashLogUsesSnapshot !== false;
-}
-
-async function sbFetchCashLog(workerName, deletedMode = 'active', options = {}) {
+async function sbFetchCashLog(workerName, deletedMode = 'active') {
   const mode = deletedMode === 'only' ? 'only' : deletedMode === 'all' ? 'all' : 'active';
-  const fullHistory = options?.fullHistory === true;
   const resolvedWorkerName = String(
     (workers || []).find(item => item.name === workerName || item.alias === workerName)?.name
     || workerName
@@ -922,12 +850,12 @@ async function sbFetchCashLog(workerName, deletedMode = 'active', options = {}) 
   const allRows = [];
   for (let offset = 0; ; offset += pageSize) {
     const res = await fetch(
-      `${WORKER_URL}/api/cash?worker=${encodeURIComponent(resolvedWorkerName)}&deleted=${encodeURIComponent(mode)}&history=${fullHistory ? 'full' : 'snapshot'}&format=envelope&offset=${offset}&limit=${pageSize}`,
+      `${WORKER_URL}/api/cash?worker=${encodeURIComponent(resolvedWorkerName)}&deleted=${encodeURIComponent(mode)}&offset=${offset}&limit=${pageSize}`,
       { headers: getHeaders() }
     );
     if (!res.ok) await throwApiError(res);
-    const envelope = await res.json();
-    const rawPage = parseCashPageEnvelope(envelope, { fullHistory, offset });
+    const rows = await res.json();
+    const rawPage = Array.isArray(rows) ? rows : [];
     const page = rawPage.filter(entry => String(entry?.ledger_status || 'posted') !== 'voided');
     allRows.push(...page);
     if (rawPage.length < pageSize) break;
@@ -935,86 +863,20 @@ async function sbFetchCashLog(workerName, deletedMode = 'active', options = {}) 
   return allRows;
 }
 
-async function sbFetchAllCashLog(deletedMode = 'active', options = {}) {
+async function sbFetchAllCashLog(deletedMode = 'active') {
   const mode = deletedMode === 'only' ? 'only' : deletedMode === 'all' ? 'all' : 'active';
-  const fullHistory = options?.fullHistory === true;
-  window.cashLoadState = 'loading';
-  window.cashLoadError = '';
   const pageSize = 1000;
   const allRows = [];
-  try {
-    for (let offset = 0; ; offset += pageSize) {
-      const res = await fetch(`${WORKER_URL}/api/cash/all?deleted=${encodeURIComponent(mode)}&history=${fullHistory ? 'full' : 'snapshot'}&format=envelope&offset=${offset}&limit=${pageSize}`, { headers: getHeaders() });
-      if (!res.ok) await throwApiError(res);
-      const envelope = await res.json();
-      const rawPage = parseCashPageEnvelope(envelope, { fullHistory, offset });
-      const page = rawPage.filter(entry => String(entry?.ledger_status || 'posted') !== 'voided');
-      allRows.push(...page);
-      if (rawPage.length < pageSize) break;
-    }
-    window.cashLoadState = 'ready';
-    return allRows;
-  } catch (error) {
-    window.cashLogUsesSnapshot = false;
-    window.cashLoadState = 'error';
-    window.cashLoadError = error?.message || 'Не удалось загрузить кассу';
-    throw error;
+  for (let offset = 0; ; offset += pageSize) {
+    const res = await fetch(`${WORKER_URL}/api/cash/all?deleted=${encodeURIComponent(mode)}&offset=${offset}&limit=${pageSize}`, { headers: getHeaders() });
+    if (!res.ok) await throwApiError(res);
+    const rows = await res.json();
+    const rawPage = Array.isArray(rows) ? rows : [];
+    const page = rawPage.filter(entry => String(entry?.ledger_status || 'posted') !== 'voided');
+    allRows.push(...page);
+    if (rawPage.length < pageSize) break;
   }
-}
-
-function parseCashPageEnvelope(envelope, { fullHistory = false, offset = 0 } = {}) {
-  if (!envelope || Array.isArray(envelope) || !Array.isArray(envelope.rows)) {
-    throw new Error('Worker кассы не обновлён: отсутствует защищённый формат ответа');
-  }
-  if (offset === 0) {
-    const snapshot = envelope.snapshot;
-    const snapshotMode = !fullHistory && envelope.mode === 'snapshot';
-    if (snapshotMode) {
-      if (!snapshot || snapshot.active !== true || !String(snapshot.cutoffAt || '').trim() || !Array.isArray(snapshot.balances)) {
-        throw new Error('Снапшот кассы загружен не полностью');
-      }
-      appSettings = appSettings && typeof appSettings === 'object' ? appSettings : {};
-      appSettings[CASH_SNAPSHOT_SETTING_KEY] = snapshot;
-      cashSnapshotConfirmedKeysCache = null;
-      cashSnapshotConfirmedKeysSource = null;
-      window.cashLogUsesSnapshot = true;
-      window.cashSnapshotNeedsRebuild = (Number(snapshot.version) || 1) < 2;
-    } else {
-      window.cashLogUsesSnapshot = false;
-      window.cashSnapshotNeedsRebuild = false;
-    }
-  }
-  return envelope.rows;
-}
-
-async function sbFetchDailyReportCash(startDate, endDate = startDate) {
-  const from = String(startDate || '').slice(0, 10);
-  const to = String(endDate || from).slice(0, 10);
-  const res = await fetch(`${WORKER_URL}/api/reports/daily-finance?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, { headers: getHeaders() });
-  if (!res.ok) await throwApiError(res);
-  const payload = await res.json();
-  if (!payload || !Array.isArray(payload.rows)) throw new Error('Некорректный ответ финансового отчёта');
-  return payload.rows;
-}
-
-async function sbCreateCashSnapshot() {
-  const res = await fetch(`${WORKER_URL}/api/cash/snapshot`, {
-    method: 'POST',
-    headers: getHeaders(),
-    body: JSON.stringify({ action: 'create' }),
-  });
-  if (!res.ok) await throwApiError(res);
-  return res.json();
-}
-
-async function sbDisableCashSnapshot() {
-  const res = await fetch(`${WORKER_URL}/api/cash/snapshot`, {
-    method: 'POST',
-    headers: getHeaders(),
-    body: JSON.stringify({ action: 'disable' }),
-  });
-  if (!res.ok) await throwApiError(res);
-  return res.json();
+  return allRows;
 }
 
 async function sbInsertCashEntry(entry) {
@@ -1260,9 +1122,7 @@ function isExpenseCashEntry(entry) {
 }
 
 function getExpenseCashAmount(entry) {
-  // Expenses are stored as negative ledger movements. Returning the inverse
-  // preserves the sign of reversals/corrections instead of counting them twice.
-  return -(Number(entry?.amount) || 0);
+  return Math.abs(Number(entry?.amount) || 0);
 }
 
 function getCashEntryDisplayComment(entry) {
@@ -1586,9 +1446,9 @@ function getDropshipperCashWorkerRecord(dropshipperName) {
   }) || null;
 }
 
-function getCashRunningBalanceMap(log = [], amountGetter = entry => Number(entry?.amount) || 0, initialBalance = 0) {
+function getCashRunningBalanceMap(log = [], amountGetter = entry => Number(entry?.amount) || 0) {
   const map = new Map();
-  let balance = Number(initialBalance) || 0;
+  let balance = 0;
   [...(log || [])]
     .filter(entry => !String(entry?.deleted_at || '').trim())
     .sort((a, b) => {
@@ -1699,7 +1559,6 @@ function rowToOrder(r) {
     reminder:        !!r.rework_data?.reminder || (Array.isArray(r.rework_data?.reminderWorkers) && r.rework_data.reminderWorkers.length > 0),
     reminderWorkers: Array.isArray(r.rework_data?.reminderWorkers) ? r.rework_data.reminderWorkers : [],
     reminderComment: String(r.rework_data?.reminderComment || ''),
-    publicComment:  String(r.rework_data?.publicComment || ''),
     clientPayments:  r.client_payments || [],
     supplierPayments:r.supplier_payments || [],
     deletedAt:       r.deleted_at || '',
@@ -1719,9 +1578,6 @@ function orderToRow(o) {
   const reminderComment = Object.prototype.hasOwnProperty.call(o, 'reminderComment') ? o.reminderComment : reworkData.reminderComment;
   if (String(reminderComment || '').trim()) reworkData.reminderComment = String(reminderComment || '').trim();
   else delete reworkData.reminderComment;
-  const publicComment = Object.prototype.hasOwnProperty.call(o, 'publicComment') ? o.publicComment : reworkData.publicComment;
-  if (String(publicComment || '').trim()) reworkData.publicComment = String(publicComment || '').trim().slice(0, 4000);
-  else delete reworkData.publicComment;
   return {
     id:               o.id,
     date:             o.date,
@@ -1882,7 +1738,6 @@ function orderToRowSparse(o) {
     ['reminder', 'rework_data'],
     ['reminderWorkers', 'rework_data'],
     ['reminderComment', 'rework_data'],
-    ['publicComment', 'rework_data'],
     ['clientPayments', 'client_payments'],
     ['supplierPayments', 'supplier_payments'],
   ];
@@ -2746,21 +2601,17 @@ function isOrderPaymentConfirmed(order, payment, paymentType = 'client') {
   if (!method) return false;
   if (!isConfirmablePaymentMethod(method)) return true;
   const sourceKey = buildPaymentSourceKey(order?.id || '', method, paymentType, payment);
-  return (Array.isArray(window.allCashLog) && window.allCashLog.some(entry =>
+  return Array.isArray(window.allCashLog) && window.allCashLog.some(entry =>
     getCashEntrySourceKey(entry) === sourceKey && entry?.fop_confirmed === true
-  )) || cashSnapshotHasConfirmedSourceKey(sourceKey);
+  );
 }
 
 function getOrderPaymentCashEntry(order, payment, paymentType = 'client') {
   const method = normalizePaymentMethod(payment?.method || '');
   if (!method || !isConfirmablePaymentMethod(method)) return null;
   const sourceKey = buildPaymentSourceKey(order?.id || '', method, paymentType, payment);
-  const liveEntry = Array.isArray(window.allCashLog)
+  return Array.isArray(window.allCashLog)
     ? (window.allCashLog.find(entry => getCashEntrySourceKey(entry) === sourceKey) || null)
-    : null;
-  if (liveEntry) return liveEntry;
-  return cashSnapshotHasConfirmedSourceKey(sourceKey)
-    ? { source_key: sourceKey, fop_source_key: sourceKey, fop_confirmed: true, approval_status: 'confirmed', snapshot: true }
     : null;
 }
 

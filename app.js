@@ -106,10 +106,6 @@ function clearCacheAndReload() {
   if (typeof currentSupplierPayments !== 'undefined') currentSupplierPayments = [];
   if (typeof window !== 'undefined') {
     window.allCashLog = [];
-    window.cashLoadState = 'idle';
-    window.cashLoadError = '';
-    window.cashLogUsesSnapshot = false;
-    window.cashSnapshotNeedsRebuild = false;
   }
 
   location.reload();
@@ -119,9 +115,7 @@ async function initApp() {
   updateThemeAssets();
   updateThemeToggleButton();
   const minDelay = new Promise(r => setTimeout(r, 2000));
-  const refDataTask = loadRefData();
-  const workersTask = loadWorkers();
-  const tasks = [loadOrders(), workersTask, refDataTask, loadWorkerSalaries(), minDelay];
+  const tasks = [loadOrders(), loadWorkers(), loadRefData(), loadWorkerSalaries(), minDelay];
   if (typeof loadManualClients === 'function' && canViewClients()) {
     tasks.push(loadManualClients());
   }
@@ -134,18 +128,10 @@ async function initApp() {
       paymentMethods = [];
     }
   })());
-  tasks.push((async () => {
-    await Promise.all([refDataTask, workersTask]);
-    if (canViewOwnerCash() || canViewOwnerExpenses() || canViewOwnerPayments()) {
-      try {
-        window.allCashLog = await sbFetchAllCashLog();
-      } catch(e) {
-        window.allCashLog = [];
-        showToast('Касса не загружена: ' + e.message, 'error');
-      }
-    }
-  })());
   if (currentRole === 'owner') {
+    tasks.push((async () => {
+      try { window.allCashLog = await sbFetchAllCashLog(); } catch(e) { window.allCashLog = []; }
+    })());
     tasks.push((async () => {
       try {
         if (typeof loadAllSalaries === 'function') await loadAllSalaries();
@@ -288,24 +274,14 @@ function openOwnerSettingsScreen() {
 
 async function openOwnerCashScreen() {
   if (!canViewOwnerCash()) return;
-  try {
-    window.allCashLog = await sbFetchAllCashLog();
-  } catch(e) {
-    window.allCashLog = [];
-    showToast('Касса не загружена: ' + e.message, 'error');
-  }
+  try { window.allCashLog = await sbFetchAllCashLog(); } catch(e) { window.allCashLog = window.allCashLog || []; }
   renderOwnerCashScreen();
   showScreen('owner-cash');
 }
 
 async function openOwnerExpensesScreen() {
   if (!canViewOwnerExpenses()) return;
-  try {
-    window.allCashLog = await sbFetchAllCashLog('active', { fullHistory: true });
-  } catch(e) {
-    window.allCashLog = [];
-    showToast('Расходы не загружены: ' + e.message, 'error');
-  }
+  try { window.allCashLog = await sbFetchAllCashLog(); } catch(e) { window.allCashLog = window.allCashLog || []; }
   renderOwnerExpensesScreen();
   showScreen('owner-expenses');
 }
@@ -950,17 +926,13 @@ function getCurrentUserClientCopyBlocks() {
   const source = currentRole !== 'owner' && Array.isArray(personal) && personal.length
     ? personal
     : (typeof getOrderCopyExtraBlocks === 'function' ? getOrderCopyExtraBlocks() : []);
-  const personalBlocks = source
+  return source
     .map((block, index) => ({
       key: String(block?.key || `copy-${index + 1}`),
       title: String(block?.title || '').trim(),
       text: String(block?.text || '').trim(),
     }))
     .filter(block => block.title && block.text);
-  const manufacturerBlocks = typeof getGlassManufacturerClientCopyBlocks === 'function'
-    ? getGlassManufacturerClientCopyBlocks()
-    : [];
-  return [...personalBlocks, ...manufacturerBlocks];
 }
 
 function openQuickCopyModal() {
@@ -1016,11 +988,7 @@ function isDateInDailyReportRange(date, range) {
   return !!key && key >= range.start && key <= range.end;
 }
 
-let dailyReportFinanceRows = [];
-let dailyReportFinanceRangeKey = '';
-let dailyReportRenderSequence = 0;
-
-function getDailyReportData(startDate, endDate = '', financeRows = []) {
+function getDailyReportData(startDate, endDate = '') {
   const range = normalizeDailyReportRange(startDate, endDate);
   const scheduled = (orders || []).filter(order => isOrderFinanciallyActive(order) && isDateInDailyReportRange(order.date, range));
   const activeOrders = (orders || []).filter(order => isOrderFinanciallyActive(order));
@@ -1044,7 +1012,7 @@ function getDailyReportData(startDate, endDate = '', financeRows = []) {
       if (!groupsMap.has(key)) groupsMap.set(key, { label: _ownerTodayGroupLabel({ responsible: order.responsible || 'Без ответственного', assistant: order.assistant || '' }), orders: [] });
       groupsMap.get(key).orders.push(order);
     });
-  const expenses = (Array.isArray(financeRows) ? financeRows : [])
+  const expenses = (typeof getOwnerExpenseLogs === 'function' ? getOwnerExpenseLogs() : [])
     .filter(entry => isDateInDailyReportRange(entry?.fop_date || _ownerCashEntryDate(entry), range));
   const expensesTotal = expenses.reduce((sum, entry) => sum + getExpenseCashAmount(entry), 0);
   const orderValue = completed.reduce((sum, order) => sum + getOrderClientTotalAmount(order), 0);
@@ -1071,51 +1039,17 @@ function openDailyReportModal() {
 
 function closeDailyReportModal() { document.getElementById('daily-report-modal')?.classList.remove('active'); }
 
-async function renderDailyReportFromInputs() {
+function renderDailyReportFromInputs() {
   renderDailyReportModal(
     document.getElementById('daily-report-date')?.value || getLocalDateString(),
     document.getElementById('daily-report-end-date')?.value || document.getElementById('daily-report-date')?.value || getLocalDateString()
   );
 }
 
-async function renderDailyReportModal(startDate, endDate = '') {
+function renderDailyReportModal(startDate, endDate = '') {
+  const report = getDailyReportData(startDate, endDate);
   const container = document.getElementById('daily-report-content');
   if (!container) return;
-  const range = normalizeDailyReportRange(startDate, endDate);
-  const rangeKey = `${range.start}:${range.end}`;
-  const sequence = ++dailyReportRenderSequence;
-  const copyButton = document.getElementById('daily-report-copy-btn');
-  if (copyButton) copyButton.disabled = true;
-  container.innerHTML = `
-    <div class="empty-state">
-      <div class="empty-state-icon">${icon('loader')}</div>
-      <h3>Собираю финансовую сводку</h3>
-      <p>Проверяем кассовые записи за выбранный период</p>
-    </div>
-  `;
-  initIcons();
-  try {
-    const financeRows = await sbFetchDailyReportCash(range.start, range.end);
-    if (sequence !== dailyReportRenderSequence) return;
-    dailyReportFinanceRows = financeRows;
-    dailyReportFinanceRangeKey = rangeKey;
-  } catch (error) {
-    if (sequence !== dailyReportRenderSequence) return;
-    dailyReportFinanceRows = [];
-    dailyReportFinanceRangeKey = '';
-    container.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-state-icon">${icon('alert-triangle')}</div>
-        <h3>Отчёт не собран</h3>
-        <p>${escapeHtml(error?.message || 'Не удалось загрузить финансовые данные')}</p>
-        <button type="button" class="btn-primary" onclick="renderDailyReportFromInputs()">Повторить</button>
-      </div>
-    `;
-    initIcons();
-    return;
-  }
-  const report = getDailyReportData(range.start, range.end, dailyReportFinanceRows);
-  if (copyButton) copyButton.disabled = false;
   const money = value => `${Number(value || 0).toLocaleString('ru')} ₴`;
   const renderOrder = order => `<button type="button" class="daily-report-order" onclick="openOrderFromDailyReport('${escapeAttr(order.id)}')"><span class="daily-report-order-status ${order.workerDone ? 'is-done' : ''}"></span><div><strong>${escapeHtml(order.id || '—')} · ${escapeHtml(order.car || order.client || 'Без названия')}</strong><small>${order.workerDone ? 'Выполнен' : 'Не выполнен'}${report.isRange && order.date ? ' · ' + escapeHtml(formatDate(order.date)) : ''}${order.time ? ' · ' + escapeHtml(order.time) : ''}</small></div><strong>${money(getOrderClientTotalAmount(order))}</strong></button>`;
   container.innerHTML = `
@@ -1145,8 +1079,8 @@ function openOrderFromDailyReport(orderId) {
   openOrderModal(orderId);
 }
 
-function buildDailyReportText(startDate, endDate = '', financeRows = []) {
-  const report = getDailyReportData(startDate, endDate, financeRows);
+function buildDailyReportText(startDate, endDate = '') {
+  const report = getDailyReportData(startDate, endDate);
   const money = value => `${Number(value || 0).toLocaleString('ru')} ₴`;
   const lines = [`ОТЧЁТ ЗА ${report.label}`, '', `Заказов: ${report.scheduled.length}`, `Выполнено: ${report.completed.length}`, `Не выполнено: ${report.unfinished.length}`, `Перенесено: ${report.transferred.length}`, ''];
   report.groups.forEach(group => {
@@ -1173,16 +1107,10 @@ function buildDailyReportText(startDate, endDate = '', financeRows = []) {
   return lines.join('\n');
 }
 
-async function copyDailyReport() {
+function copyDailyReport() {
   const start = document.getElementById('daily-report-date')?.value || getLocalDateString();
   const end = document.getElementById('daily-report-end-date')?.value || start;
-  const range = normalizeDailyReportRange(start, end);
-  const rangeKey = `${range.start}:${range.end}`;
-  if (dailyReportFinanceRangeKey !== rangeKey) {
-    showToast('Сначала дождитесь загрузки отчёта', 'error');
-    return;
-  }
-  const text = buildDailyReportText(range.start, range.end, dailyReportFinanceRows);
+  const text = buildDailyReportText(start, end);
   copyOrderClientContent({ text, html: `<pre style="white-space:pre-wrap;font-family:Arial,sans-serif">${escapeHtml(text)}</pre>` });
 }
 
@@ -1315,32 +1243,29 @@ function renderHome() {
   }
 
   if (canViewOwnerCash()) {
-    const cashUnavailable = window.cashLoadState === 'error';
-    const totalCash = cashUnavailable ? null : getOwnerCurrentCashTotal();
+    const totalCash = getOwnerCurrentCashTotal();
     container.innerHTML += `
       <div class="home-card" onclick="openOwnerCashScreen()">
         <div class="home-card-icon-wrap home-card-icon-dim">
           <i data-lucide="wallet" style="width:22px;height:22px;"></i>
         </div>
         <h3>Касса</h3>
-        <p>${cashUnavailable ? 'Не удалось загрузить данные' : 'Сумма на руках'}</p>
-        <div class="home-card-count" style="font-size:22px; color:${cashUnavailable ? 'var(--red)' : 'var(--accent)'};">${cashUnavailable ? 'Недоступно' : `${totalCash.toLocaleString('ru')} ₴`}</div>
+        <p>Сумма на руках</p>
+        <div class="home-card-count" style="font-size:22px; color: var(--accent);">${totalCash.toLocaleString('ru')} ₴</div>
       </div>
     `;
   }
 
   if (canViewOwnerExpenses()) {
-    const cashUnavailable = window.cashLoadState === 'error' || window.cashSnapshotNeedsRebuild === true;
-    const snapshotExpenseTotal = !cashUnavailable && shouldApplyCashSnapshotBase() ? getCashSnapshotTotal('expenses') : 0;
-    const expenseTotal = cashUnavailable ? null : snapshotExpenseTotal + getOwnerExpenseLogs().reduce((sum, entry) => sum + getExpenseCashAmount(entry), 0);
+    const expenseTotal = getOwnerExpenseLogs().reduce((sum, entry) => sum + getExpenseCashAmount(entry), 0);
     container.innerHTML += `
       <div class="home-card" onclick="openOwnerExpensesScreen()">
         <div class="home-card-icon-wrap home-card-icon-dim">
           <i data-lucide="receipt" style="width:22px;height:22px;"></i>
         </div>
         <h3>Расходы</h3>
-        <p>${window.cashSnapshotNeedsRebuild === true ? 'Пересоздайте кассовый снапшот' : (cashUnavailable ? 'Не удалось загрузить данные' : 'Затраты по сотрудникам')}</p>
-        <div class="home-card-count" style="font-size:22px; color: var(--red);">${cashUnavailable ? 'Недоступно' : `${expenseTotal.toLocaleString('ru')} ₴`}</div>
+        <p>Затраты по сотрудникам</p>
+        <div class="home-card-count" style="font-size:22px; color: var(--red);">${expenseTotal.toLocaleString('ru')} ₴</div>
       </div>
     `;
   }
@@ -1583,11 +1508,6 @@ function getOwnerCashWorkerDescriptors() {
       });
     });
 
-  const snapshot = typeof getActiveCashSnapshot === 'function' ? getActiveCashSnapshot() : null;
-  (Array.isArray(snapshot?.balances) ? snapshot.balances : []).forEach(row => {
-    addDescriptor({ workerId: row?.workerId || '', workerName: row?.workerName || '' });
-  });
-
   [...(window.allCashLog || [])].forEach(entry => {
     const resolvedWorker = getOwnerCashResolvedWorker(entry);
     if (!resolvedWorker) return;
@@ -1607,16 +1527,6 @@ function getOwnerCashWorkerDescriptorByKey(workerKey) {
 
 function getOwnerCashWorkerDescriptorByEntry(entry) {
   return getOwnerCashWorkerDescriptors().find(item => item.matches(entry)) || null;
-}
-
-function getOwnerCashSnapshotBalance(workerKey, account = 'uah') {
-  if (!shouldApplyCashSnapshotBase()) return 0;
-  const descriptor = getOwnerCashWorkerDescriptorByKey(workerKey);
-  if (!descriptor) return 0;
-  if (account === 'usd') return getCashSnapshotBalance(descriptor, 'usd');
-  if (account === 'fop') return getCashSnapshotBalance(descriptor, 'fop');
-  if (account === 'cash') return getCashSnapshotBalance(descriptor, 'cash');
-  return getCashSnapshotBalance(descriptor, 'cash') + getCashSnapshotBalance(descriptor, 'fop');
 }
 
 function getOwnerSpecialCashSections() {
@@ -1891,8 +1801,7 @@ function getOwnerCurrencyCashLogs() {
 }
 
 function getOwnerCurrentCashTotal() {
-  const base = shouldApplyCashSnapshotBase() ? getCashSnapshotTotal('uah') : 0;
-  return base + getOwnerCashBalanceLogs().reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+  return getOwnerCashBalanceLogs().reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
 }
 
 function normalizeCashSearchNumber(value) {
@@ -2561,27 +2470,10 @@ function closeOwnerExpenseHistoryModal() {
   ownerExpenseSelectedWorker = '';
 }
 
-function isOwnerCashEntryBeforeSnapshot(entry) {
-  const snapshot = typeof getActiveCashSnapshot === 'function' ? getActiveCashSnapshot() : null;
-  if (!entry || snapshot?.active !== true || !snapshot?.cutoffAt) return false;
-  const entryTime = new Date(entry.created_at || 0).getTime();
-  const cutoffTime = new Date(snapshot.cutoffAt).getTime();
-  return Number.isFinite(entryTime) && Number.isFinite(cutoffTime) && entryTime < cutoffTime;
-}
-
 async function deleteOwnerCashEntry(id) {
   if (currentRole !== 'owner' || !id) return;
   const entry = (window.allCashLog || []).find(item => String(item.id) === String(id));
   const hardDelete = !!String(entry?.deleted_at || '').trim();
-  if (isOwnerCashEntryBeforeSnapshot(entry)) {
-    if (hardDelete) {
-      showToast('Старую запись нельзя удалить: она входит в снапшот кассы', 'error');
-      return;
-    }
-    showToast('Запись входит в снапшот — используем безопасную обратную проводку');
-    await reverseOwnerCashEntry(id);
-    return;
-  }
   const message = hardDelete
     ? 'Удалить эту запись кассы безвозвратно? Восстановить ее уже не получится.'
     : 'Переместить эту запись кассы в удаленные? Ее можно будет восстановить позже.';
@@ -2654,11 +2546,6 @@ async function reverseOwnerCashEntry(id) {
 
 async function restoreOwnerCashEntry(id) {
   if (currentRole !== 'owner' || !id) return;
-  const entry = (window.allCashLog || []).find(item => String(item.id) === String(id));
-  if (isOwnerCashEntryBeforeSnapshot(entry)) {
-    showToast('Старую запись нельзя восстановить напрямую: сначала пересоздайте снапшот после сверки кассы', 'error');
-    return;
-  }
   try {
     const saved = await sbUpdateCashEntry(id, {
       deleted_at: null,
@@ -2811,10 +2698,9 @@ function renderOwnerEmployeeCashHistory(workerName, logs) {
 
   const confirmedRows = getOwnerCashBalanceLogs()
     .filter(entry => workerDescriptor ? workerDescriptor.matches(entry) : getCashEntryOwner(entry) === workerName);
-  const snapshotBase = shouldApplyCashSnapshotBase() ? getOwnerCashSnapshotBalance(workerName, 'uah') : 0;
-  const total = snapshotBase + confirmedRows.reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
+  const total = confirmedRows.reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
   const balanceMap = typeof getCashRunningBalanceMap === 'function'
-    ? getCashRunningBalanceMap(confirmedRows, entry => Number(entry?.amount) || 0, snapshotBase)
+    ? getCashRunningBalanceMap(confirmedRows)
     : new Map();
   const workerKey = getOwnerCashSafeKey(workerName);
 
@@ -3104,8 +2990,7 @@ function renderOwnerEmployeeCurrencyCashHistory(workerKey, logs) {
 
   if (!rows.length) return '';
 
-  const snapshotBase = shouldApplyCashSnapshotBase() ? getOwnerCashSnapshotBalance(workerKey, 'usd') : 0;
-  const total = snapshotBase + calcCurrencyCashBalance(rows);
+  const total = calcCurrencyCashBalance(rows);
   const safeWorkerKey = getOwnerCashSafeKey(String(workerKey || historyTitle) + '-currency');
   const tree = {};
 
@@ -3904,18 +3789,6 @@ function renderOwnerPaymentsScreen() {
 function renderOwnerCashScreen() {
   const container = document.getElementById('owner-cash-content');
   if (!container) return;
-  if (window.cashLoadState === 'error') {
-    container.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-state-icon">${icon('alert-triangle')}</div>
-        <h3>Касса не загружена</h3>
-        <p>${escapeHtml(window.cashLoadError || 'Не удалось получить подтверждённые данные кассы')}</p>
-        <button type="button" class="btn-primary" onclick="openOwnerCashScreen()">Повторить загрузку</button>
-      </div>
-    `;
-    initIcons();
-    return;
-  }
 
   const workerDescriptors = getOwnerCashWorkerDescriptors();
   const balanceLogs = getOwnerCashBalanceLogs()
@@ -3924,11 +3797,6 @@ function renderOwnerCashScreen() {
     .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
 
   const balances = {};
-  if (shouldApplyCashSnapshotBase()) {
-    workerDescriptors.forEach(descriptor => {
-      balances[descriptor.key] = getOwnerCashSnapshotBalance(descriptor.key, 'uah');
-    });
-  }
   for (const entry of balanceLogs) {
     const descriptor = getOwnerCashWorkerDescriptorByEntry(entry);
     if (!descriptor) continue;
@@ -3936,11 +3804,6 @@ function renderOwnerCashScreen() {
   }
 
   const currencyBalances = {};
-  if (shouldApplyCashSnapshotBase()) {
-    workerDescriptors.forEach(descriptor => {
-      currencyBalances[descriptor.key] = getOwnerCashSnapshotBalance(descriptor.key, 'usd');
-    });
-  }
   for (const entry of currencyLogs) {
     const parsed = parseCurrencyCashEntry(entry);
     if (!parsed) continue;
@@ -3964,11 +3827,6 @@ function renderOwnerCashScreen() {
   const isUahView = ownerCashCurrencyView !== 'usd';
   const total = isUahView ? currentCashTotal : currentCurrencyTotal;
   const rows = isUahView ? currentCashRows : currentCurrencyRows;
-  const activeSnapshot = getActiveCashSnapshot();
-  const snapshotMode = !!activeSnapshot && shouldApplyCashSnapshotBase();
-  const snapshotDateLabel = activeSnapshot?.cutoffAt
-    ? new Date(activeSnapshot.cutoffAt).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' })
-    : '';
   const searchLogs = isUahView ? getOwnerCashLogs(ownerCashConfirmFilter) : currencyLogs;
   const searchResultsHtml = renderOwnerCashSearchResults(searchLogs, { currency: isUahView ? 'uah' : 'usd' });
   const filtersHtml = isUahView ? `
@@ -3992,7 +3850,7 @@ function renderOwnerCashScreen() {
         <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;">
           <div>
             <div class="fin-month-name">Текущая касса</div>
-            <div class="fin-month-sub">${isUahView ? 'Баланс считает только подтвержденные записи' : 'Баланс в долларах после обмена из гривневой кассы'}${snapshotMode ? ` · быстрая загрузка с ${escapeHtml(snapshotDateLabel)}` : ''}</div>
+            <div class="fin-month-sub">${isUahView ? 'Баланс считает только подтвержденные записи' : 'Баланс в долларах после обмена из гривневой кассы'}</div>
           </div>
           <div style="display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap;justify-content:flex-end;">
             <div class="owner-cash-confirm-filters" style="padding:0;">
@@ -4003,7 +3861,6 @@ function renderOwnerCashScreen() {
               <div style="font-size:22px;font-weight:900;color:${total >= 0 ? 'var(--accent)' : '#ef4444'};white-space:nowrap;">${total.toLocaleString('ru')} ${isUahView ? '₴' : '$'}</div>
               <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;">
                 ${isUahView ? `<button class="btn-secondary" style="font-size:12px;padding:6px 10px;" onclick="openOwnerCashEntryModal()">+ Запись</button>` : ''}
-                ${activeSnapshot ? `<button class="btn-secondary" id="owner-cash-history-mode-btn" style="font-size:12px;padding:6px 10px;" onclick="${snapshotMode ? 'loadOwnerCashFullHistory()' : 'loadOwnerCashSnapshotView()'}">${snapshotMode ? 'Полная история' : 'Быстрый режим'}</button>` : ''}
                 <button class="btn-secondary" style="font-size:12px;padding:6px 10px;" onclick="openOwnerDeletedCashModal()">Архив</button>
               </div>
             </div>
@@ -4034,42 +3891,6 @@ function renderOwnerCashScreen() {
   }
   container.innerHTML = currentCashHtml;
   initIcons();
-}
-
-async function loadOwnerCashFullHistory() {
-  if (!canViewOwnerCash()) return;
-  const btn = document.getElementById('owner-cash-history-mode-btn');
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = 'Загружаю…';
-  }
-  try {
-    window.allCashLog = await sbFetchAllCashLog('active', { fullHistory: true });
-    renderOwnerCashScreen();
-    showToast('Полная история кассы загружена');
-  } catch (e) {
-    showToast('Ошибка загрузки истории: ' + e.message, 'error');
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = 'Полная история';
-    }
-  }
-}
-
-async function loadOwnerCashSnapshotView() {
-  if (!canViewOwnerCash()) return;
-  const btn = document.getElementById('owner-cash-history-mode-btn');
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = 'Загружаю…';
-  }
-  try {
-    window.allCashLog = await sbFetchAllCashLog();
-    renderOwnerCashScreen();
-    showToast('Быстрый режим кассы включён');
-  } catch (e) {
-    showToast('Ошибка загрузки кассы: ' + e.message, 'error');
-  }
 }
 
 // --- ОТКРЫТИЕ РАЗДЕЛОВ ---
@@ -4209,161 +4030,10 @@ function renderOwnerSettingsScreen() {
         </div>
       </div>
     </div>
-    ${renderOwnerCashSnapshotSettings()}
-    ${renderOwnerGlassManufacturerSettings()}
     ${renderOwnerCopyFieldsSettings()}
     ${typeof renderOwnerSystemBannerControls === 'function' ? renderOwnerSystemBannerControls() : ''}
   `;
   initIcons();
-}
-
-function renderOwnerGlassManufacturerSettings() {
-  const items = typeof getGlassManufacturers === 'function' ? getGlassManufacturers() : [];
-  return `
-    <div class="owner-copy-settings owner-manufacturer-settings">
-      <div class="owner-copy-settings-head">
-        <div>
-          <div class="owner-banner-card-title">Производители стекла</div>
-          <div class="owner-banner-card-text">Название попадёт в заказ, а комментарий — в «Данные для клиента»</div>
-        </div>
-        <button type="button" class="btn-secondary" onclick="addOwnerGlassManufacturer()"><i data-lucide="plus" style="width:14px;height:14px;"></i> Добавить</button>
-      </div>
-      <div class="owner-manufacturer-list" id="owner-manufacturer-list">
-        ${items.map(item => renderOwnerGlassManufacturerEditor(item)).join('')}
-      </div>
-      <div class="owner-manufacturer-empty" id="owner-manufacturer-empty" style="display:${items.length ? 'none' : ''};">Производителей пока нет</div>
-      <div style="display:flex;justify-content:flex-end;margin-top:12px;">
-        <button type="button" class="btn-primary" id="owner-manufacturer-save-btn" onclick="saveOwnerGlassManufacturers()"><i data-lucide="save" style="width:14px;height:14px;"></i> Сохранить производителей</button>
-      </div>
-    </div>
-  `;
-}
-
-function renderOwnerGlassManufacturerEditor(item = {}) {
-  const key = String(item?.key || `manufacturer-${Date.now()}-${Math.random().toString(16).slice(2)}`);
-  return `
-    <div class="owner-manufacturer-row" data-owner-manufacturer-row data-key="${escapeAttr(key)}">
-      <div class="owner-manufacturer-row-head">
-        <input class="form-input" data-owner-manufacturer-name value="${escapeAttr(item?.name || '')}" placeholder="Название производителя">
-        <button type="button" class="icon-btn" onclick="removeOwnerGlassManufacturer(this)" title="Удалить производителя"><i data-lucide="trash-2" style="width:15px;height:15px;"></i></button>
-      </div>
-      <textarea class="form-input" data-owner-manufacturer-description rows="3" placeholder="Комментарий для клиента">${escapeHtml(item?.description || '')}</textarea>
-    </div>
-  `;
-}
-
-function addOwnerGlassManufacturer() {
-  const list = document.getElementById('owner-manufacturer-list');
-  if (!list) return;
-  list.insertAdjacentHTML('beforeend', renderOwnerGlassManufacturerEditor());
-  const empty = document.getElementById('owner-manufacturer-empty');
-  if (empty) empty.style.display = 'none';
-  initIcons();
-  list.lastElementChild?.querySelector('[data-owner-manufacturer-name]')?.focus();
-}
-
-function removeOwnerGlassManufacturer(button) {
-  button?.closest('[data-owner-manufacturer-row]')?.remove();
-  const list = document.getElementById('owner-manufacturer-list');
-  const empty = document.getElementById('owner-manufacturer-empty');
-  if (empty) empty.style.display = list?.children?.length ? 'none' : '';
-}
-
-async function saveOwnerGlassManufacturers() {
-  if (currentRole !== 'owner') return;
-  const items = Array.from(document.querySelectorAll('[data-owner-manufacturer-row]')).map((row, index) => ({
-    key: String(row.dataset.key || `manufacturer-${index + 1}`),
-    name: String(row.querySelector('[data-owner-manufacturer-name]')?.value || '').trim(),
-    description: String(row.querySelector('[data-owner-manufacturer-description]')?.value || '').trim(),
-  })).filter(item => item.name);
-  const normalizedNames = items.map(item => item.name.toLocaleLowerCase('ru'));
-  if (new Set(normalizedNames).size !== normalizedNames.length) {
-    return showToast('Названия производителей не должны повторяться', 'error');
-  }
-  const btn = document.getElementById('owner-manufacturer-save-btn');
-  if (btn) btn.disabled = true;
-  try {
-    const payload = { items, updatedAt: new Date().toISOString() };
-    await sbUpsertAppSetting('glass_manufacturers', payload);
-    appSettings.glass_manufacturers = payload;
-    renderOwnerSettingsScreen();
-    showToast('Производители сохранены ✓');
-  } catch (e) {
-    showToast('Ошибка сохранения: ' + e.message, 'error');
-  } finally {
-    if (btn?.isConnected) btn.disabled = false;
-  }
-}
-
-function renderOwnerCashSnapshotSettings() {
-  const snapshot = getActiveCashSnapshot();
-  const cutoffLabel = snapshot?.cutoffAt
-    ? new Date(snapshot.cutoffAt).toLocaleString('ru-RU', { dateStyle: 'medium', timeStyle: 'short' })
-    : '';
-  const rowsLabel = Number(snapshot?.sourceRows || 0).toLocaleString('ru');
-  return `
-    <div class="cash-snapshot-card">
-      <div class="cash-snapshot-main">
-        <div class="cash-snapshot-icon">${icon('gauge')}</div>
-        <div>
-          <div class="owner-banner-card-title">Точка отсчёта кассы</div>
-          <div class="owner-banner-card-text">Фиксирует остатки по сотрудникам. После неё загружаются только новые движения, а старые записи остаются в базе.</div>
-          ${snapshot ? `<div class="cash-snapshot-meta">Действует с ${escapeHtml(cutoffLabel)} · зафиксировано ${rowsLabel} записей</div>` : '<div class="cash-snapshot-meta is-muted">Снапшот ещё не создан — касса считается с первой записи</div>'}
-        </div>
-      </div>
-      <div class="owner-banner-card-actions">
-        <span class="owner-banner-card-status ${snapshot ? 'is-active' : ''}">${snapshot ? 'Активен' : 'Не настроен'}</span>
-        <button type="button" class="btn-primary" id="cash-snapshot-create-btn" onclick="createOwnerCashSnapshot()">${snapshot ? 'Обновить точку' : 'Создать точку'}</button>
-        ${snapshot ? '<button type="button" class="btn-secondary" id="cash-snapshot-disable-btn" onclick="disableOwnerCashSnapshot()">Отключить</button>' : ''}
-      </div>
-    </div>
-  `;
-}
-
-async function createOwnerCashSnapshot() {
-  if (currentRole !== 'owner') return;
-  const current = getActiveCashSnapshot();
-  const message = current
-    ? 'Обновить точку отсчёта до текущего состояния кассы? Остатки будут пересчитаны по полному журналу.'
-    : 'Создать текущую точку отсчёта кассы? Первый расчёт может занять несколько секунд.';
-  if (!confirm(message)) return;
-  const btn = document.getElementById('cash-snapshot-create-btn');
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = 'Считаю кассу…';
-  }
-  try {
-    const snapshot = await sbCreateCashSnapshot();
-    appSettings[CASH_SNAPSHOT_SETTING_KEY] = snapshot;
-    await refreshOwnerCashState();
-    renderOwnerSettingsScreen();
-    renderHome();
-    showToast('Точка отсчёта кассы создана ✓');
-  } catch (e) {
-    showToast('Ошибка снапшота: ' + e.message, 'error');
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = current ? 'Обновить точку' : 'Создать точку';
-    }
-  }
-}
-
-async function disableOwnerCashSnapshot() {
-  if (currentRole !== 'owner') return;
-  if (!confirm('Отключить точку отсчёта? При следующем расчёте снова загрузится весь журнал кассы.')) return;
-  const btn = document.getElementById('cash-snapshot-disable-btn');
-  if (btn) btn.disabled = true;
-  try {
-    const snapshot = await sbDisableCashSnapshot();
-    appSettings[CASH_SNAPSHOT_SETTING_KEY] = snapshot;
-    await refreshOwnerCashState();
-    renderOwnerSettingsScreen();
-    renderHome();
-    showToast('Точка отсчёта отключена');
-  } catch (e) {
-    showToast('Ошибка: ' + e.message, 'error');
-    if (btn) btn.disabled = false;
-  }
 }
 
 function renderOwnerCopyFieldsSettings() {
