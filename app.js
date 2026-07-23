@@ -2244,16 +2244,28 @@ function openOwnerCashHistoryModal(workerKey) {
     <div class="modal" style="max-width:760px;max-height:88vh;display:flex;flex-direction:column;">
       <div class="modal-header" style="flex-shrink:0;">
         <div class="modal-title">${escapeHtml(title)}</div>
-        ${ownerCashHasMore ? `<button class="btn-secondary" style="font-size:12px;padding:6px 10px;margin-left:auto;" onclick="loadMoreOwnerCashHistory(this)">Ещё ${OWNER_CASH_PAGE_SIZE}</button>` : ''}
         <button class="modal-close" onclick="closeOwnerCashHistoryModal()">${icon('x')}</button>
       </div>
       <div class="modal-body" style="overflow-y:auto;flex:1;">
         ${getOwnerCashHistoryHtml(workerKey)}
+        ${renderOwnerCashHistoryPagination()}
       </div>
     </div>
   `;
   modal.classList.add('active');
   initIcons();
+}
+
+function renderOwnerCashHistoryPagination() {
+  if (!ownerCashHasMore) return '';
+  return `
+    <div class="fin-month-card" style="margin-top:12px;padding:14px;text-align:center;">
+      <div class="fin-month-sub" style="margin-bottom:10px;">Загружено последних записей: ${window.ownerCashRecentLog?.length || 0}</div>
+      <button class="btn-secondary" type="button" style="font-size:13px;padding:8px 14px;" onclick="loadMoreOwnerCashHistory(this)">
+        Загрузить более старые записи
+      </button>
+    </div>
+  `;
 }
 
 async function loadOwnerCashCompleteHistory() {

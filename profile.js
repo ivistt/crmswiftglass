@@ -523,20 +523,9 @@ function renderCashScreen() {
     + ((currentWorkerHasFopCashRoute() || fopCashLog.length)
       ? renderCashSection(confirmedFopCashLog, fopBalance, today, { title: 'Касса БАБЕНКО', account: 'fop', buttonText: '+ БАБЕНКО', pendingEntries: pendingFopCashLog })
       : '')
-    + renderWorkerDropshipperCashSection()
-    + renderWorkerCashPagination();
+    + renderWorkerDropshipperCashSection();
 
   initIcons();
-}
-
-function renderWorkerCashPagination() {
-  if (!workerCashHasMore) return '';
-  return '<div class="profile-today-card" style="margin-top:12px;padding:14px;text-align:center;">'
-    + '<div style="font-size:12px;color:var(--text3);margin-bottom:10px;">Загружено записей: ' + workerCashLog.length + '</div>'
-    + '<button class="btn-secondary" type="button" style="font-size:13px;padding:8px 14px;" onclick="loadMoreWorkerCashHistory(this)">'
-    + 'Загрузить ещё ' + WORKER_CASH_PAGE_SIZE
-    + '</button>'
-    + '</div>';
 }
 
 function getSalaryAccrualForDate(entries, date) {
@@ -1112,6 +1101,13 @@ function renderCashSection(log, balance, today, options = {}) {
     + '<div style="font-size:12px;font-weight:700;color:var(--text3);letter-spacing:0.04em;margin-bottom:8px;">🗂 АРХИВ</div>'
     + (archiveLog.length ? archiveHtml : '<div style="text-align:center;color:var(--text3);font-size:13px;padding:10px 0;">Ничего не найдено</div>')
     + '</div>'
+    + (account === 'cash' && workerCashHasMore
+      ? '<div style="display:flex;justify-content:center;padding-top:14px;">'
+        + '<button class="btn-secondary" type="button" style="font-size:13px;padding:8px 14px;" onclick="loadMoreWorkerCashHistory(this)">'
+        + 'Загрузить более старые записи'
+        + '</button>'
+        + '</div>'
+      : '')
 
     + '</div>';
 }
