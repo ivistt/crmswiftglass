@@ -1348,7 +1348,7 @@ function renderHome() {
 
   // Карточка "Записи" — акцентная (бирюзовая)
   container.innerHTML += `
-    <div class="home-card home-card-accent" onclick="openOrdersScreen()">
+    <div class="home-card home-card-accent home-card-size-lg" onclick="openOrdersScreen()">
       <div class="home-card-icon-wrap">
         <i data-lucide="clipboard-list" style="width:22px;height:22px;"></i>
       </div>
@@ -1363,7 +1363,7 @@ function renderHome() {
     const todayOrders = orders.filter(o => isOrderFinanciallyActive(o) && o.date === today);
     const todayTotal = todayOrders.reduce((sum, o) => sum + getOrderClientTotalAmount(o), 0);
     container.innerHTML += `
-      <div class="home-card" onclick="openOwnerTodayScreen()">
+      <div class="home-card home-card-size-lg" onclick="openOwnerTodayScreen()">
         <div class="home-card-icon-wrap home-card-icon-dim">
           <i data-lucide="calendar-days" style="width:22px;height:22px;"></i>
         </div>
@@ -1379,7 +1379,7 @@ function renderHome() {
     const monthPlannerOrders = getCalendarPlannerOrders().filter(o => String(o.date || '').startsWith(monthKey));
     const monthPlannerTotal = monthPlannerOrders.reduce((sum, o) => sum + getOrderClientTotalAmount(o), 0);
     container.innerHTML += `
-      <div class="home-card" onclick="openCalendarScreen()">
+      <div class="home-card home-card-size-md" onclick="openCalendarScreen()">
         <div class="home-card-icon-wrap home-card-icon-dim">
           <i data-lucide="calendar" style="width:22px;height:22px;"></i>
         </div>
@@ -1393,7 +1393,7 @@ function renderHome() {
   if (canViewOwnerCash()) {
     const totalCash = getOwnerCurrentCashTotal();
     container.innerHTML += `
-      <div class="home-card" onclick="openOwnerCashScreen()">
+      <div class="home-card home-card-size-md" onclick="openOwnerCashScreen()">
         <div class="home-card-icon-wrap home-card-icon-dim">
           <i data-lucide="wallet" style="width:22px;height:22px;"></i>
         </div>
@@ -1410,7 +1410,7 @@ function renderHome() {
       ? summaryExpenseTotal
       : getOwnerExpenseLogs().reduce((sum, entry) => sum + getExpenseCashAmount(entry), 0);
     container.innerHTML += `
-      <div class="home-card" onclick="openOwnerExpensesScreen()">
+      <div class="home-card home-card-size-sm" onclick="openOwnerExpensesScreen()">
         <div class="home-card-icon-wrap home-card-icon-dim">
           <i data-lucide="receipt" style="width:22px;height:22px;"></i>
         </div>
@@ -1432,7 +1432,7 @@ function renderHome() {
     }, 0);
 
     container.innerHTML += `
-      <div class="home-card" onclick="openWarehousesScreen()">
+      <div class="home-card home-card-size-md" onclick="openWarehousesScreen()">
         <div class="home-card-icon-wrap home-card-icon-dim">
           <i data-lucide="package" style="width:22px;height:22px;"></i>
         </div>
@@ -1451,7 +1451,7 @@ function renderHome() {
       return sum + Math.max(0, (Number(o.dropshipperPayout) || 0) - paid);
     }, 0);
     container.innerHTML += `
-      <div class="home-card" onclick="openDropshippersScreen()">
+      <div class="home-card home-card-size-sm" onclick="openDropshippersScreen()">
         <div class="home-card-icon-wrap home-card-icon-dim">
           <i data-lucide="handshake" style="width:22px;height:22px;"></i>
         </div>
@@ -1465,7 +1465,7 @@ function renderHome() {
   if (canViewClients()) {
     const clients = getClients();
     container.innerHTML += `
-      <div class="home-card" onclick="openClientsScreen()">
+      <div class="home-card home-card-size-md" onclick="openClientsScreen()">
         <div class="home-card-icon-wrap home-card-icon-dim">
           <i data-lucide="users" style="width:22px;height:22px;"></i>
         </div>
@@ -1478,7 +1478,7 @@ function renderHome() {
 
   if (canViewWorkers()) {
     container.innerHTML += `
-      <div class="home-card" onclick="openWorkersScreen()">
+      <div class="home-card home-card-size-sm" onclick="openWorkersScreen()">
         <div class="home-card-icon-wrap home-card-icon-dim">
           <i data-lucide="hard-hat" style="width:22px;height:22px;"></i>
         </div>
@@ -1492,7 +1492,7 @@ function renderHome() {
   if (canViewFinance()) {
     const totalSum = orders.filter(isOrderFinanciallyActive).reduce((s, o) => s + (Number(o.total) || 0), 0);
     container.innerHTML += `
-      <div class="home-card" onclick="openFinanceScreen()">
+      <div class="home-card home-card-size-sm" onclick="openFinanceScreen()">
         <div class="home-card-icon-wrap home-card-icon-dim">
           <i data-lucide="trending-up" style="width:22px;height:22px;"></i>
         </div>
@@ -1514,7 +1514,7 @@ function renderHome() {
       .filter(s => s.date && s.date.startsWith(currentYm))
       .reduce((sum, s) => sum + Number(s.amount), 0);
     container.innerHTML += `
-      <div class="home-card" onclick="openOwnerSalaryScreen()">
+      <div class="home-card home-card-size-sm" onclick="openOwnerSalaryScreen()">
         <div class="home-card-icon-wrap home-card-icon-dim">
           <i data-lucide="wallet-cards" style="width:22px;height:22px;"></i>
         </div>
@@ -1527,7 +1527,7 @@ function renderHome() {
 
   if (currentRole === 'owner') {
     container.innerHTML += `
-      <div class="home-card" onclick="openOwnerSettingsScreen()">
+      <div class="home-card home-card-size-sm" onclick="openOwnerSettingsScreen()">
         <div class="home-card-icon-wrap home-card-icon-dim">
           <i data-lucide="settings" style="width:22px;height:22px;"></i>
         </div>
@@ -1540,7 +1540,7 @@ function renderHome() {
 
   if (canViewCarDirectory()) {
     container.innerHTML += `
-      <div class="home-card" onclick="openCarDirectoryScreen()">
+      <div class="home-card home-card-size-sm" onclick="openCarDirectoryScreen()">
         <div class="home-card-icon-wrap home-card-icon-dim">
           <i data-lucide="car" style="width:22px;height:22px;"></i>
         </div>

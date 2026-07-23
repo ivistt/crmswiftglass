@@ -692,6 +692,81 @@ body {
   color: #0a0a0f;
 }
 
+/* Dashboard card hierarchy */
+.owner-dashboard-cards {
+  grid-auto-flow: dense;
+  grid-auto-rows: 64px;
+  align-items: stretch;
+}
+.owner-dashboard-cards .home-card {
+  min-height: 0;
+}
+.owner-dashboard-cards .home-card-size-lg {
+  grid-column: span 2;
+  grid-row: span 3;
+  padding: 20px;
+}
+.owner-dashboard-cards .home-card-size-md {
+  grid-row: span 2;
+}
+.owner-dashboard-cards .home-card-size-sm {
+  grid-row: span 1;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  column-gap: 10px;
+  align-content: center;
+  padding: 9px 12px;
+}
+.owner-dashboard-cards .home-card-size-lg .home-card-icon-wrap {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  margin-bottom: 14px;
+}
+.owner-dashboard-cards .home-card-size-lg h3 {
+  font-size: 13px;
+}
+.owner-dashboard-cards .home-card-size-lg p {
+  font-size: 11px;
+}
+.owner-dashboard-cards .home-card-size-lg .home-card-count {
+  margin-top: 12px;
+  font-size: 30px !important;
+}
+.owner-dashboard-cards .home-card-size-sm .home-card-icon-wrap {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  width: 32px;
+  height: 32px;
+  margin: 0;
+}
+.owner-dashboard-cards .home-card-size-sm h3 {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: end;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.owner-dashboard-cards .home-card-size-sm p {
+  display: none;
+}
+.owner-dashboard-cards .home-card-size-sm .home-card-count {
+  grid-column: 2;
+  grid-row: 2;
+  align-self: start;
+  min-width: 0;
+  margin: 2px 0 0;
+  overflow: hidden;
+  font-size: 14px !important;
+  letter-spacing: -0.35px;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ===== CALENDAR ===== */
 .calendar-toolbar {
   display: flex;
