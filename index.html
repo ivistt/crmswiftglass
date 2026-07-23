@@ -861,7 +861,7 @@
             <label class="form-label">☎️ Телефон</label>
             <div class="ac-wrap" id="ac-phone-wrap">
               <input class="form-input" type="text" id="f-phone" placeholder="+380..."
-                autocomplete="off" oninput="acFilter('phone')" onfocus="acOpen('phone')" onblur="acBlur('phone')" onkeydown="acKey(event,'phone')">
+                autocomplete="off" inputmode="tel" oninput="formatOrderPhoneInput(this); acFilter('phone')" onfocus="acOpen('phone')" onblur="acBlur('phone')" onkeydown="acKey(event,'phone')">
               <div class="ac-dropdown" id="ac-phone-list"></div>
             </div>
           </div>

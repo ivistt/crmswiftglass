@@ -4146,7 +4146,7 @@ function fillOrderForm(o) {
   set('f-time', o.time);
   set('f-responsible', o.responsible);
   set('f-client', o.client);
-  set('f-phone', o.phone);
+  set('f-phone', normalizeOrderPhoneValue(o.phone));
   set('f-address', o.address);
   set('f-vin', o.vin);
   set('f-extra-note', o.extraNote);
@@ -4460,7 +4460,7 @@ async function saveOrder() {
     time:            get('f-time'),
     responsible:     get('f-responsible'),
     client:          get('f-client'),
-    phone:           get('f-phone'),
+    phone:           normalizeOrderPhoneValue(get('f-phone')),
     address:         get('f-address'),
     vin:             get('f-vin'),
     extraNote:       get('f-extra-note'),
@@ -4698,6 +4698,25 @@ function phoneCallLink(phone) {
   const tel = raw.replace(/[^\d+]/g, '').replace(/(?!^)\+/g, '');
   if (!tel) return raw;
   return `<a class="detail-phone-link" href="tel:${tel}">${raw}</a>`;
+}
+
+function normalizeOrderPhoneValue(value) {
+  const raw = String(value || '');
+  const hasLeadingPlus = raw.trimStart().startsWith('+');
+  const digits = raw.replace(/\D/g, '');
+  return `${hasLeadingPlus ? '+' : ''}${digits}`;
+}
+
+function formatOrderPhoneInput(input) {
+  if (!input) return;
+  const raw = String(input.value || '');
+  const cursor = Number.isFinite(input.selectionStart) ? input.selectionStart : raw.length;
+  const formatted = normalizeOrderPhoneValue(raw);
+  if (formatted === raw) return;
+  const formattedBeforeCursor = normalizeOrderPhoneValue(raw.slice(0, cursor));
+  input.value = formatted;
+  const nextCursor = Math.min(formatted.length, formattedBeforeCursor.length);
+  try { input.setSelectionRange(nextCursor, nextCursor); } catch (e) {}
 }
 
 function orderCardPhoneCallLink(phone) {
@@ -5619,7 +5638,7 @@ function acSelect(type, idx) {
 
     // Автозаполнение телефона
     const phoneEl = document.getElementById('f-phone');
-    if (phoneEl && item.client?.phone) phoneEl.value = item.client.phone;
+    if (phoneEl && item.client?.phone) phoneEl.value = normalizeOrderPhoneValue(item.client.phone);
 
     const addressEl = document.getElementById('f-address');
     if (addressEl && item.client?.address) addressEl.value = item.client.address;
