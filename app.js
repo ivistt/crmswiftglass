@@ -17,6 +17,7 @@ const OWNER_CASH_PAGE_SIZE = 200;
 let ownerCashNextOffset = 0;
 let ownerCashHasMore = false;
 let ownerCashPageLoading = false;
+let ownerCashLoadUntilDate = '';
 // Legacy bucket name used in historical cash rows.
 const OWNER_PENDING_CASH_WORKER_NAME = 'Карты владельца';
 let calendarCursorDate = new Date();
@@ -2301,14 +2302,31 @@ function openOwnerCashHistoryModal(workerKey) {
 
 function renderOwnerCashHistoryPagination() {
   if (!ownerCashHasMore) return '';
+  const oldestLoadedDate = getOwnerCashOldestLoadedDate();
   return `
     <div class="fin-month-card" style="margin-top:12px;padding:14px;text-align:center;">
-      <div class="fin-month-sub" style="margin-bottom:10px;">Загружено последних записей: ${window.ownerCashRecentLog?.length || 0}</div>
-      <button class="btn-secondary" type="button" style="font-size:13px;padding:8px 14px;" onclick="loadMoreOwnerCashHistory(this)">
-        Загрузить более старые записи
-      </button>
+      <div class="fin-month-sub" style="margin-bottom:10px;">
+        Загружено последних записей: ${window.ownerCashRecentLog?.length || 0}${oldestLoadedDate ? ` · до ${formatDate(oldestLoadedDate)}` : ''}
+      </div>
+      <div class="owner-cash-history-load-actions">
+        <button class="btn-secondary" type="button" onclick="loadMoreOwnerCashHistory(this)">
+          Загрузить ещё 200
+        </button>
+        <span class="owner-cash-history-load-divider">или</span>
+        <input class="form-input" type="date" id="owner-cash-load-until-date" max="${getLocalDateString()}" value="${escapeAttr(ownerCashLoadUntilDate)}" onchange="ownerCashLoadUntilDate=this.value">
+        <button class="btn-secondary" type="button" onclick="loadOwnerCashHistoryUntilDate(this)">
+          Загрузить до даты
+        </button>
+      </div>
     </div>
   `;
+}
+
+function getOwnerCashOldestLoadedDate() {
+  return (window.ownerCashRecentLog || [])
+    .map(entry => _ownerCashEntryDate(entry))
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b))[0] || '';
 }
 
 async function loadOwnerCashCompleteHistory() {
@@ -2321,6 +2339,26 @@ async function loadOwnerCashCompleteHistory() {
   }
 }
 
+async function appendNextOwnerCashPage() {
+  const page = await sbFetchCashPage({
+    offset: ownerCashNextOffset,
+    limit: OWNER_CASH_PAGE_SIZE,
+  });
+  const pageRows = Array.isArray(page?.rows) ? page.rows : [];
+  const existingIds = new Set((window.ownerCashRecentLog || []).map(entry => String(entry?.id || '')).filter(Boolean));
+  const uniqueRows = pageRows.filter(entry => {
+    const id = String(entry?.id || '');
+    return !id || !existingIds.has(id);
+  });
+  window.ownerCashRecentLog = [...(window.ownerCashRecentLog || []), ...uniqueRows];
+  ownerCashNextOffset = Math.max(ownerCashNextOffset, Number(page?.nextOffset) || ownerCashNextOffset);
+  ownerCashHasMore = page?.hasMore === true;
+  window.__allCashLogComplete = !ownerCashHasMore;
+  if (!ownerCashHasMore) window.allCashLog = [...window.ownerCashRecentLog];
+  ownerCashStateGeneration += 1;
+  return uniqueRows.length;
+}
+
 async function loadMoreOwnerCashHistory(button = null) {
   if (ownerCashPageLoading || !ownerCashHasMore || currentRole !== 'owner') return;
   ownerCashPageLoading = true;
@@ -2330,22 +2368,7 @@ async function loadMoreOwnerCashHistory(button = null) {
   }
 
   try {
-    const page = await sbFetchCashPage({
-      offset: ownerCashNextOffset,
-      limit: OWNER_CASH_PAGE_SIZE,
-    });
-    const pageRows = Array.isArray(page?.rows) ? page.rows : [];
-    const existingIds = new Set((window.ownerCashRecentLog || []).map(entry => String(entry?.id || '')).filter(Boolean));
-    const uniqueRows = pageRows.filter(entry => {
-      const id = String(entry?.id || '');
-      return !id || !existingIds.has(id);
-    });
-    window.ownerCashRecentLog = [...(window.ownerCashRecentLog || []), ...uniqueRows];
-    ownerCashNextOffset = Math.max(ownerCashNextOffset, Number(page?.nextOffset) || ownerCashNextOffset);
-    ownerCashHasMore = page?.hasMore === true;
-    window.__allCashLogComplete = !ownerCashHasMore;
-    if (!ownerCashHasMore) window.allCashLog = [...window.ownerCashRecentLog];
-    ownerCashStateGeneration += 1;
+    await appendNextOwnerCashPage();
     renderOwnerCashScreen();
     if (ownerCashSelectedWorker) openOwnerCashHistoryModal(ownerCashSelectedWorker);
   } catch (error) {
@@ -2353,6 +2376,50 @@ async function loadMoreOwnerCashHistory(button = null) {
     if (button) {
       button.disabled = false;
       button.textContent = 'Загрузить ещё';
+    }
+  } finally {
+    ownerCashPageLoading = false;
+  }
+}
+
+async function loadOwnerCashHistoryUntilDate(button = null) {
+  if (ownerCashPageLoading || !ownerCashHasMore || currentRole !== 'owner') return;
+  const input = document.getElementById('owner-cash-load-until-date');
+  const targetDate = String(input?.value || ownerCashLoadUntilDate || '').slice(0, 10);
+  if (!targetDate) return showToast('Выберите дату, до которой загрузить историю', 'error');
+  ownerCashLoadUntilDate = targetDate;
+
+  const initialOldestDate = getOwnerCashOldestLoadedDate();
+  if (initialOldestDate && initialOldestDate < targetDate) {
+    return showToast(`История до ${formatDate(targetDate)} уже загружена`);
+  }
+
+  ownerCashPageLoading = true;
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Загрузка…';
+  }
+
+  let loadedRows = 0;
+  try {
+    while (ownerCashHasMore) {
+      const oldestDate = getOwnerCashOldestLoadedDate();
+      // Загружаем ещё одну страницу и после достижения выбранного дня,
+      // чтобы гарантированно получить все записи за целевую дату.
+      if (oldestDate && oldestDate < targetDate) break;
+      loadedRows += await appendNextOwnerCashPage();
+      if (button) button.textContent = `Загрузка… ${loadedRows}`;
+    }
+    renderOwnerCashScreen();
+    if (ownerCashSelectedWorker) openOwnerCashHistoryModal(ownerCashSelectedWorker);
+    showToast(ownerCashHasMore
+      ? `История загружена до ${formatDate(targetDate)}`
+      : 'Загружена вся доступная история');
+  } catch (error) {
+    showToast('Не удалось загрузить историю: ' + error.message, 'error');
+    if (button) {
+      button.disabled = false;
+      button.textContent = 'Загрузить до даты';
     }
   } finally {
     ownerCashPageLoading = false;
