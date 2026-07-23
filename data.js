@@ -902,16 +902,42 @@ async function sbFetchCashLogPage(workerName, { deletedMode = 'active', offset =
 
 async function sbFetchCashPage({ deletedMode = 'active', offset = 0, limit = 200 } = {}) {
   const mode = deletedMode === 'only' ? 'only' : deletedMode === 'all' ? 'all' : 'active';
-  const safeOffset = Math.max(0, Number(offset) || 0);
+  let rawOffset = Math.max(0, Number(offset) || 0);
   const safeLimit = Math.min(1000, Math.max(1, Number(limit) || 200));
-  const res = await fetch(
-    `${WORKER_URL}/api/cash/all?deleted=${encodeURIComponent(mode)}&offset=${safeOffset}&limit=${safeLimit}`,
-    { headers: getHeaders() }
-  );
-  if (!res.ok) await throwApiError(res);
-  const rows = await res.json();
-  return (Array.isArray(rows) ? rows : [])
-    .filter(entry => String(entry?.ledger_status || 'posted') !== 'voided');
+  const rows = [];
+  let nextOffset = rawOffset;
+  let hasMore = false;
+  let reachedEnd = false;
+
+  // offset API относится к сырым строкам cash_log. Пропускаем voided-записи,
+  // но продолжаем запрашивать страницы, пока не найдём safeLimit + 1 активную.
+  while (!hasMore && !reachedEnd) {
+    const needed = Math.max(1, safeLimit + 1 - rows.length);
+    const batchLimit = Math.min(1000, Math.max(200, needed));
+    const res = await fetch(
+      `${WORKER_URL}/api/cash/all?deleted=${encodeURIComponent(mode)}&offset=${rawOffset}&limit=${batchLimit}`,
+      { headers: getHeaders() }
+    );
+    if (!res.ok) await throwApiError(res);
+    const data = await res.json();
+    const rawRows = Array.isArray(data) ? data : [];
+    if (!rawRows.length) break;
+
+    for (const entry of rawRows) {
+      rawOffset += 1;
+      if (String(entry?.ledger_status || 'posted') === 'voided') continue;
+      if (rows.length < safeLimit) {
+        rows.push(entry);
+        nextOffset = rawOffset;
+      } else {
+        hasMore = true;
+        break;
+      }
+    }
+    reachedEnd = rawRows.length < batchLimit;
+  }
+
+  return { rows, nextOffset, hasMore };
 }
 
 async function sbFetchAllCashLog(deletedMode = 'active') {
@@ -1297,6 +1323,29 @@ async function sbUpsertAppSetting(key, valueJson) {
     key: String(key || '').trim(),
     value_json: valueJson || {},
   });
+}
+
+async function refreshSharedGlassManufacturers(force = false) {
+  const now = Date.now();
+  if (!force && glassManufacturersLastSyncAt && now - glassManufacturersLastSyncAt < 30000) {
+    return appSettings?.glass_manufacturers || null;
+  }
+  if (glassManufacturersSyncPromise) return glassManufacturersSyncPromise;
+
+  glassManufacturersSyncPromise = sbFetchRefOptional('ref_app_settings')
+    .then(rows => {
+      const row = (rows || []).find(item => String(item?.key || '').trim() === 'glass_manufacturers');
+      if (row?.value_json && typeof row.value_json === 'object') {
+        appSettings.glass_manufacturers = row.value_json;
+      }
+      glassManufacturersLastSyncAt = Date.now();
+      return appSettings?.glass_manufacturers || null;
+    })
+    .finally(() => {
+      glassManufacturersSyncPromise = null;
+    });
+
+  return glassManufacturersSyncPromise;
 }
 
 async function sbSendTelegramTest(text = 'Тестовое сообщение из SwiftGlass') {
@@ -2794,6 +2843,8 @@ let refCars             = [];
 let refWarehouses       = [];
 let refDropshippers     = [];
 let appSettings         = {};
+let glassManufacturersSyncPromise = null;
+let glassManufacturersLastSyncAt = 0;
 let carDirectory        = []; // справочник авто
 let refEquipment        = [];
 let refPaymentStatuses  = [];

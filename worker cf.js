@@ -1581,21 +1581,27 @@ export default {
       }
 
       if (request.method === 'POST') {
-        if (authedRole !== 'owner') {
-          return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
-        }
-
         if (table !== 'ref_warehouses' && table !== 'ref_dropshippers' && table !== 'ref_app_settings' && table !== 'ref_service_rates') {
           return Response.json({ error: 'Read only reference' }, { status: 400, headers: cors });
         }
 
         const body = await request.json().catch(() => ({}));
+        const requestedSettingKey = table === 'ref_app_settings' ? String(body?.key || '').trim() : '';
+        const canManageSharedGlassManufacturers = requestedSettingKey === 'glass_manufacturers'
+          && workerHasPermission(liveWorker, 'action_panel_client_data');
+        if (authedRole !== 'owner' && !canManageSharedGlassManufacturers) {
+          return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
+        }
+
         if (table === 'ref_app_settings') {
           const key = String(body?.key || '').trim();
           if (!key) {
             return Response.json({ error: 'Key required' }, { status: 400, headers: cors });
           }
-          const valueJson = body?.value_json && typeof body.value_json === 'object' ? body.value_json : {};
+          const rawValueJson = body?.value_json && typeof body.value_json === 'object' ? body.value_json : {};
+          const valueJson = key === 'glass_manufacturers'
+            ? normalizeGlassManufacturersSetting(rawValueJson)
+            : rawValueJson;
           const existingRes = await fetch(
             `${sb}/rest/v1/${table}?key=eq.${encodeURIComponent(key)}&limit=1`,
             { headers: sbHeaders }
@@ -2657,6 +2663,26 @@ function normalizeWorkerClientCopyFields(value) {
     .filter(field => field.title && field.text)
     .slice(0, 50);
   return cleanFields.length ? { fields: cleanFields, updatedAt: new Date().toISOString() } : null;
+}
+
+function normalizeGlassManufacturersSetting(value) {
+  const items = Array.isArray(value?.items) ? value.items : [];
+  const seenNames = new Set();
+  const cleanItems = [];
+  for (let index = 0; index < items.length && cleanItems.length < 200; index += 1) {
+    const item = items[index];
+    const name = String(item?.name || '').trim().slice(0, 200);
+    const description = String(item?.description || '').trim().slice(0, 4000);
+    const normalizedName = name.toLocaleLowerCase();
+    if (!name || !description || seenNames.has(normalizedName)) continue;
+    seenNames.add(normalizedName);
+    cleanItems.push({
+      id: String(item?.id || `manufacturer-${index + 1}`).trim().slice(0, 120) || `manufacturer-${index + 1}`,
+      name,
+      description,
+    });
+  }
+  return { items: cleanItems, updatedAt: new Date().toISOString() };
 }
 
 function getWorkerTelegramNick(workerRow) {

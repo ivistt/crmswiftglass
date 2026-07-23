@@ -142,15 +142,15 @@ function getOwnerCashViewLog() {
 async function loadOwnerCashFastState({ force = false } = {}) {
   if (!force && ownerCashFastLoadPromise) return ownerCashFastLoadPromise;
   ownerCashFastLoadPromise = (async () => {
-    const [summary, recent] = await Promise.all([
+    const [summary, page] = await Promise.all([
       sbFetchCashSummary(),
-      sbFetchCashPage({ limit: OWNER_CASH_PAGE_SIZE + 1 }),
+      sbFetchCashPage({ limit: OWNER_CASH_PAGE_SIZE }),
     ]);
-    const recentRows = Array.isArray(recent) ? recent : [];
+    const recentRows = Array.isArray(page?.rows) ? page.rows : [];
     window.ownerCashSummary = summary;
-    window.ownerCashRecentLog = recentRows.slice(0, OWNER_CASH_PAGE_SIZE);
-    ownerCashNextOffset = window.ownerCashRecentLog.length;
-    ownerCashHasMore = recentRows.length > OWNER_CASH_PAGE_SIZE;
+    window.ownerCashRecentLog = recentRows;
+    ownerCashNextOffset = Math.max(0, Number(page?.nextOffset) || recentRows.length);
+    ownerCashHasMore = page?.hasMore === true;
     window.__allCashLogComplete = !ownerCashHasMore;
     if (!ownerCashHasMore) window.allCashLog = [...window.ownerCashRecentLog];
     ownerCashStateGeneration += 1;
@@ -356,7 +356,12 @@ function openFinanceScreen() {
   showScreen('finance');
 }
 
-function openSettingsScreen() {
+async function openSettingsScreen() {
+  if (typeof canUseActionPanelClientData === 'function'
+      && canUseActionPanelClientData()
+      && typeof refreshSharedGlassManufacturers === 'function') {
+    try { await refreshSharedGlassManufacturers(true); } catch (e) {}
+  }
   renderSettingsScreen();
   showScreen('owner-settings');
   setActiveNav('settings');
@@ -936,18 +941,27 @@ function updateDashboardActionMenu() {
   if (!menu) return;
   const visible = canUseDashboardActionPanel();
   menu.style.display = visible ? '' : 'none';
+  const addOrderBtn = document.getElementById('action-menu-add-order');
   const clientBtn = document.getElementById('action-menu-client-data');
   const reportBtn = document.getElementById('action-menu-daily-report');
   const remindersBtn = document.getElementById('action-menu-reminders');
   const empty = document.getElementById('action-menu-empty');
   const canClient = canUseActionPanelClientData();
+  const canAddOrder = typeof canCreateOrder === 'function' && canCreateOrder();
   const canReport = canUseActionPanelDailyReport();
   const canReminders = canUseActionPanelReminders();
+  if (addOrderBtn) addOrderBtn.style.display = canAddOrder ? '' : 'none';
   if (clientBtn) clientBtn.style.display = canClient ? '' : 'none';
   if (reportBtn) reportBtn.style.display = canReport ? '' : 'none';
   if (remindersBtn) remindersBtn.style.display = canReminders ? '' : 'none';
-  if (empty) empty.style.display = (!canClient && !canReport && !canReminders) ? 'block' : 'none';
+  if (empty) empty.style.display = (!canAddOrder && !canClient && !canReport && !canReminders) ? 'block' : 'none';
   updateOwnerRemindersCount();
+}
+
+function openNewOrderFromActionPanel() {
+  if (!(typeof canCreateOrder === 'function' && canCreateOrder())) return;
+  closeOwnerDashboardMenu();
+  openOrderModal(null);
 }
 
 function getCurrentReminderWorkerKey() {
@@ -1034,21 +1048,43 @@ function getCurrentUserClientCopyBlocks() {
     .filter(block => block.title && block.text);
 }
 
-function openQuickCopyModal() {
+async function openQuickCopyModal() {
   if (!canUseActionPanelClientData()) return;
   closeOwnerDashboardMenu();
+  if (typeof refreshSharedGlassManufacturers === 'function') {
+    try { await refreshSharedGlassManufacturers(true); } catch (e) {}
+  }
   const fields = getCurrentUserClientCopyBlocks();
+  const manufacturers = typeof getGlassManufacturers === 'function' ? getGlassManufacturers() : [];
   const container = document.getElementById('quick-copy-options');
   if (!container) return;
-  container.innerHTML = fields.length ? fields.map(field => `
-    <label class="order-copy-option">
-      <input type="checkbox" value="${escapeAttr(field.key)}" data-quick-copy-field>
-      <span>
-        <div class="order-copy-option-title">${escapeHtml(field.title)}</div>
-        <div class="order-copy-option-preview">${escapeHtml(field.text.replace(/\*/g, ''))}</div>
-      </span>
-    </label>
-  `).join('') : '<div class="empty-state"><h3>Текстов пока нет</h3><p>Добавьте их в настройках владельца</p></div>';
+  const fieldsHtml = fields.length ? `
+    <div class="quick-copy-section-title">Тексты</div>
+    ${fields.map(field => `
+      <label class="order-copy-option">
+        <input type="checkbox" value="${escapeAttr(field.key)}" data-quick-copy-field>
+        <span>
+          <div class="order-copy-option-title">${escapeHtml(field.title)}</div>
+          <div class="order-copy-option-preview">${escapeHtml(field.text.replace(/\*/g, ''))}</div>
+        </span>
+      </label>
+    `).join('')}
+  ` : '';
+  const manufacturersHtml = manufacturers.length ? `
+    <div class="quick-copy-section-title">Производители</div>
+    ${manufacturers.map(item => `
+      <label class="order-copy-option">
+        <input type="checkbox" value="${escapeAttr(item.id)}" data-quick-copy-manufacturer>
+        <span>
+          <div class="order-copy-option-title">${escapeHtml(item.name)}</div>
+          <div class="order-copy-option-preview">${escapeHtml(item.description || 'Без описания')}</div>
+        </span>
+      </label>
+    `).join('')}
+  ` : '';
+  container.innerHTML = (fieldsHtml || manufacturersHtml)
+    ? fieldsHtml + manufacturersHtml
+    : '<div class="empty-state"><h3>Данных пока нет</h3><p>Добавьте тексты или производителей в настройках</p></div>';
   document.getElementById('quick-copy-modal')?.classList.add('active');
   initIcons();
 }
@@ -1060,9 +1096,16 @@ function closeQuickCopyModal() {
 function copyQuickClientData() {
   const selected = new Set(Array.from(document.querySelectorAll('[data-quick-copy-field]:checked')).map(input => input.value));
   const blocks = getCurrentUserClientCopyBlocks().filter(field => selected.has(field.key));
-  if (!blocks.length) return showToast('Выберите хотя бы один блок', 'error');
-  const text = blocks.map(block => block.text).join('\n\n');
-  const html = `<div style="font-family:Arial,sans-serif;font-size:16px;line-height:1.45;">${blocks.map(block => `<div style="margin-bottom:18px;">${renderOrderCopyExtraBlockHtml(block.text)}</div>`).join('')}</div>`;
+  const selectedManufacturers = new Set(Array.from(document.querySelectorAll('[data-quick-copy-manufacturer]:checked')).map(input => input.value));
+  const manufacturers = (typeof getGlassManufacturers === 'function' ? getGlassManufacturers() : [])
+    .filter(item => selectedManufacturers.has(item.id));
+  const manufacturerBlocks = manufacturers.map(item => ({
+    text: `Производитель стекла: ${item.name}${item.description ? `\n${item.description}` : ''}`,
+  }));
+  const selectedBlocks = [...blocks, ...manufacturerBlocks];
+  if (!selectedBlocks.length) return showToast('Выберите хотя бы один блок', 'error');
+  const text = selectedBlocks.map(block => block.text).join('\n\n');
+  const html = `<div style="font-family:Arial,sans-serif;font-size:16px;line-height:1.45;">${selectedBlocks.map(block => `<div style="margin-bottom:18px;">${renderOrderCopyExtraBlockHtml(block.text)}</div>`).join('')}</div>`;
   copyOrderClientContent({ text, html });
   closeQuickCopyModal();
 }
@@ -2287,19 +2330,19 @@ async function loadMoreOwnerCashHistory(button = null) {
   }
 
   try {
-    const rows = await sbFetchCashPage({
+    const page = await sbFetchCashPage({
       offset: ownerCashNextOffset,
-      limit: OWNER_CASH_PAGE_SIZE + 1,
+      limit: OWNER_CASH_PAGE_SIZE,
     });
-    const pageRows = (Array.isArray(rows) ? rows : []).slice(0, OWNER_CASH_PAGE_SIZE);
+    const pageRows = Array.isArray(page?.rows) ? page.rows : [];
     const existingIds = new Set((window.ownerCashRecentLog || []).map(entry => String(entry?.id || '')).filter(Boolean));
     const uniqueRows = pageRows.filter(entry => {
       const id = String(entry?.id || '');
       return !id || !existingIds.has(id);
     });
     window.ownerCashRecentLog = [...(window.ownerCashRecentLog || []), ...uniqueRows];
-    ownerCashNextOffset += pageRows.length;
-    ownerCashHasMore = (Array.isArray(rows) ? rows.length : 0) > OWNER_CASH_PAGE_SIZE;
+    ownerCashNextOffset = Math.max(ownerCashNextOffset, Number(page?.nextOffset) || ownerCashNextOffset);
+    ownerCashHasMore = page?.hasMore === true;
     window.__allCashLogComplete = !ownerCashHasMore;
     if (!ownerCashHasMore) window.allCashLog = [...window.ownerCashRecentLog];
     ownerCashStateGeneration += 1;
@@ -4275,6 +4318,7 @@ function renderOwnerSettingsScreen() {
       </div>
     </div>
     ${renderOwnerCopyFieldsSettings()}
+    ${renderGlassManufacturerSettings()}
     ${typeof renderOwnerSystemBannerControls === 'function' ? renderOwnerSystemBannerControls() : ''}
   `;
   initIcons();
@@ -4319,8 +4363,103 @@ async function saveOwnerCopyFields() {
     const payload = { fields, updatedAt: new Date().toISOString() };
     await sbUpsertAppSetting('client_copy_fields', payload);
     appSettings.client_copy_fields = payload;
-    renderOwnerSettingsScreen();
     showToast('Тексты сохранены ✓');
+  } catch (e) {
+    showToast('Ошибка сохранения: ' + e.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function canManageSharedGlassManufacturers() {
+  return currentRole === 'owner'
+    || (typeof canUseActionPanelClientData === 'function' && canUseActionPanelClientData());
+}
+
+function createGlassManufacturerKey() {
+  return `manufacturer-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function renderGlassManufacturerSettings() {
+  if (!canManageSharedGlassManufacturers()) return '';
+  const manufacturers = typeof getGlassManufacturers === 'function' ? getGlassManufacturers() : [];
+  return `
+    <div class="owner-copy-settings glass-manufacturer-settings">
+      <div class="owner-copy-settings-head">
+        <div>
+          <div class="owner-banner-card-title">Производители стекла</div>
+          <div class="owner-banner-card-text">Общий список для всех, кому доступны «Данные клиенту»</div>
+        </div>
+        <button type="button" class="btn-secondary" onclick="addGlassManufacturerSetting()">
+          <i data-lucide="plus" style="width:14px;height:14px;"></i> Добавить
+        </button>
+      </div>
+      <div class="owner-copy-settings-list" id="glass-manufacturer-settings-list">
+        ${manufacturers.map(item => renderGlassManufacturerEditor(item)).join('')}
+      </div>
+      ${manufacturers.length ? '' : '<div class="glass-manufacturer-empty">Производителей пока нет. Добавьте первую запись.</div>'}
+      <div style="display:flex;justify-content:flex-end;margin-top:12px;">
+        <button type="button" class="btn-primary" id="glass-manufacturer-save-btn" onclick="saveGlassManufacturers()">
+          <i data-lucide="save" style="width:14px;height:14px;"></i> Сохранить производителей
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function renderGlassManufacturerEditor(item = {}) {
+  return `
+    <div class="owner-copy-field glass-manufacturer-field" data-glass-manufacturer-row data-key="${escapeAttr(item.id || createGlassManufacturerKey())}">
+      <input class="form-input" data-glass-manufacturer-name value="${escapeAttr(item.name || '')}" maxlength="200" placeholder="Название производителя">
+      <button type="button" class="icon-btn" onclick="removeGlassManufacturerSetting(this)" title="Удалить">
+        <i data-lucide="trash-2" style="width:15px;height:15px;"></i>
+      </button>
+      <textarea class="form-input" data-glass-manufacturer-description maxlength="4000" placeholder="Описание для клиента">${escapeHtml(item.description || '')}</textarea>
+    </div>
+  `;
+}
+
+function addGlassManufacturerSetting() {
+  const list = document.getElementById('glass-manufacturer-settings-list');
+  if (!list) return;
+  list.insertAdjacentHTML('beforeend', renderGlassManufacturerEditor({ id: createGlassManufacturerKey() }));
+  document.querySelector('.glass-manufacturer-empty')?.remove();
+  initIcons();
+  const rows = list.querySelectorAll('[data-glass-manufacturer-row]');
+  rows[rows.length - 1]?.querySelector('[data-glass-manufacturer-name]')?.focus();
+}
+
+function removeGlassManufacturerSetting(button) {
+  button?.closest('[data-glass-manufacturer-row]')?.remove();
+}
+
+async function saveGlassManufacturers() {
+  if (!canManageSharedGlassManufacturers()) return;
+  const rows = Array.from(document.querySelectorAll('[data-glass-manufacturer-row]'));
+  const manufacturers = rows.map((row, index) => ({
+    id: String(row.dataset.key || `manufacturer-${index + 1}`),
+    name: row.querySelector('[data-glass-manufacturer-name]')?.value?.trim() || '',
+    description: row.querySelector('[data-glass-manufacturer-description]')?.value?.trim() || '',
+  }));
+  const incomplete = manufacturers.find(item => !item.name || !item.description);
+  if (incomplete) return showToast('У каждого производителя заполните название и описание', 'error');
+  const normalizedNames = manufacturers.map(item => item.name.toLocaleLowerCase());
+  if (new Set(normalizedNames).size !== normalizedNames.length) {
+    return showToast('Названия производителей не должны повторяться', 'error');
+  }
+
+  const btn = document.getElementById('glass-manufacturer-save-btn');
+  if (btn) btn.disabled = true;
+  try {
+    const payload = { items: manufacturers, updatedAt: new Date().toISOString() };
+    await sbUpsertAppSetting('glass_manufacturers', payload);
+    appSettings.glass_manufacturers = payload;
+    if (typeof glassManufacturersLastSyncAt !== 'undefined') glassManufacturersLastSyncAt = Date.now();
+    const selectedManufacturer = document.getElementById('f-glass-manufacturer')?.value || '';
+    if (typeof populateGlassManufacturerOptions === 'function') {
+      populateGlassManufacturerOptions(selectedManufacturer);
+    }
+    showToast('Производители сохранены ✓');
   } catch (e) {
     showToast('Ошибка сохранения: ' + e.message, 'error');
   } finally {
@@ -4347,6 +4486,7 @@ function renderUserSettingsScreen() {
               <i data-lucide="save" style="width:14px;height:14px;"></i> Сохранить мои тексты
             </button>
           </div>
+          ${renderGlassManufacturerSettings()}
         </div>
       ` : ''}
     </div>

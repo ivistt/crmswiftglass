@@ -81,7 +81,7 @@ const SERVICE_TYPE_OPTIONS = new Proxy([], {
   }
 });
 const CUSTOM_SERVICE_TYPE_NAME = 'Нестандартные работы';
-const GLASS_MANUFACTURERS = [
+const DEFAULT_GLASS_MANUFACTURERS = [
   {
     name: '🇨🇳 XYG (Китай)',
     description: 'Средний сегмент (хороший аналог)\nГеометрия уступает европейским производителям\nМассово используется на рынке',
@@ -119,7 +119,38 @@ const GLASS_MANUFACTURERS = [
     description: 'турецко-европейский производитель автостекла',
   },
 ];
-const GLASS_MANUFACTURER_BY_NAME = Object.fromEntries(GLASS_MANUFACTURERS.map(item => [item.name, item]));
+
+function getGlassManufacturers() {
+  const configured = appSettings?.glass_manufacturers?.items;
+  const source = Array.isArray(configured) ? configured : DEFAULT_GLASS_MANUFACTURERS;
+  return source
+    .map((item, index) => ({
+      id: String(item?.id || `manufacturer-${index + 1}`),
+      name: String(item?.name || '').trim(),
+      description: String(item?.description || '').trim(),
+    }))
+    .filter(item => item.name);
+}
+
+function getGlassManufacturerByName(name) {
+  const normalized = String(name || '').trim().toLowerCase();
+  if (!normalized) return null;
+  return getGlassManufacturers().find(item => item.name.toLowerCase() === normalized) || null;
+}
+
+function populateGlassManufacturerOptions(selectedValue = '') {
+  const select = document.getElementById('f-glass-manufacturer');
+  if (!select) return;
+  const selected = String(selectedValue || select.value || '').trim();
+  const manufacturers = getGlassManufacturers();
+  const options = [...manufacturers];
+  if (selected && !options.some(item => item.name === selected)) {
+    options.push({ id: 'historical', name: selected, description: '' });
+  }
+  select.innerHTML = '<option value="">— выбрать —</option>'
+    + options.map(item => `<option value="${escapeAttr(item.name)}">${escapeHtml(item.name)}</option>`).join('');
+  select.value = selected;
+}
 
 const SERVICE_TYPE_BY_NAME = new Proxy({}, {
   get(_target, prop) {
@@ -369,7 +400,7 @@ function _escapeAttr(value) {
 }
 
 function getGlassManufacturerCopyText(name) {
-  const manufacturer = GLASS_MANUFACTURER_BY_NAME[name];
+  const manufacturer = getGlassManufacturerByName(name);
   if (!name) return '';
   return manufacturer?.description
     ? `Производитель стекла: ${name}\n${manufacturer.description}`
@@ -3237,6 +3268,10 @@ async function openOrderModal(id) {
   }
 
   populateRefSelects();
+  if (typeof refreshSharedGlassManufacturers === 'function') {
+    try { await refreshSharedGlassManufacturers(); } catch (e) {}
+  }
+  populateGlassManufacturerOptions(accessOrder?.glassManufacturer || '');
   populateClientDatalist();
   setOrderModalPanel(canUseFullOrderForm(accessOrder) ? 'order' : 'work');
 
