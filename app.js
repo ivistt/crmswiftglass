@@ -13,6 +13,10 @@ let ownerCashSearchQuery = '';
 let ownerCashFastLoadPromise = null;
 let ownerCashFullLoadPromise = null;
 let ownerCashStateGeneration = 0;
+const OWNER_CASH_PAGE_SIZE = 200;
+let ownerCashNextOffset = 0;
+let ownerCashHasMore = false;
+let ownerCashPageLoading = false;
 // Legacy bucket name used in historical cash rows.
 const OWNER_PENDING_CASH_WORKER_NAME = 'Карты владельца';
 let calendarCursorDate = new Date();
@@ -106,6 +110,9 @@ function clearCacheAndReload() {
   if (typeof workerCashSummary !== 'undefined') workerCashSummary = null;
   if (typeof workerCashLogComplete !== 'undefined') workerCashLogComplete = false;
   if (typeof workerCashLoadVersion !== 'undefined') workerCashLoadVersion += 1;
+  if (typeof workerCashNextOffset !== 'undefined') workerCashNextOffset = 0;
+  if (typeof workerCashHasMore !== 'undefined') workerCashHasMore = false;
+  if (typeof workerCashPageLoading !== 'undefined') workerCashPageLoading = false;
   if (typeof allSalaries !== 'undefined') allSalaries = [];
   if (typeof manualClients !== 'undefined') manualClients = [];
   if (typeof currentClientPayments !== 'undefined') currentClientPayments = [];
@@ -116,6 +123,9 @@ function clearCacheAndReload() {
     window.ownerCashSummary = null;
     window.__allCashLogComplete = false;
   }
+  ownerCashNextOffset = 0;
+  ownerCashHasMore = false;
+  ownerCashPageLoading = false;
 
   location.reload();
 }
@@ -134,10 +144,15 @@ async function loadOwnerCashFastState({ force = false } = {}) {
   ownerCashFastLoadPromise = (async () => {
     const [summary, recent] = await Promise.all([
       sbFetchCashSummary(),
-      sbFetchCashPage({ limit: 200 }),
+      sbFetchCashPage({ limit: OWNER_CASH_PAGE_SIZE + 1 }),
     ]);
+    const recentRows = Array.isArray(recent) ? recent : [];
     window.ownerCashSummary = summary;
-    window.ownerCashRecentLog = recent;
+    window.ownerCashRecentLog = recentRows.slice(0, OWNER_CASH_PAGE_SIZE);
+    ownerCashNextOffset = window.ownerCashRecentLog.length;
+    ownerCashHasMore = recentRows.length > OWNER_CASH_PAGE_SIZE;
+    window.__allCashLogComplete = !ownerCashHasMore;
+    if (!ownerCashHasMore) window.allCashLog = [...window.ownerCashRecentLog];
     ownerCashStateGeneration += 1;
     return true;
   })();
@@ -169,23 +184,16 @@ async function loadOwnerCashFullState({ force = false } = {}) {
     }
     window.allCashLog = rows;
     window.__allCashLogComplete = true;
-    if (!window.ownerCashRecentLog?.length) window.ownerCashRecentLog = rows.slice(0, 200);
+    ownerCashNextOffset = rows.length;
+    ownerCashHasMore = false;
+    if (!window.ownerCashRecentLog?.length) window.ownerCashRecentLog = rows.slice(0, OWNER_CASH_PAGE_SIZE);
     return rows;
   })();
   try {
     return await ownerCashFullLoadPromise;
   } finally {
     ownerCashFullLoadPromise = null;
-    if (staleResult) setTimeout(loadOwnerCashFullInBackground, 0);
   }
-}
-
-function loadOwnerCashFullInBackground() {
-  if (currentRole !== 'owner' || window.__allCashLogComplete === true || ownerCashFullLoadPromise) return;
-  loadOwnerCashFullState().then(() => {
-    if (document.getElementById('screen-home')?.classList.contains('active')) renderHome();
-    if (document.getElementById('screen-owner-cash')?.classList.contains('active')) renderOwnerCashScreen();
-  }).catch(e => console.warn('[cash] Background history load failed:', e));
 }
 
 async function loadOwnerCashStartupState() {
@@ -241,7 +249,6 @@ async function initApp() {
     loader.classList.add('hiding');
     setTimeout(() => loader.remove(), 400);
   }
-  loadOwnerCashFullInBackground();
 }
 
 function getSystemBannerState(key) {
@@ -366,7 +373,6 @@ async function openOwnerCashScreen() {
   }
   renderOwnerCashScreen();
   showScreen('owner-cash');
-  loadOwnerCashFullInBackground();
 }
 
 async function openOwnerExpensesScreen() {
@@ -831,10 +837,7 @@ async function refreshOrders() {
     orders = await sbFetchOrders();
     if (currentRole === 'owner') {
       const fastLoaded = await loadOwnerCashFastState({ force: true });
-      if (fastLoaded) {
-        window.__allCashLogComplete = false;
-        loadOwnerCashFullInBackground();
-      } else {
+      if (!fastLoaded) {
         try { await loadOwnerCashFullState({ force: true }); } catch(e) { window.allCashLog = window.allCashLog || []; }
       }
     }
@@ -2241,7 +2244,7 @@ function openOwnerCashHistoryModal(workerKey) {
     <div class="modal" style="max-width:760px;max-height:88vh;display:flex;flex-direction:column;">
       <div class="modal-header" style="flex-shrink:0;">
         <div class="modal-title">${escapeHtml(title)}</div>
-        ${window.__allCashLogComplete === true ? '' : `<button class="btn-secondary" style="font-size:12px;padding:6px 10px;margin-left:auto;" onclick="loadOwnerCashCompleteHistory()">Вся история</button>`}
+        ${ownerCashHasMore ? `<button class="btn-secondary" style="font-size:12px;padding:6px 10px;margin-left:auto;" onclick="loadMoreOwnerCashHistory(this)">Ещё ${OWNER_CASH_PAGE_SIZE}</button>` : ''}
         <button class="modal-close" onclick="closeOwnerCashHistoryModal()">${icon('x')}</button>
       </div>
       <div class="modal-body" style="overflow-y:auto;flex:1;">
@@ -2260,6 +2263,44 @@ async function loadOwnerCashCompleteHistory() {
     if (ownerCashSelectedWorker) openOwnerCashHistoryModal(ownerCashSelectedWorker);
   } catch (e) {
     showToast('Не удалось загрузить всю историю: ' + e.message, 'error');
+  }
+}
+
+async function loadMoreOwnerCashHistory(button = null) {
+  if (ownerCashPageLoading || !ownerCashHasMore || currentRole !== 'owner') return;
+  ownerCashPageLoading = true;
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Загрузка…';
+  }
+
+  try {
+    const rows = await sbFetchCashPage({
+      offset: ownerCashNextOffset,
+      limit: OWNER_CASH_PAGE_SIZE + 1,
+    });
+    const pageRows = (Array.isArray(rows) ? rows : []).slice(0, OWNER_CASH_PAGE_SIZE);
+    const existingIds = new Set((window.ownerCashRecentLog || []).map(entry => String(entry?.id || '')).filter(Boolean));
+    const uniqueRows = pageRows.filter(entry => {
+      const id = String(entry?.id || '');
+      return !id || !existingIds.has(id);
+    });
+    window.ownerCashRecentLog = [...(window.ownerCashRecentLog || []), ...uniqueRows];
+    ownerCashNextOffset += pageRows.length;
+    ownerCashHasMore = (Array.isArray(rows) ? rows.length : 0) > OWNER_CASH_PAGE_SIZE;
+    window.__allCashLogComplete = !ownerCashHasMore;
+    if (!ownerCashHasMore) window.allCashLog = [...window.ownerCashRecentLog];
+    ownerCashStateGeneration += 1;
+    renderOwnerCashScreen();
+    if (ownerCashSelectedWorker) openOwnerCashHistoryModal(ownerCashSelectedWorker);
+  } catch (error) {
+    showToast('Не удалось загрузить историю: ' + error.message, 'error');
+    if (button) {
+      button.disabled = false;
+      button.textContent = 'Загрузить ещё';
+    }
+  } finally {
+    ownerCashPageLoading = false;
   }
 }
 
@@ -2390,8 +2431,6 @@ function closeOwnerCashEntryModal() {
 async function refreshOwnerCashState() {
   const fastLoaded = await loadOwnerCashFastState({ force: true });
   if (fastLoaded) {
-    window.__allCashLogComplete = false;
-    loadOwnerCashFullInBackground();
     return;
   }
   try { await loadOwnerCashFullState({ force: true }); }
@@ -3173,6 +3212,12 @@ function renderOwnerEmployeeCurrencyCashHistory(workerKey, logs) {
 
   const summaryTotal = hasOwnerCashSummary() ? getOwnerCashSummaryAmount(workerKey, 'usd') : null;
   const total = summaryTotal !== null ? summaryTotal : calcCurrencyCashBalance(rows);
+  const currencyAmountGetter = entry => Number(parseCurrencyCashEntry(entry)?.usdAmount) || 0;
+  const balanceMap = window.__allCashLogComplete !== true && summaryTotal !== null
+    ? getOwnerCashReverseBalanceMap(rows, summaryTotal, currencyAmountGetter)
+    : (typeof getCashRunningBalanceMap === 'function'
+      ? getCashRunningBalanceMap(rows, currencyAmountGetter)
+      : new Map());
   const safeWorkerKey = getOwnerCashSafeKey(String(workerKey || historyTitle) + '-currency');
   const tree = {};
 
@@ -3216,7 +3261,7 @@ function renderOwnerEmployeeCurrencyCashHistory(workerKey, logs) {
                 <div class="owner-cash-entry-meta">${time ? escapeHtml(time) : '—'}${meta ? ' · ' + escapeHtml(meta) : ''}</div>
               </div>
               <div style="display:flex;align-items:center;gap:8px;">
-                <div class="owner-cash-entry-amount" style="color:${Number(parsed?.usdAmount || 0) >= 0 ? 'var(--accent)' : '#ef4444'};">${Number(parsed?.usdAmount || 0) >= 0 ? '+' : ''}${Number(parsed?.usdAmount || 0).toLocaleString('ru')} $</div>
+                <div class="owner-cash-entry-amount" style="color:${Number(parsed?.usdAmount || 0) >= 0 ? 'var(--accent)' : '#ef4444'};">${formatOwnerCashAmountWithBalance(Number(parsed?.usdAmount || 0), balanceMap.get(String(entry.id)), '$')}</div>
                 ${renderOwnerCashEntryActionMenu(entry, { edit: false })}
               </div>
             </div>
@@ -4036,7 +4081,7 @@ function renderOwnerCashScreen() {
         <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;">
           <div>
             <div class="fin-month-name">Текущая касса</div>
-            <div class="fin-month-sub">${isUahView ? 'Баланс считает все подтвержденные записи в базе' : 'Баланс в долларах после обмена из гривневой кассы'}${window.__allCashLogComplete === true ? '' : ' · история догружается'}</div>
+            <div class="fin-month-sub">${isUahView ? 'Баланс считает все подтвержденные записи в базе' : 'Баланс в долларах после обмена из гривневой кассы'}${ownerCashHasMore ? ` · показано ${window.ownerCashRecentLog?.length || 0} последних записей` : ''}</div>
           </div>
           <div style="display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap;justify-content:flex-end;">
             <div class="owner-cash-confirm-filters" style="padding:0;">

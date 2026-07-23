@@ -10,6 +10,10 @@ let workerCashLogComplete = false;
 let workerCashFastLoadPromise = null;
 let workerCashFullLoadPromise = null;
 let workerCashLoadVersion = 0;
+const WORKER_CASH_PAGE_SIZE = 200;
+let workerCashNextOffset = 0;
+let workerCashHasMore = false;
+let workerCashPageLoading = false;
 let assistantWorkerSalaries = [];
 let cashSearchQuery = '';
 let selectedAssistantSalaryName = '';
@@ -160,9 +164,13 @@ async function loadWorkerCashLog() {
   try {
     workerCashLog = await sbFetchCashLog(currentWorkerName);
     workerCashLogComplete = true;
+    workerCashNextOffset = workerCashLog.length;
+    workerCashHasMore = false;
   } catch (e) {
     workerCashLog = [];
     workerCashLogComplete = false;
+    workerCashNextOffset = 0;
+    workerCashHasMore = false;
   }
 }
 
@@ -173,7 +181,7 @@ async function loadWorkerCashFastState({ force = false } = {}) {
 
   const fastPromise = Promise.all([
     sbFetchCashSummary(currentWorkerName),
-    sbFetchCashLogPage(currentWorkerName, { limit: 200 }),
+    sbFetchCashLogPage(currentWorkerName, { limit: WORKER_CASH_PAGE_SIZE + 1 }),
   ]).then(([summary, rows]) => {
     if (loadVersion !== workerCashLoadVersion) return false;
     const summaryRows = Array.isArray(summary?.workers) ? summary.workers : [];
@@ -185,8 +193,11 @@ async function loadWorkerCashFastState({ force = false } = {}) {
       throw new Error('Cash summary SQL must be updated');
     }
     workerCashSummary = summary;
-    workerCashLog = Array.isArray(rows) ? rows : [];
-    workerCashLogComplete = false;
+    const pageRows = Array.isArray(rows) ? rows : [];
+    workerCashLog = pageRows.slice(0, WORKER_CASH_PAGE_SIZE);
+    workerCashNextOffset = workerCashLog.length;
+    workerCashHasMore = pageRows.length > WORKER_CASH_PAGE_SIZE;
+    workerCashLogComplete = !workerCashHasMore;
     return true;
   }).catch(error => {
     console.warn('Fast worker cash load unavailable:', error);
@@ -211,6 +222,8 @@ async function loadWorkerCashFullState({ force = false } = {}) {
       if (loadVersion !== workerCashLoadVersion) return false;
       workerCashLog = Array.isArray(rows) ? rows : [];
       workerCashLogComplete = true;
+      workerCashNextOffset = workerCashLog.length;
+      workerCashHasMore = false;
       return true;
     })
     .catch(error => {
@@ -225,21 +238,6 @@ async function loadWorkerCashFullState({ force = false } = {}) {
   return workerCashFullLoadPromise;
 }
 
-function loadWorkerCashFullInBackground() {
-  if (workerCashLogComplete) return;
-  if (workerCashFullLoadPromise) {
-    workerCashFullLoadPromise.then(() => {
-      if (!workerCashLogComplete) loadWorkerCashFullInBackground();
-    });
-    return;
-  }
-  loadWorkerCashFullState().then(ok => {
-    if (ok && document.getElementById('screen-cash')?.classList.contains('active')) {
-      renderCashScreen();
-    }
-  });
-}
-
 async function loadWorkerCashCompleteHistory(button = null) {
   if (button) {
     button.disabled = true;
@@ -250,6 +248,41 @@ async function loadWorkerCashCompleteHistory(button = null) {
   else if (button) {
     button.disabled = false;
     button.textContent = 'Вся история';
+  }
+}
+
+async function loadMoreWorkerCashHistory(button = null) {
+  if (workerCashPageLoading || !workerCashHasMore || !currentWorkerName) return;
+  workerCashPageLoading = true;
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Загрузка…';
+  }
+
+  try {
+    const rows = await sbFetchCashLogPage(currentWorkerName, {
+      offset: workerCashNextOffset,
+      limit: WORKER_CASH_PAGE_SIZE + 1,
+    });
+    const pageRows = (Array.isArray(rows) ? rows : []).slice(0, WORKER_CASH_PAGE_SIZE);
+    const existingIds = new Set((workerCashLog || []).map(entry => String(entry?.id || '')).filter(Boolean));
+    const uniqueRows = pageRows.filter(entry => {
+      const id = String(entry?.id || '');
+      return !id || !existingIds.has(id);
+    });
+    workerCashLog = [...(workerCashLog || []), ...uniqueRows];
+    workerCashNextOffset += pageRows.length;
+    workerCashHasMore = (Array.isArray(rows) ? rows.length : 0) > WORKER_CASH_PAGE_SIZE;
+    workerCashLogComplete = !workerCashHasMore;
+    renderCashScreen();
+  } catch (error) {
+    showToast('Ошибка загрузки истории: ' + error.message, 'error');
+    if (button) {
+      button.disabled = false;
+      button.textContent = 'Загрузить ещё';
+    }
+  } finally {
+    workerCashPageLoading = false;
   }
 }
 
@@ -275,7 +308,7 @@ function getWorkerCashSummaryAmount(field) {
   );
 }
 
-function getWorkerCashReverseBalanceMap(log = [], currentBalance = 0) {
+function getWorkerCashReverseBalanceMap(log = [], currentBalance = 0, amountGetter = entry => Number(entry?.amount) || 0) {
   const map = new Map();
   let balance = Number(currentBalance) || 0;
   [...(log || [])]
@@ -289,7 +322,7 @@ function getWorkerCashReverseBalanceMap(log = [], currentBalance = 0) {
     .forEach(entry => {
       const id = String(entry?.id || '').trim();
       if (id) map.set(id, balance);
-      balance -= Number(entry?.amount) || 0;
+      balance -= Number(amountGetter(entry)) || 0;
     });
   return map;
 }
@@ -310,7 +343,6 @@ async function openCashScreen() {
   renderCashScreen();
   showScreen('cash');
   setActiveNav('cash');
-  if (fastLoaded) loadWorkerCashFullInBackground();
 }
 
 // ── РЕНДЕР ЗП ────────────────────────────────────────────────
@@ -474,8 +506,7 @@ function renderCashScreen() {
     + '</div>'
     + (!workerCashLogComplete
       ? '<div class="profile-today-card" style="margin-top:12px;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">'
-        + '<div style="font-size:12px;color:var(--text3);">Показаны последние операции. Полная история загружается в фоне.</div>'
-        + '<button class="btn-secondary" style="font-size:12px;padding:6px 10px;" onclick="loadWorkerCashCompleteHistory(this)">Вся история</button>'
+        + '<div style="font-size:12px;color:var(--text3);">Показано последних операций: ' + workerCashLog.length + '. Остальная история загружается только по запросу.</div>'
         + '</div>'
       : '')
     + renderCashSection(confirmedUnifiedCashLog, cashBalance, today, {
@@ -492,9 +523,20 @@ function renderCashScreen() {
     + ((currentWorkerHasFopCashRoute() || fopCashLog.length)
       ? renderCashSection(confirmedFopCashLog, fopBalance, today, { title: 'Касса БАБЕНКО', account: 'fop', buttonText: '+ БАБЕНКО', pendingEntries: pendingFopCashLog })
       : '')
-    + renderWorkerDropshipperCashSection();
+    + renderWorkerDropshipperCashSection()
+    + renderWorkerCashPagination();
 
   initIcons();
+}
+
+function renderWorkerCashPagination() {
+  if (!workerCashHasMore) return '';
+  return '<div class="profile-today-card" style="margin-top:12px;padding:14px;text-align:center;">'
+    + '<div style="font-size:12px;color:var(--text3);margin-bottom:10px;">Загружено записей: ' + workerCashLog.length + '</div>'
+    + '<button class="btn-secondary" type="button" style="font-size:13px;padding:8px 14px;" onclick="loadMoreWorkerCashHistory(this)">'
+    + 'Загрузить ещё ' + WORKER_CASH_PAGE_SIZE
+    + '</button>'
+    + '</div>';
 }
 
 function getSalaryAccrualForDate(entries, date) {
@@ -1208,11 +1250,17 @@ function _cashEntryRow(e, balanceMap = null) {
 function renderCurrencyCashSection(log, balance, today) {
   const todayLog = (log || []).filter(e => _cashEntryDate(e) === today);
   const archiveLog = (log || []).filter(e => _cashEntryDate(e) !== today);
+  const currencyAmountGetter = entry => Number(parseCurrencyCashEntry(entry)?.usdAmount) || 0;
+  const balanceMap = !workerCashLogComplete && hasWorkerCashSummary()
+    ? getWorkerCashReverseBalanceMap(log, balance, currencyAmountGetter)
+    : (typeof getCashRunningBalanceMap === 'function'
+      ? getCashRunningBalanceMap(log, currencyAmountGetter)
+      : new Map());
   const todayBalance = calcCurrencyCashBalance(todayLog);
   const balanceColor = balance >= 0 ? 'var(--accent)' : '#ef4444';
   const todayColor = todayBalance >= 0 ? 'var(--accent)' : '#ef4444';
   const todayRowsHtml = todayLog.length
-    ? todayLog.map(e => _currencyCashEntryRow(e)).join('')
+    ? todayLog.map(e => _currencyCashEntryRow(e, balanceMap)).join('')
     : '<div style="text-align:center;color:var(--text3);font-size:13px;padding:10px 0;">Сегодня обменов не было</div>';
 
   return '<div class="profile-today-card" style="margin-top:12px;">'
@@ -1240,12 +1288,12 @@ function renderCurrencyCashSection(log, balance, today) {
     + '</div>'
     + '<div>'
     + '<div style="font-size:12px;font-weight:700;color:var(--text3);letter-spacing:0.04em;margin-bottom:8px;">🗂 АРХИВ</div>'
-    + (archiveLog.length ? _buildCurrencyCashArchive(archiveLog) : '<div style="text-align:center;color:var(--text3);font-size:13px;padding:10px 0;">Обменов пока нет</div>')
+    + (archiveLog.length ? _buildCurrencyCashArchive(archiveLog, balanceMap) : '<div style="text-align:center;color:var(--text3);font-size:13px;padding:10px 0;">Обменов пока нет</div>')
     + '</div>'
     + '</div>';
 }
 
-function _currencyCashEntryRow(entry) {
+function _currencyCashEntryRow(entry, balanceMap = null) {
   const parsed = parseCurrencyCashEntry(entry);
   if (!parsed) return '';
   const dt = new Date(entry.created_at);
@@ -1257,17 +1305,17 @@ function _currencyCashEntryRow(entry) {
     parsed.uahAmount ? (parsed.usdAmount > 0 ? 'списано ' : 'получено ') + parsed.uahAmount.toLocaleString('ru') + ' ₴' : '',
   ].filter(Boolean).join(' · ');
   const amountColor = parsed.usdAmount >= 0 ? 'var(--accent)' : '#ef4444';
-  const amountSign = parsed.usdAmount >= 0 ? '+' : '';
   return '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);">'
     + '<div>'
     + '<div style="font-size:13px;color:var(--text2);">' + escapeHtml(title) + '</div>'
     + '<div style="font-size:11px;color:var(--text3);margin-top:2px;">' + time + (meta ? ' · ' + escapeHtml(meta) : '') + '</div>'
     + '</div>'
-    + '<div style="font-size:15px;font-weight:800;color:' + amountColor + ';white-space:nowrap;margin-left:12px;">' + amountSign + parsed.usdAmount.toLocaleString('ru') + ' $</div>'
+    + '<div style="font-size:15px;font-weight:800;color:' + amountColor + ';white-space:nowrap;margin-left:12px;">'
+    + _formatCashAmountWithBalance(parsed.usdAmount, balanceMap?.get?.(String(entry.id)), '$') + '</div>'
     + '</div>';
 }
 
-function _buildCurrencyCashArchive(log) {
+function _buildCurrencyCashArchive(log, balanceMap = null) {
   if (!log.length) return '';
   const MONTH_NAMES = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
   const tree = {};
@@ -1311,7 +1359,7 @@ function _buildCurrencyCashArchive(log) {
           + '<div style="font-size:13px;font-weight:800;color:' + (daySum >= 0 ? 'var(--accent)' : '#ef4444') + ';">' + (daySum >= 0 ? '+' : '') + daySum.toLocaleString('ru') + ' $</div>'
           + '</div>'
           + '<div id="profile-month-body-' + dayKey + '" style="display:none;padding:0 12px 4px 28px;">'
-          + entries.map(item => _currencyCashEntryRow(item)).join('')
+          + entries.map(item => _currencyCashEntryRow(item, balanceMap)).join('')
           + '</div>'
           + '</div>';
       }).join('');
@@ -1664,8 +1712,7 @@ function closeCashEntryModal() {
 async function refreshCurrentWorkerCashState() {
   if (!currentWorkerName) return;
   const fastLoaded = await loadWorkerCashFastState({ force: true });
-  if (fastLoaded) loadWorkerCashFullInBackground();
-  else await loadWorkerCashFullState({ force: true });
+  if (!fastLoaded) await loadWorkerCashFullState({ force: true });
 }
 
 async function refreshCurrentWorkerSalaryState() {
