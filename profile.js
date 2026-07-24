@@ -482,13 +482,15 @@ function renderCashScreen() {
   const fopCashLog = (workerCashLog || []).filter(isFopCashEntry);
   const pendingPersonalCashLog = (workerCashLog || []).filter(isPendingPersonalConfirmableCashEntry);
   const pendingCardCashLog = pendingPersonalCashLog.filter(isCardCashEntry);
+  const unifiedCashHistoryLog = nonFopCashLog.filter(entry => {
+    if (isCurrencyCashEntry(entry) && !isCurrencyCashTransferEntry(entry)) return false;
+    return true;
+  });
   const confirmedUnifiedCashLog = nonFopCashLog.filter(entry => {
     if (isCurrencyCashEntry(entry) && !isCurrencyCashTransferEntry(entry)) return false;
     if (isPendingPersonalConfirmableCashEntry(entry)) return false;
     return true;
   });
-  const confirmedCardCashLog = confirmedUnifiedCashLog.filter(isCardCashEntry);
-  const confirmedCashOnlyLog = confirmedUnifiedCashLog.filter(entry => !isCardCashEntry(entry));
   const confirmedFopCashLog = fopCashLog.filter(entry => getCashEntryApprovalStatus(entry) === 'confirmed');
   const pendingFopCashLog = fopCashLog.filter(entry => getCashEntryApprovalStatus(entry) !== 'confirmed');
   const summaryCashBalance = getWorkerCashSummaryAmount('confirmed_cash_uah');
@@ -509,10 +511,11 @@ function renderCashScreen() {
         + '<div style="font-size:12px;color:var(--text3);">Показано последних операций: ' + workerCashLog.length + '. Остальная история загружается только по запросу.</div>'
         + '</div>'
       : '')
-    + renderCashSection(confirmedUnifiedCashLog, cashBalance, today, {
+    + renderCashSection(unifiedCashHistoryLog, cashBalance, today, {
       title: 'Касса',
       account: 'cash',
       buttonText: '+ Запись',
+      balanceLog: confirmedUnifiedCashLog,
       pendingEntries: pendingCardCashLog,
       pendingLabel: 'ОЖИДАЮТ ПОДТВЕРЖДЕНИЯ (КАРТА)',
       defaultPendingComment: 'Карта',
@@ -521,7 +524,13 @@ function renderCashScreen() {
     })
     + renderCurrencyCashSection(currencyCashLog, currencyBalance, today)
     + ((currentWorkerHasFopCashRoute() || fopCashLog.length)
-      ? renderCashSection(confirmedFopCashLog, fopBalance, today, { title: 'Касса БАБЕНКО', account: 'fop', buttonText: '+ БАБЕНКО', pendingEntries: pendingFopCashLog })
+      ? renderCashSection(fopCashLog, fopBalance, today, {
+          title: 'Касса БАБЕНКО',
+          account: 'fop',
+          buttonText: '+ БАБЕНКО',
+          balanceLog: confirmedFopCashLog,
+          pendingEntries: pendingFopCashLog
+        })
       : '')
     + renderWorkerDropshipperCashSection();
 
@@ -1041,15 +1050,16 @@ function renderCashSection(log, balance, today, options = {}) {
   const account = options.account || 'cash';
   const buttonText = options.buttonText || '+ Запись';
   const pendingEntries = options.pendingEntries || [];
+  const balanceLog = Array.isArray(options.balanceLog) ? options.balanceLog : log;
   const balanceColor = balance >= 0 ? 'var(--accent)' : '#ef4444';
   const filteredLog = _filterCashLogByComment(log, cashSearchQuery);
   const balanceMap = !workerCashLogComplete && hasWorkerCashSummary()
-    ? getWorkerCashReverseBalanceMap(log, balance)
-    : (typeof getCashRunningBalanceMap === 'function' ? getCashRunningBalanceMap(log) : new Map());
+    ? getWorkerCashReverseBalanceMap(balanceLog, balance)
+    : (typeof getCashRunningBalanceMap === 'function' ? getCashRunningBalanceMap(balanceLog) : new Map());
 
-  // Разделяем лог на сегодня и архив
+  // Сегодня показываем быстрым блоком, но полный архив также включает текущий день.
   const todayLog   = filteredLog.filter(e => _cashEntryDate(e) === today);
-  const archiveLog = filteredLog.filter(e => _cashEntryDate(e) !== today);
+  const archiveLog = filteredLog;
 
   // ── Текущая касса (сегодня) ──
   const todayBalance = todayLog.reduce((s, e) => s + Number(e.amount), 0);
@@ -1069,7 +1079,7 @@ function renderCashSection(log, balance, today, options = {}) {
     + '<div>'
     + '<div class="profile-today-label"><i data-lucide="wallet" style="width:15px;height:15px;"></i> ' + escapeHtml(title) + '</div>'
     + '<div style="font-size:28px;font-weight:800;color:' + balanceColor + ';margin-top:4px;">' + balance.toLocaleString('ru') + ' \u20B4</div>'
-    + '<div style="font-size:11px;color:var(--text3);">общий баланс</div>'
+    + '<div style="font-size:11px;color:var(--text3);">подтверждённый баланс</div>'
     + '</div>'
     + '<div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">'
     + (options.hideAddButton || !canAddPersonalCashEntries() ? '' : '<button class="btn-secondary" style="font-size:12px;padding:6px 10px;" onclick="openCashEntryModal(\'' + account + '\')">' + escapeHtml(buttonText) + '</button>')
@@ -1098,7 +1108,7 @@ function renderCashSection(log, balance, today, options = {}) {
 
     // ── АРХИВ ──
     + '<div>'
-    + '<div style="font-size:12px;font-weight:700;color:var(--text3);letter-spacing:0.04em;margin-bottom:8px;">🗂 АРХИВ</div>'
+    + '<div style="font-size:12px;font-weight:700;color:var(--text3);letter-spacing:0.04em;margin-bottom:8px;">🗂 ПОЛНЫЙ АРХИВ</div>'
     + (archiveLog.length ? archiveHtml : '<div style="text-align:center;color:var(--text3);font-size:13px;padding:10px 0;">Ничего не найдено</div>')
     + '</div>'
     + (account === 'cash' && workerCashHasMore
@@ -1226,13 +1236,17 @@ function _cashEntryRow(e, balanceMap = null) {
   const cardTag = isConfirmedCard
     ? '<span style="display:inline-flex;align-items:center;padding:2px 7px;border-radius:999px;background:rgba(29,233,182,.12);border:1px solid rgba(29,233,182,.22);color:var(--accent);font-size:10px;font-weight:800;margin-left:6px;">карта</span>'
     : '';
+  const isPending = isConfirmableCashEntry(e) && getCashEntryApprovalStatus(e) !== 'confirmed';
+  const pendingTag = isPending
+    ? '<span style="display:inline-flex;align-items:center;padding:2px 7px;border-radius:999px;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.25);color:var(--yellow);font-size:10px;font-weight:800;margin-left:6px;">ожидает подтверждения</span>'
+    : '';
   const linkedOrderId = typeof getOrderIdFromCashEntry === 'function' ? getOrderIdFromCashEntry(e) : '';
   return '<div style="display:flex;justify-content:space-between;align-items:center;'
     + 'padding:10px 0;border-bottom:1px solid var(--border);' + (linkedOrderId ? 'cursor:pointer;' : '') + '"'
     + (linkedOrderId ? ' onclick="openOrderFromCashEntry(\'' + escapeJsString(e.id) + '\', event)"' : '')
     + '>'
     + '<div>'
-    + '<div style="font-size:13px;color:var(--text2);display:flex;align-items:center;flex-wrap:wrap;">' + escapeHtml(displayComment || '—') + cardTag + '</div>'
+    + '<div style="font-size:13px;color:var(--text2);display:flex;align-items:center;flex-wrap:wrap;">' + escapeHtml(displayComment || '—') + cardTag + pendingTag + '</div>'
     + (tagLabels.length
       ? '<div class="cash-entry-tags">' + tagLabels.map(label => '<span class="cash-entry-tag">' + escapeHtml(label) + '</span>').join('') + '</div>'
       : '')
