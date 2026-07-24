@@ -888,16 +888,40 @@ async function sbFetchCashLogPage(workerName, { deletedMode = 'active', offset =
     || workerName
     || ''
   ).trim();
-  const safeOffset = Math.max(0, Number(offset) || 0);
+  let rawOffset = Math.max(0, Number(offset) || 0);
   const safeLimit = Math.min(1000, Math.max(1, Number(limit) || 200));
-  const res = await fetch(
-    `${WORKER_URL}/api/cash?worker=${encodeURIComponent(resolvedWorkerName)}&deleted=${encodeURIComponent(mode)}&offset=${safeOffset}&limit=${safeLimit}`,
-    { headers: getHeaders() }
-  );
-  if (!res.ok) await throwApiError(res);
-  const rows = await res.json();
-  return (Array.isArray(rows) ? rows : [])
-    .filter(entry => String(entry?.ledger_status || 'posted') !== 'voided');
+  const rows = [];
+  let nextOffset = rawOffset;
+  let hasMore = false;
+  let reachedEnd = false;
+
+  while (!hasMore && !reachedEnd) {
+    const needed = Math.max(1, safeLimit + 1 - rows.length);
+    const batchLimit = Math.min(1000, Math.max(200, needed));
+    const res = await fetch(
+      `${WORKER_URL}/api/cash?worker=${encodeURIComponent(resolvedWorkerName)}&deleted=${encodeURIComponent(mode)}&offset=${rawOffset}&limit=${batchLimit}`,
+      { headers: getHeaders() }
+    );
+    if (!res.ok) await throwApiError(res);
+    const data = await res.json();
+    const rawRows = Array.isArray(data) ? data : [];
+    if (!rawRows.length) break;
+
+    for (const entry of rawRows) {
+      rawOffset += 1;
+      if (String(entry?.ledger_status || 'posted') === 'voided') continue;
+      if (rows.length < safeLimit) {
+        rows.push(entry);
+        nextOffset = rawOffset;
+      } else {
+        hasMore = true;
+        break;
+      }
+    }
+    reachedEnd = rawRows.length < batchLimit;
+  }
+
+  return { rows, nextOffset, hasMore };
 }
 
 async function sbFetchCashPage({ deletedMode = 'active', offset = 0, limit = 200 } = {}) {

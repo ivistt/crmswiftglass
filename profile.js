@@ -181,8 +181,8 @@ async function loadWorkerCashFastState({ force = false } = {}) {
 
   const fastPromise = Promise.all([
     sbFetchCashSummary(currentWorkerName),
-    sbFetchCashLogPage(currentWorkerName, { limit: WORKER_CASH_PAGE_SIZE + 1 }),
-  ]).then(([summary, rows]) => {
+    sbFetchCashLogPage(currentWorkerName, { limit: WORKER_CASH_PAGE_SIZE }),
+  ]).then(([summary, page]) => {
     if (loadVersion !== workerCashLoadVersion) return false;
     const summaryRows = Array.isArray(summary?.workers) ? summary.workers : [];
     const hasAccountBreakdown = summaryRows.every(row =>
@@ -193,10 +193,10 @@ async function loadWorkerCashFastState({ force = false } = {}) {
       throw new Error('Cash summary SQL must be updated');
     }
     workerCashSummary = summary;
-    const pageRows = Array.isArray(rows) ? rows : [];
-    workerCashLog = pageRows.slice(0, WORKER_CASH_PAGE_SIZE);
-    workerCashNextOffset = workerCashLog.length;
-    workerCashHasMore = pageRows.length > WORKER_CASH_PAGE_SIZE;
+    const pageRows = Array.isArray(page?.rows) ? page.rows : [];
+    workerCashLog = pageRows;
+    workerCashNextOffset = Math.max(0, Number(page?.nextOffset) || pageRows.length);
+    workerCashHasMore = page?.hasMore === true;
     workerCashLogComplete = !workerCashHasMore;
     return true;
   }).catch(error => {
@@ -238,6 +238,42 @@ async function loadWorkerCashFullState({ force = false } = {}) {
   return workerCashFullLoadPromise;
 }
 
+async function loadWorkerCashCompleteState() {
+  if (!canAccessPersonalCash()) return false;
+  const loadVersion = ++workerCashLoadVersion;
+  const [summaryResult, logResult] = await Promise.allSettled([
+    sbFetchCashSummary(currentWorkerName),
+    sbFetchCashLog(currentWorkerName),
+  ]);
+  if (loadVersion !== workerCashLoadVersion) return false;
+
+  if (summaryResult.status === 'fulfilled') {
+    const summary = summaryResult.value;
+    const summaryRows = Array.isArray(summary?.workers) ? summary.workers : [];
+    const hasAccountBreakdown = summaryRows.every(row =>
+      Object.prototype.hasOwnProperty.call(row || {}, 'confirmed_cash_uah')
+      && Object.prototype.hasOwnProperty.call(row || {}, 'confirmed_fop_uah')
+    );
+    workerCashSummary = hasAccountBreakdown ? summary : null;
+  } else {
+    console.warn('Worker cash summary load failed:', summaryResult.reason);
+    workerCashSummary = null;
+  }
+
+  if (logResult.status !== 'fulfilled') {
+    console.warn('Full worker cash load failed:', logResult.reason);
+    workerCashLogComplete = false;
+    workerCashHasMore = false;
+    return false;
+  }
+
+  workerCashLog = Array.isArray(logResult.value) ? logResult.value : [];
+  workerCashLogComplete = true;
+  workerCashNextOffset = workerCashLog.length;
+  workerCashHasMore = false;
+  return true;
+}
+
 async function loadWorkerCashCompleteHistory(button = null) {
   if (button) {
     button.disabled = true;
@@ -260,19 +296,19 @@ async function loadMoreWorkerCashHistory(button = null) {
   }
 
   try {
-    const rows = await sbFetchCashLogPage(currentWorkerName, {
+    const page = await sbFetchCashLogPage(currentWorkerName, {
       offset: workerCashNextOffset,
-      limit: WORKER_CASH_PAGE_SIZE + 1,
+      limit: WORKER_CASH_PAGE_SIZE,
     });
-    const pageRows = (Array.isArray(rows) ? rows : []).slice(0, WORKER_CASH_PAGE_SIZE);
+    const pageRows = Array.isArray(page?.rows) ? page.rows : [];
     const existingIds = new Set((workerCashLog || []).map(entry => String(entry?.id || '')).filter(Boolean));
     const uniqueRows = pageRows.filter(entry => {
       const id = String(entry?.id || '');
       return !id || !existingIds.has(id);
     });
     workerCashLog = [...(workerCashLog || []), ...uniqueRows];
-    workerCashNextOffset += pageRows.length;
-    workerCashHasMore = (Array.isArray(rows) ? rows.length : 0) > WORKER_CASH_PAGE_SIZE;
+    workerCashNextOffset = Math.max(workerCashNextOffset, Number(page?.nextOffset) || workerCashNextOffset);
+    workerCashHasMore = page?.hasMore === true;
     workerCashLogComplete = !workerCashHasMore;
     renderCashScreen();
   } catch (error) {
@@ -338,8 +374,7 @@ async function openProfileScreen() {
 }
 
 async function openCashScreen() {
-  const fastLoaded = await loadWorkerCashFastState({ force: true });
-  if (!fastLoaded) await loadWorkerCashFullState({ force: true });
+  await loadWorkerCashCompleteState();
   renderCashScreen();
   showScreen('cash');
   setActiveNav('cash');
@@ -507,8 +542,8 @@ function renderCashScreen() {
     + '<div style="font-size:13px;color:var(--text3);margin-top:2px;">Касса</div></div>'
     + '</div>'
     + (!workerCashLogComplete
-      ? '<div class="profile-today-card" style="margin-top:12px;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">'
-        + '<div style="font-size:12px;color:var(--text3);">Показано последних операций: ' + workerCashLog.length + '. Остальная история загружается только по запросу.</div>'
+      ? '<div class="profile-today-card" style="margin-top:12px;padding:12px 14px;">'
+        + '<div style="font-size:12px;color:#ef4444;">Не удалось загрузить полный архив кассы. Обновите страницу.</div>'
         + '</div>'
       : '')
     + renderCashSection(unifiedCashHistoryLog, cashBalance, today, {
@@ -1111,14 +1146,6 @@ function renderCashSection(log, balance, today, options = {}) {
     + '<div style="font-size:12px;font-weight:700;color:var(--text3);letter-spacing:0.04em;margin-bottom:8px;">🗂 ПОЛНЫЙ АРХИВ</div>'
     + (archiveLog.length ? archiveHtml : '<div style="text-align:center;color:var(--text3);font-size:13px;padding:10px 0;">Ничего не найдено</div>')
     + '</div>'
-    + (account === 'cash' && workerCashHasMore
-      ? '<div style="display:flex;justify-content:center;padding-top:14px;">'
-        + '<button class="btn-secondary" type="button" style="font-size:13px;padding:8px 14px;" onclick="loadMoreWorkerCashHistory(this)">'
-        + 'Загрузить более старые записи'
-        + '</button>'
-        + '</div>'
-      : '')
-
     + '</div>';
 }
 
@@ -1721,8 +1748,7 @@ function closeCashEntryModal() {
 
 async function refreshCurrentWorkerCashState() {
   if (!currentWorkerName) return;
-  const fastLoaded = await loadWorkerCashFastState({ force: true });
-  if (!fastLoaded) await loadWorkerCashFullState({ force: true });
+  await loadWorkerCashCompleteState();
 }
 
 async function refreshCurrentWorkerSalaryState() {
