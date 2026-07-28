@@ -349,48 +349,6 @@ export default {
       }
     }
 
-    if (url.pathname === '/api/orders/payment-confirmations' && request.method === 'GET') {
-      if (authedRole !== 'owner' && authedRole !== 'manager' && !workerHasPermission(liveWorker, 'clients_view')) {
-        return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
-      }
-
-      const sourceKeys = new Set();
-      const clientPaidByOrder = {};
-      const countedClientSources = new Set();
-      const pageSize = 1000;
-      for (let offset = 0; ; offset += pageSize) {
-        const query = [
-          'select=source_key,fop_source_key,source_id,ledger_status,deleted_at,fop_confirmed,approval_status,order_id,payment_type,amount',
-          'order_id=not.is.null',
-          'deleted_at=is.null',
-          'or=(fop_confirmed.eq.true,approval_status.eq.confirmed)',
-          `offset=${offset}`,
-          `limit=${pageSize}`,
-        ].join('&');
-        const res = await fetch(`${sb}/rest/v1/cash_log?${query}`, { headers: sbHeaders });
-        const rows = await res.json().catch(() => []);
-        if (!res.ok) {
-          return Response.json({ error: rows?.message || 'Failed to load payment confirmations' }, { status: res.status || 500, headers: cors });
-        }
-        const rawRows = Array.isArray(rows) ? rows : [];
-        rawRows.forEach(row => {
-          if (!isEffectiveConfirmedOrderPaymentCashRow(row)) return;
-          const sourceKey = getCashLedgerSourceKey(row);
-          if (!sourceKey.startsWith('order:')) return;
-          sourceKeys.add(sourceKey);
-          const orderId = String(row.order_id || extractOrderIdFromSourceKey(sourceKey) || '').trim();
-          const amount = Number(row.amount) || 0;
-          const paymentType = String(row.payment_type || getOrderPaymentTypeFromSourceKey(sourceKey) || (amount > 0 ? 'client' : '')).trim().toLowerCase();
-          if (paymentType !== 'client' || !orderId || amount <= 0 || countedClientSources.has(sourceKey)) return;
-          countedClientSources.add(sourceKey);
-          clientPaidByOrder[orderId] = (Number(clientPaidByOrder[orderId]) || 0) + amount;
-        });
-        if (rawRows.length < pageSize) break;
-      }
-
-      return Response.json({ source_keys: [...sourceKeys], client_paid_by_order: clientPaidByOrder }, { headers: cors });
-    }
-
     if (url.pathname.startsWith('/api/orders/')) {
       const id = decodeURIComponent(url.pathname.split('/').pop());
 
@@ -1243,16 +1201,6 @@ export default {
         return Response.json({ error: voidData?.message || 'Failed to mark original entry as reversed', details: voidData }, { status: voidRes.status || 400, headers: cors });
       }
 
-      const reversedSourceKey = getCashLedgerSourceKey(cashRow);
-      const reversedOrderId = String(cashRow.order_id || extractOrderIdFromSourceKey(reversedSourceKey) || '').trim();
-      if (reversedOrderId && isClientOrderPaymentCashRow(cashRow)) {
-        try {
-          await syncOrderClientPaymentState(reversedOrderId, sb, sbHeaders);
-        } catch (syncError) {
-          console.warn('Failed to sync client payment state after cash reversal:', syncError);
-        }
-      }
-
       return Response.json({ reversal: Array.isArray(reverseData) ? reverseData[0] : reverseData, original: Array.isArray(voidData) ? voidData[0] : voidData }, { headers: cors });
     }
 
@@ -1417,16 +1365,6 @@ export default {
         return Response.json({ error: markData?.message || 'Failed to mark original entry as corrected', details: markData }, { status: markRes.status || 400, headers: cors });
       }
 
-      const correctedSourceKey = getCashLedgerSourceKey(cashRow);
-      const correctedOrderId = String(cashRow.order_id || extractOrderIdFromSourceKey(correctedSourceKey) || '').trim();
-      if (correctedOrderId && isClientOrderPaymentCashRow(cashRow)) {
-        try {
-          await syncOrderClientPaymentState(correctedOrderId, sb, sbHeaders);
-        } catch (syncError) {
-          console.warn('Failed to sync client payment state after cash correction:', syncError);
-        }
-      }
-
       return Response.json({ corrections: correctionData, original: Array.isArray(markData) ? markData[0] : markData }, { headers: cors });
     }
 
@@ -1509,17 +1447,6 @@ export default {
         body: JSON.stringify(patch),
       });
       const data = await res.json();
-      if (res.ok) {
-        const sourceKey = getCashLedgerSourceKey({ ...cashRow, ...(Array.isArray(data) ? data[0] : data), ...patch });
-        const orderId = String(cashRow.order_id || extractOrderIdFromSourceKey(sourceKey) || '').trim();
-        if (orderId && isClientOrderPaymentCashRow({ ...cashRow, ...(Array.isArray(data) ? data[0] : data), ...patch })) {
-          try {
-            await syncOrderClientPaymentState(orderId, sb, sbHeaders);
-          } catch (syncError) {
-            console.warn('Failed to sync client payment state after cash update:', syncError);
-          }
-        }
-      }
       return Response.json(data, { headers: cors });
     }
 
@@ -1529,17 +1456,7 @@ export default {
       }
 
       const id = url.pathname.split('/').pop();
-      const cashRow = await getCashById(id, sb, sbHeaders);
       await fetch(`${sb}/rest/v1/cash_log?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE', headers: sbHeaders });
-      const sourceKey = getCashLedgerSourceKey(cashRow || {});
-      const orderId = String(cashRow?.order_id || extractOrderIdFromSourceKey(sourceKey) || '').trim();
-      if (orderId && isClientOrderPaymentCashRow(cashRow)) {
-        try {
-          await syncOrderClientPaymentState(orderId, sb, sbHeaders);
-        } catch (syncError) {
-          console.warn('Failed to sync client payment state after cash delete:', syncError);
-        }
-      }
       return Response.json({ ok: true }, { headers: cors });
     }
 
@@ -1557,7 +1474,6 @@ export default {
       }
 
       const deletedIds = [];
-      const affectedClientOrderIds = new Set();
       const sessionWorker = await findWorkerByIdentity(session.workerName, sb, sbHeaders);
 
       for (const sourceKey of sourceKeys) {
@@ -1574,19 +1490,6 @@ export default {
           if (!row?.id) continue;
           await voidCashLedgerRow(row.id, `cash source removed: ${sourceKey}`, sb, sbHeaders);
           deletedIds.push(String(row.id));
-          const rowSourceKey = getCashLedgerSourceKey(row);
-          const orderId = String(row.order_id || extractOrderIdFromSourceKey(rowSourceKey) || '').trim();
-          if (orderId && isClientOrderPaymentCashRow(row)) {
-            affectedClientOrderIds.add(orderId);
-          }
-        }
-      }
-
-      for (const orderId of affectedClientOrderIds) {
-        try {
-          await syncOrderClientPaymentState(orderId, sb, sbHeaders);
-        } catch (syncError) {
-          console.warn('Failed to sync client payment state after cash source removal:', syncError);
         }
       }
 
@@ -2465,7 +2368,7 @@ function buildSpecialistOrderPatch(body, existingOrder, session = {}, currentWor
     const prev = existingOrder?.client_payments || [];
     assertOnlyAppendedPayments(clientPayments, prev, 'client_payments');
     patch.client_payments = clientPayments;
-    patch.debt = (Number(existingOrder?.debt) || 0) + sumAppendedCashPayments(clientPayments, prev);
+    patch.debt = sumPaymentAmounts(clientPayments);
   } else if (Object.prototype.hasOwnProperty.call(body, 'debt')) {
     patch.debt = Number(body.debt) || 0;
   }
@@ -2489,7 +2392,12 @@ function buildSpecialistOrderPatch(body, existingOrder, session = {}, currentWor
 }
 
 function sumPaymentAmounts(payments) {
-  return (payments || []).reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
+  // Статус расчёта заказа зависит от зарегистрированных оплат,
+  // а подтверждение безнала отдельно влияет только на кассовую проводку.
+  return (payments || []).reduce((sum, payment) => {
+    const amount = Number(payment?.amount) || 0;
+    return amount > 0 ? sum + amount : sum;
+  }, 0);
 }
 
 function getOrderClientTotal(order) {
@@ -3442,54 +3350,6 @@ function isActiveCashLedgerRow(row) {
   return status !== 'voided' && status !== 'reversed';
 }
 
-function isEffectiveConfirmedOrderPaymentCashRow(row) {
-  if (!row || String(row.deleted_at || '').trim()) return false;
-  const status = String(row.ledger_status || 'posted').trim().toLowerCase();
-  if (status === 'voided' || status === 'reversed' || status === 'corrected') return false;
-  return row.fop_confirmed === true || String(row.approval_status || '').trim().toLowerCase() === 'confirmed';
-}
-
-async function syncOrderClientPaymentState(orderId, sb, sbHeaders) {
-  const cleanOrderId = String(orderId || '').trim();
-  if (!cleanOrderId) return null;
-  const order = await getOrderById(cleanOrderId, sb, sbHeaders);
-  if (!order) return null;
-  const payments = Array.isArray(order.client_payments) ? order.client_payments : [];
-  if (!payments.length) return null;
-
-  const cashRows = await fetchOrderDerivedCashEntries(cleanOrderId, sb, sbHeaders);
-  const countedSources = new Set();
-  const confirmedNonCashPaid = (cashRows || []).reduce((sum, row) => {
-    if (!isEffectiveConfirmedOrderPaymentCashRow(row)) return sum;
-    const sourceKey = getCashLedgerSourceKey(row);
-    if (!sourceKey || countedSources.has(sourceKey)) return sum;
-    const amount = Number(row?.amount) || 0;
-    const paymentType = String(row?.payment_type || getOrderPaymentTypeFromSourceKey(sourceKey) || (amount > 0 ? 'client' : '')).trim().toLowerCase();
-    if (paymentType !== 'client' || amount <= 0) return sum;
-    countedSources.add(sourceKey);
-    return sum + amount;
-  }, 0);
-  const cashPaid = payments.reduce((sum, payment) => {
-    const amount = Number(payment?.amount) || 0;
-    if (amount <= 0) return sum;
-    const method = normalizeCashPaymentMethod(payment?.method || '');
-    if (!method) return sum;
-    if (isCashPaymentMethodForSync(method)) return sum + amount;
-    return sum;
-  }, 0);
-  const paid = cashPaid + confirmedNonCashPaid;
-  const paymentStatus = calcClientPaymentStatus(paid, getOrderClientTotal(order));
-
-  const res = await fetch(`${sb}/rest/v1/orders?id=eq.${encodeURIComponent(cleanOrderId)}`, {
-    method: 'PATCH',
-    headers: sbHeaders,
-    body: JSON.stringify({ debt: paid, payment_status: paymentStatus }),
-  });
-  const rows = await res.json().catch(() => []);
-  if (!res.ok) throw new Error(rows?.message || 'Failed to sync client payment state');
-  return Array.isArray(rows) ? (rows[0] || null) : null;
-}
-
 function chooseCanonicalOrderCashEntry(rows = []) {
   return [...rows].sort((a, b) => {
     const aConfirmed = a?.fop_confirmed === true || String(a?.approval_status || '') === 'confirmed';
@@ -3658,14 +3518,6 @@ function getOrderPaymentTypeFromSourceKey(sourceKey = '') {
   } catch (e) {
     return match[1];
   }
-}
-
-function isClientOrderPaymentCashRow(row = {}) {
-  const sourceKey = getCashLedgerSourceKey(row);
-  if (!sourceKey.startsWith('order:')) return false;
-  const paymentType = String(row?.payment_type || getOrderPaymentTypeFromSourceKey(sourceKey) || '').trim().toLowerCase();
-  if (paymentType) return paymentType === 'client';
-  return (Number(row?.amount) || 0) > 0;
 }
 
 async function buildOrderDerivedCashEntries(order, sb, sbHeaders, options = {}) {

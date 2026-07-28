@@ -2482,9 +2482,6 @@ const ORDER_META_TATU_RESP_PREFIX = '__tatu_resp__:';
 const ORDER_META_TONING_RESP_PREFIX = '__toning_resp__:';
 
 let paymentMethods = [];
-let confirmedOrderPaymentSourceKeys = new Set();
-let confirmedClientPaidByOrder = new Map();
-let orderPaymentConfirmationIndexLoaded = false;
 
 const PAYMENT_METHOD_LABEL_ALIASES = {
   'Шепель карта': '👤 Шепель Александр 💳 4149 4975 1422 9980 (PRIVAT)',
@@ -2504,22 +2501,6 @@ function getPaymentMethods() {
     acc.push({ ...row, label: normalizedLabel });
     return acc;
   }, []);
-}
-
-async function refreshOrderPaymentConfirmationIndex() {
-  const res = await fetch(`${WORKER_URL}/api/orders/payment-confirmations`, { headers: getHeaders() });
-  if (!res.ok) await throwApiError(res);
-  const data = await res.json();
-  const rows = Array.isArray(data?.source_keys) ? data.source_keys : [];
-  const totals = data?.client_paid_by_order && typeof data.client_paid_by_order === 'object'
-    ? data.client_paid_by_order
-    : {};
-  confirmedOrderPaymentSourceKeys = new Set(rows.map(key => String(key || '').trim()).filter(Boolean));
-  confirmedClientPaidByOrder = new Map(
-    Object.entries(totals).map(([orderId, amount]) => [String(orderId), Number(amount) || 0])
-  );
-  orderPaymentConfirmationIndexLoaded = true;
-  return confirmedOrderPaymentSourceKeys;
 }
 
 function findPaymentMethodConfigByLabel(label) {
@@ -2744,9 +2725,6 @@ function isOrderPaymentConfirmed(order, payment, paymentType = 'client') {
   if (!method) return false;
   if (!isConfirmablePaymentMethod(method)) return true;
   const sourceKey = buildPaymentSourceKey(order?.id || '', method, paymentType, payment);
-  if (orderPaymentConfirmationIndexLoaded) {
-    return confirmedOrderPaymentSourceKeys.has(sourceKey);
-  }
   const availableRows = [
     ...(Array.isArray(window.allCashLog) ? window.allCashLog : []),
     ...(Array.isArray(window.ownerCashRecentLog) ? window.ownerCashRecentLog : []),
@@ -2778,17 +2756,23 @@ function sumConfirmedOrderPayments(order, payments = [], paymentType = 'client')
   }, 0);
 }
 
+function sumRecordedOrderPayments(payments = []) {
+  // Долг клиента уменьшается в момент регистрации оплаты.
+  // Подтверждение безнала относится к кассе и не меняет факт оплаты клиентом.
+  return (payments || []).reduce((sum, payment) => {
+    const amount = Number(payment?.amount) || 0;
+    return amount > 0 ? sum + amount : sum;
+  }, 0);
+}
+
 function getOrderClientPaidAmount(order) {
   const payments = Array.isArray(order?.clientPayments) ? order.clientPayments : [];
-  if (payments.length && orderPaymentConfirmationIndexLoaded) {
-    const cashPaid = payments.reduce((sum, payment) => {
-      const amount = Number(payment?.amount) || 0;
-      const method = normalizePaymentMethod(payment?.method || '');
-      if (amount <= 0 || !method || isConfirmablePaymentMethod(method)) return sum;
-      return sum + amount;
-    }, 0);
-    return cashPaid + (confirmedClientPaidByOrder.get(String(order?.id || '')) || 0);
-  }
+  if (payments.length) return sumRecordedOrderPayments(payments);
+  return Number(order?.debt) || 0;
+}
+
+function getOrderClientConfirmedPaidAmount(order) {
+  const payments = Array.isArray(order?.clientPayments) ? order.clientPayments : [];
   if (payments.length) return sumConfirmedOrderPayments(order, payments, 'client');
   return Number(order?.debt) || 0;
 }

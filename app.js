@@ -118,9 +118,6 @@ function clearCacheAndReload() {
   if (typeof manualClients !== 'undefined') manualClients = [];
   if (typeof currentClientPayments !== 'undefined') currentClientPayments = [];
   if (typeof currentSupplierPayments !== 'undefined') currentSupplierPayments = [];
-  if (typeof confirmedOrderPaymentSourceKeys !== 'undefined') confirmedOrderPaymentSourceKeys = new Set();
-  if (typeof confirmedClientPaidByOrder !== 'undefined') confirmedClientPaidByOrder = new Map();
-  if (typeof orderPaymentConfirmationIndexLoaded !== 'undefined') orderPaymentConfirmationIndexLoaded = false;
   if (typeof window !== 'undefined') {
     window.allCashLog = [];
     window.ownerCashRecentLog = [];
@@ -1162,7 +1159,7 @@ function getDailyReportData(startDate, endDate = '') {
     .filter(entry => isDateInDailyReportRange(entry?.fop_date || _ownerCashEntryDate(entry), range));
   const expensesTotal = expenses.reduce((sum, entry) => sum + getExpenseCashAmount(entry), 0);
   const orderValue = completed.reduce((sum, order) => sum + getOrderClientTotalAmount(order), 0);
-  const received = completed.reduce((sum, order) => sum + getOrderClientPaidAmount(order), 0);
+  const received = completed.reduce((sum, order) => sum + getOrderClientConfirmedPaidAmount(order), 0);
   const supplierCosts = completed.reduce((sum, order) => sum + (Number(order.purchase) || 0), 0);
   const clientDebtDay = scheduled.reduce((sum, order) => sum + getClientDebt(order), 0);
   const clientDebtTotal = activeOrders.reduce((sum, order) => sum + getClientDebt(order), 0);
@@ -4302,22 +4299,10 @@ function goBackFromOrder() {
   goBackOrHome('orders');
 }
 
-async function openClientsScreen() {
+function openClientsScreen() {
   if (!canViewClients()) return;
-  showScreen('clients');
-  const clientsList = document.getElementById('clients-list');
-  if (clientsList) {
-    clientsList.innerHTML = '<div class="empty-state"><p>Проверяем оплаты клиентов…</p></div>';
-  }
-  if (typeof refreshOrderPaymentConfirmationIndex === 'function') {
-    try {
-      await refreshOrderPaymentConfirmationIndex();
-    } catch (error) {
-      console.warn('Failed to refresh order payment confirmations:', error);
-      showToast('Не удалось проверить подтверждения безналичных оплат', 'error');
-    }
-  }
   renderClients();
+  showScreen('clients');
 }
 
 async function openWorkersScreen() {
