@@ -672,7 +672,7 @@ function renderOrderCard(o) {
   const warehousePillHtml = (o.warehouse || warehouseCodeInlineHtml || supplierPaidInlineHtml)
     ? `<span class="order-meta-item order-meta-pill">${escapeHtml(o.warehouse || 'Склад —')}${warehouseCodeInlineHtml}${supplierPaidInlineHtml}</span>`
     : '';
-  const phoneHtml = (currentRole === 'senior' || currentRole === 'junior' || currentRole === 'extra')
+  const phoneHtml = (currentRole === 'owner' || currentRole === 'senior' || currentRole === 'junior' || currentRole === 'extra')
     ? orderCardPhoneCallLink(o.phone)
     : `${icon('phone')} ${escapeHtml(o.phone || '—')}`;
   const layoutHtml = renderOrderCardLayout(o, {
