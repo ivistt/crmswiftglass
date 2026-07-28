@@ -118,6 +118,9 @@ function clearCacheAndReload() {
   if (typeof manualClients !== 'undefined') manualClients = [];
   if (typeof currentClientPayments !== 'undefined') currentClientPayments = [];
   if (typeof currentSupplierPayments !== 'undefined') currentSupplierPayments = [];
+  if (typeof confirmedOrderPaymentSourceKeys !== 'undefined') confirmedOrderPaymentSourceKeys = new Set();
+  if (typeof confirmedClientPaidByOrder !== 'undefined') confirmedClientPaidByOrder = new Map();
+  if (typeof orderPaymentConfirmationIndexLoaded !== 'undefined') orderPaymentConfirmationIndexLoaded = false;
   if (typeof window !== 'undefined') {
     window.allCashLog = [];
     window.ownerCashRecentLog = [];
@@ -4299,10 +4302,22 @@ function goBackFromOrder() {
   goBackOrHome('orders');
 }
 
-function openClientsScreen() {
+async function openClientsScreen() {
   if (!canViewClients()) return;
-  renderClients();
   showScreen('clients');
+  const clientsList = document.getElementById('clients-list');
+  if (clientsList) {
+    clientsList.innerHTML = '<div class="empty-state"><p>Проверяем оплаты клиентов…</p></div>';
+  }
+  if (typeof refreshOrderPaymentConfirmationIndex === 'function') {
+    try {
+      await refreshOrderPaymentConfirmationIndex();
+    } catch (error) {
+      console.warn('Failed to refresh order payment confirmations:', error);
+      showToast('Не удалось проверить подтверждения безналичных оплат', 'error');
+    }
+  }
+  renderClients();
 }
 
 async function openWorkersScreen() {
