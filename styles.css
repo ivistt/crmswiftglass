@@ -84,6 +84,11 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+html,
+body {
+  touch-action: pan-x pan-y;
+}
+
 body {
   font-family: 'Manrope', sans-serif;
   background: var(--bg);
@@ -2271,6 +2276,8 @@ body {
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.2s;
+  overflow: hidden;
+  overscroll-behavior: contain;
 }
 .modal-overlay.active {
   opacity: 1;
@@ -2287,6 +2294,8 @@ body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  overscroll-behavior: contain;
   box-shadow: var(--shadow-lg);
   animation: modalIn 0.2s ease;
 }
@@ -2422,8 +2431,24 @@ body {
 .modal-body {
   padding: 24px;
   max-height: 70vh;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+html.modal-scroll-locked,
+body.modal-scroll-locked {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+body.modal-scroll-locked {
+  position: fixed;
+  left: 0;
+  right: 0;
+  width: 100%;
 }
 
 .modal-footer {
@@ -2592,6 +2617,12 @@ input[type="datetime-local"] {
 
 /* ===== RESPONSIVE MOBILE ===== */
 @media (max-width: 640px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+
   .auth-card { padding: 28px 20px 32px; }
   .auth-title { font-size: 22px; }
   .auth-input { font-size: 16px; }
@@ -4257,7 +4288,7 @@ input[type="datetime-local"] {
   .modal-order .modal-footer--sticky { align-items: stretch; }
   .modal-order .order-modal-footer-status { max-width: none; min-width: 0; }
   .modal-order .form-input,
-  .modal-order .form-select { font-size: 13px; padding: 9px 10px; }
+  .modal-order .form-select { font-size: 16px; padding: 9px 10px; }
   .modal-order .form-label { font-size: 10px; }
 }
 

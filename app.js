@@ -41,6 +41,47 @@ const SYSTEM_BANNER_CONFIGS = [
   },
 ];
 
+let modalPageScrollY = 0;
+let modalPageScrollLocked = false;
+let modalScrollObserver = null;
+
+function syncModalPageScrollLock() {
+  const hasOpenModal = !!document.querySelector('.modal-overlay.active');
+  if (hasOpenModal === modalPageScrollLocked) return;
+
+  if (hasOpenModal) {
+    modalPageScrollY = window.scrollY || document.documentElement.scrollTop || 0;
+    document.documentElement.classList.add('modal-scroll-locked');
+    document.body.classList.add('modal-scroll-locked');
+    document.body.style.top = `-${modalPageScrollY}px`;
+    modalPageScrollLocked = true;
+    return;
+  }
+
+  document.documentElement.classList.remove('modal-scroll-locked');
+  document.body.classList.remove('modal-scroll-locked');
+  document.body.style.top = '';
+  modalPageScrollLocked = false;
+  window.scrollTo(0, modalPageScrollY);
+}
+
+function initModalPageScrollLock() {
+  if (modalScrollObserver || !document.body) return;
+  modalScrollObserver = new MutationObserver(syncModalPageScrollLock);
+  modalScrollObserver.observe(document.body, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    attributeFilter: ['class'],
+  });
+  syncModalPageScrollLock();
+}
+
+document.addEventListener('DOMContentLoaded', initModalPageScrollLock);
+['gesturestart', 'gesturechange', 'gestureend'].forEach(eventName => {
+  document.addEventListener(eventName, event => event.preventDefault(), { passive: false });
+});
+
 // Fallback если data.js старой версии (без carDirectory)
 if (typeof carDirectory === 'undefined') {
   window.carDirectory = [];
