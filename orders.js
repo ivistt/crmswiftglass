@@ -531,6 +531,7 @@ async function confirmSeniorOrderAmounts(orderId) {
       amount: newClientPaymentAmount,
       date: todayStr(),
       method: quickPaymentMethod,
+      confirmed: true,
       cashWorker: quickCashWorker || undefined,
       timestamp: new Date().toISOString(),
     });
@@ -2947,6 +2948,7 @@ function renderClientPayments() {
         <div style="font-size:13px;font-weight:700;color:var(--text2);">${Number(p.amount).toLocaleString('ru')} ₴</div>
         <div style="font-size:11px;color:var(--text3);">${formatDate(p.date)}</div>
         ${p.method ? `<div style="font-size:11px;color:var(--text3);margin-top:2px;">${escapeHtml(normalizePaymentMethod(p.method))}</div>` : ''}
+        ${p.confirmed === false ? '<div style="font-size:11px;color:var(--yellow);font-weight:800;margin-top:2px;">Ожидает подтверждения</div>' : ''}
         ${renderOrderPaymentRecipientLine(p, 'client')}
       </div>
       ${canManagePayments && canRemovePayments ? `
@@ -3046,7 +3048,14 @@ async function addClientPayment() {
 
   const nextClientPayments = [
     ...JSON.parse(JSON.stringify(currentClientPayments || [])),
-    { amount, date, method, cashWorker: resolvedCashWorker || undefined, timestamp: new Date().toISOString() },
+    {
+      amount,
+      date,
+      method,
+      confirmed: !isConfirmablePaymentMethod(method),
+      cashWorker: resolvedCashWorker || undefined,
+      timestamp: new Date().toISOString(),
+    },
   ];
   if (addBtn) addBtn.disabled = true;
   try {

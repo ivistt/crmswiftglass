@@ -1193,9 +1193,15 @@ async function confirmFopCashEntry(id) {
     if (Array.isArray(window.allCashLog)) {
       window.allCashLog = window.allCashLog.map(entry => entry.id === id ? { ...entry, ...updated, fop_confirmed: true, approval_status: 'confirmed' } : entry);
     }
+    try {
+      orders = await sbFetchOrders();
+    } catch (ordersRefreshError) {
+      console.warn('Failed to refresh orders after cash confirmation:', ordersRefreshError);
+    }
     await refreshCurrentWorkerCashState();
     renderCashScreen();
     if (document.getElementById('screen-profile')?.classList.contains('active')) renderProfile();
+    if (typeof refreshActiveOrdersViews === 'function') refreshActiveOrdersViews();
     const account = getCashEntryAccountType(updated);
     const paymentMethod = getCashEntryPaymentMethod(updated);
     if (account === 'fop') showToast('ФОП подтверждено ✓');

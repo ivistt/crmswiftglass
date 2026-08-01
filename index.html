@@ -1347,6 +1347,51 @@
   </div>
 </div>
 
+<!-- ==================== CLIENT STATEMENT MODAL ==================== -->
+<div class="modal-overlay" id="client-statement-modal">
+  <div class="modal client-statement-modal">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">Чек клиента</div>
+        <div class="client-statement-subtitle" id="client-statement-client-name"></div>
+      </div>
+      <button class="modal-close" type="button" aria-label="Закрыть" onclick="closeClientStatementModal()">
+        <i data-lucide="x" style="width:16px;height:16px;"></i>
+      </button>
+    </div>
+    <div class="modal-body client-statement-modal-body">
+      <div class="client-statement-mode" role="group" aria-label="Тип периода">
+        <button type="button" class="client-statement-mode-btn active" data-client-statement-mode="single" onclick="setClientStatementMode('single')">Один день</button>
+        <button type="button" class="client-statement-mode-btn" data-client-statement-mode="range" onclick="setClientStatementMode('range')">Период</button>
+      </div>
+
+      <div class="client-statement-date-fields">
+        <label class="client-statement-date-field" id="client-statement-single-wrap">
+          <span>Дата</span>
+          <input class="form-input" type="date" id="client-statement-single-date" onchange="renderClientStatementPreview()">
+        </label>
+        <label class="client-statement-date-field" id="client-statement-from-wrap" style="display:none;">
+          <span>С даты</span>
+          <input class="form-input" type="date" id="client-statement-from-date" onchange="renderClientStatementPreview()">
+        </label>
+        <label class="client-statement-date-field" id="client-statement-to-wrap" style="display:none;">
+          <span>По дату</span>
+          <input class="form-input" type="date" id="client-statement-to-date" onchange="renderClientStatementPreview()">
+        </label>
+      </div>
+
+      <div class="client-statement-preview" id="client-statement-preview"></div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn-secondary" onclick="closeClientStatementModal()">Отмена</button>
+      <button type="button" class="btn-primary" id="client-statement-print-btn" onclick="printClientStatement()">
+        <i data-lucide="printer" style="width:15px;height:15px;"></i>
+        Печать
+      </button>
+    </div>
+  </div>
+</div>
+
 <!-- ==================== SALARY DETAIL MODAL ==================== -->
 <div class="modal-overlay" id="salary-detail-modal">
   <div class="modal" style="max-width:480px;max-height:85vh;display:flex;flex-direction:column;">

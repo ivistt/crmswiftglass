@@ -2724,6 +2724,8 @@ function isOrderPaymentConfirmed(order, payment, paymentType = 'client') {
   const method = normalizePaymentMethod(payment?.method || '');
   if (!method) return false;
   if (!isConfirmablePaymentMethod(method)) return true;
+  if (payment?.confirmed === true) return true;
+  if (payment?.confirmed === false) return false;
   const sourceKey = buildPaymentSourceKey(order?.id || '', method, paymentType, payment);
   const availableRows = [
     ...(Array.isArray(window.allCashLog) ? window.allCashLog : []),
@@ -2757,11 +2759,11 @@ function sumConfirmedOrderPayments(order, payments = [], paymentType = 'client')
 }
 
 function sumRecordedOrderPayments(payments = []) {
-  // Долг клиента уменьшается в момент регистрации оплаты.
-  // Подтверждение безнала относится к кассе и не меняет факт оплаты клиентом.
+  // Новые подтверждаемые оплаты не уменьшают долг до подтверждения владельцем метода.
+  // У старых платежей поля confirmed нет — считаем их оплаченными для совместимости.
   return (payments || []).reduce((sum, payment) => {
     const amount = Number(payment?.amount) || 0;
-    return amount > 0 ? sum + amount : sum;
+    return amount > 0 && payment?.confirmed !== false ? sum + amount : sum;
   }, 0);
 }
 
@@ -2772,9 +2774,7 @@ function getOrderClientPaidAmount(order) {
 }
 
 function getOrderClientConfirmedPaidAmount(order) {
-  const payments = Array.isArray(order?.clientPayments) ? order.clientPayments : [];
-  if (payments.length) return sumConfirmedOrderPayments(order, payments, 'client');
-  return Number(order?.debt) || 0;
+  return getOrderClientPaidAmount(order);
 }
 
 function getOrderSupplierPaidAmount(order) {

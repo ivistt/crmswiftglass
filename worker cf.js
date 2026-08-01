@@ -235,6 +235,7 @@ export default {
         const data = await insertNewOrderWithMonotonicId(body, sb, sbHeaders);
         if (Array.isArray(data) && data[0]) {
           await syncOrderFopCashEntries(data[0], sb, sbHeaders);
+          data[0] = await reconcileOrderClientPaymentConfirmations(data[0], sb, sbHeaders);
           await syncOrderSashaManagerCashEntries(data[0], sb, sbHeaders);
           await maybeNotifyOrderTransitions(null, data[0], sb, sbHeaders, env);
         }
@@ -332,6 +333,7 @@ export default {
         }
 
         await syncOrderFopCashEntries(savedOrder, sb, sbHeaders, { paymentTypes: syncPaymentTypes, debug: financeDebug });
+        savedOrder = await reconcileOrderClientPaymentConfirmations(savedOrder, sb, sbHeaders);
         const sashaCashEntries = await syncOrderSashaManagerCashEntries(savedOrder, sb, sbHeaders);
         savedCashEntries.push(...sashaCashEntries);
         await maybeNotifyOrderTransitions(previousOrder, savedOrder, sb, sbHeaders, env);
@@ -395,6 +397,7 @@ export default {
           }
           if (Array.isArray(data) && data[0]) {
             await syncOrderFopCashEntries(data[0], sb, sbHeaders);
+            data[0] = await reconcileOrderClientPaymentConfirmations(data[0], sb, sbHeaders);
             await syncOrderSashaManagerCashEntries(data[0], sb, sbHeaders);
             await maybeNotifyOrderTransitions(previousOrder, data[0], sb, sbHeaders, env);
           }
@@ -1382,7 +1385,7 @@ export default {
       ]);
       const isOwnCashEntry = cashOwnerLabel === session.workerName
         || (sessionWorker && targetWorker && normalizeWorkerIdentityText(sessionWorker.name) === normalizeWorkerIdentityText(targetWorker.name));
-      const canPatchOwnConfirmableCash = (authedRole === 'senior' || authedRole === 'extra' || authedRole === 'manager')
+      const canPatchOwnConfirmableCash = ['manager', 'senior', 'extra', 'junior'].includes(authedRole)
         && isOwnCashEntry
         && (
           String(cashRow.cash_account || '').toLowerCase() === 'fop'
@@ -1446,7 +1449,27 @@ export default {
         headers: sbHeaders,
         body: JSON.stringify(patch),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => []);
+      if (!res.ok) {
+        return Response.json({ error: Array.isArray(data) ? 'Failed to update cash entry' : (data?.message || data?.error || 'Failed to update cash entry') }, { status: res.status || 400, headers: cors });
+      }
+      if (Object.prototype.hasOwnProperty.call(patch, 'fop_confirmed')) {
+        const updatedCashRow = Array.isArray(data) && data[0] ? data[0] : { ...cashRow, ...patch };
+        try {
+          await syncClientPaymentConfirmationFromCashEntry(
+            updatedCashRow,
+            patch.fop_confirmed === true,
+            session,
+            sb,
+            sbHeaders
+          );
+        } catch (orderSyncError) {
+          return Response.json({
+            error: 'Cash entry was updated, but order debt sync failed',
+            details: orderSyncError?.message || String(orderSyncError),
+          }, { status: 500, headers: cors });
+        }
+      }
       return Response.json(data, { headers: cors });
     }
 
@@ -1981,16 +2004,19 @@ const SPECIALIST_ORDER_SELECT = [
 
 async function fetchOrdersForSession(session, sb, sbHeaders) {
   await rolloverOverdueInWorkOrdersToToday(sb, sbHeaders);
+  let rows;
   if (session.role === 'owner' || session.role === 'manager') {
-    return fetchSupabasePagedRows(`${sb}/rest/v1/orders?order=date.desc`, sbHeaders);
+    rows = await fetchSupabasePagedRows(`${sb}/rest/v1/orders?order=date.desc`, sbHeaders);
+    return hydratePendingClientPaymentStates(rows, sb, sbHeaders);
   }
 
   const currentWorker = await getWorkerByName(session.workerName, sb, sbHeaders);
   if (workerHasPermission(currentWorker, 'orders_view_all') || workerHasPermission(currentWorker, 'warehouses_view')) {
-    return fetchSupabasePagedRows(
+    rows = await fetchSupabasePagedRows(
       `${sb}/rest/v1/orders?select=${SPECIALIST_ORDER_SELECT}&is_cancelled=eq.false&deleted_at=is.null&order=date.desc`,
       sbHeaders
     );
+    return hydratePendingClientPaymentStates(rows, sb, sbHeaders);
   }
 
   const workerName = session.workerName || '';
@@ -2004,10 +2030,11 @@ async function fetchOrdersForSession(session, sb, sbHeaders) {
   if (workerHasSpecialServiceCapability(currentWorker, 'tatu')) specialistFilters.push('and(in_work.eq.true,tatu.gt.0)');
   if (workerHasSpecialServiceCapability(currentWorker, 'toning')) specialistFilters.push('and(in_work.eq.true,toning.gt.0)');
   const ownFilter = encodeURIComponent(`(${specialistFilters.join(',')})`);
-  return fetchSupabasePagedRows(
+  rows = await fetchSupabasePagedRows(
     `${sb}/rest/v1/orders?select=${SPECIALIST_ORDER_SELECT}&is_cancelled=eq.false&deleted_at=is.null&or=${ownFilter}&order=date.desc`,
     sbHeaders
   );
+  return hydratePendingClientPaymentStates(rows, sb, sbHeaders);
 }
 
 async function fetchSupabasePagedRows(baseUrl, sbHeaders, pageSize = 1000) {
@@ -2022,6 +2049,49 @@ async function fetchSupabasePagedRows(baseUrl, sbHeaders, pageSize = 1000) {
     if (items.length < pageSize) break;
   }
   return rows;
+}
+
+async function hydratePendingClientPaymentStates(orders, sb, sbHeaders) {
+  const list = Array.isArray(orders) ? orders : [];
+  if (!list.length) return list;
+
+  const pendingRows = await fetchSupabasePagedRows(
+    `${sb}/rest/v1/cash_log?select=source_key,fop_source_key,source_id,order_id,ledger_status,deleted_at&source_type=eq.order&approval_status=eq.pending&deleted_at=is.null`,
+    sbHeaders
+  ).catch(() => []);
+  const pendingKeys = new Set(
+    pendingRows
+      .filter(row => !['voided', 'reversed', 'corrected'].includes(String(row?.ledger_status || 'posted').trim().toLowerCase()))
+      .map(row => getCashLedgerSourceKey(row))
+      .filter(Boolean)
+  );
+  if (!pendingKeys.size && !list.some(order => (order?.client_payments || []).some(payment => payment?.confirmed === false))) {
+    return list;
+  }
+
+  return list.map(order => {
+    const payments = Array.isArray(order?.client_payments) ? order.client_payments : [];
+    if (!payments.length) return order;
+    const keyCounts = new Map();
+    let changed = false;
+    const nextPayments = payments.map(payment => {
+      const baseKey = buildOrderPaymentSourceKey(order.id, payment?.method, 'client', payment);
+      const count = (keyCounts.get(baseKey) || 0) + 1;
+      keyCounts.set(baseKey, count);
+      const sourceKey = count === 1 ? baseKey : `${baseKey}|seq:${count}`;
+      if (!pendingKeys.has(sourceKey) || payment?.confirmed === false) return payment;
+      changed = true;
+      return { ...payment, confirmed: false };
+    });
+    if (!changed && !nextPayments.some(payment => payment?.confirmed === false)) return order;
+    const paid = sumPaymentAmounts(nextPayments);
+    return {
+      ...order,
+      client_payments: nextPayments,
+      debt: paid,
+      payment_status: calcClientPaymentStatus(paid, getOrderClientTotal(order)),
+    };
+  });
 }
 
 function getKyivLocalDateString(offsetDays = 0) {
@@ -2392,11 +2462,9 @@ function buildSpecialistOrderPatch(body, existingOrder, session = {}, currentWor
 }
 
 function sumPaymentAmounts(payments) {
-  // Статус расчёта заказа зависит от зарегистрированных оплат,
-  // а подтверждение безнала отдельно влияет только на кассовую проводку.
   return (payments || []).reduce((sum, payment) => {
     const amount = Number(payment?.amount) || 0;
-    return amount > 0 ? sum + amount : sum;
+    return amount > 0 && payment?.confirmed !== false ? sum + amount : sum;
   }, 0);
 }
 
@@ -3456,6 +3524,108 @@ function buildOrderPaymentSourceKey(orderId, method, paymentType = 'client', pay
     `date:${encodeURIComponent(date)}`,
     `ts:${encodeURIComponent(timestamp)}`,
   ].join('|');
+}
+
+async function syncClientPaymentConfirmationFromCashEntry(cashRow, confirmed, session, sb, sbHeaders) {
+  const sourceKey = getCashLedgerSourceKey(cashRow);
+  const orderId = String(cashRow?.order_id || extractOrderIdFromSourceKey(sourceKey) || '').trim();
+  if (!sourceKey || !orderId) return null;
+
+  const paymentType = getOrderPaymentTypeFromSourceKey(sourceKey);
+  if (paymentType && paymentType !== 'client') return null;
+  if (!paymentType && Number(cashRow?.amount) <= 0) return null;
+
+  const order = await getOrderById(orderId, sb, sbHeaders);
+  const payments = Array.isArray(order?.client_payments) ? order.client_payments : [];
+  if (!order || !payments.length) return null;
+
+  const keyCounts = new Map();
+  let matched = false;
+  const changedAt = new Date().toISOString();
+  const nextPayments = payments.map(payment => {
+    const baseKey = buildOrderPaymentSourceKey(orderId, payment?.method, 'client', payment);
+    const count = (keyCounts.get(baseKey) || 0) + 1;
+    keyCounts.set(baseKey, count);
+    const paymentSourceKey = count === 1 ? baseKey : `${baseKey}|seq:${count}`;
+    if (paymentSourceKey !== sourceKey) return payment;
+    matched = true;
+    return {
+      ...payment,
+      confirmed,
+      confirmedAt: confirmed ? changedAt : null,
+      confirmedBy: confirmed ? String(session?.workerName || '').trim() : null,
+    };
+  });
+  if (!matched) return null;
+
+  const paid = sumPaymentAmounts(nextPayments);
+  const orderPatch = {
+    client_payments: nextPayments,
+    debt: paid,
+    payment_status: calcClientPaymentStatus(paid, getOrderClientTotal(order)),
+  };
+  const res = await fetch(`${sb}/rest/v1/orders?id=eq.${encodeURIComponent(orderId)}`, {
+    method: 'PATCH',
+    headers: sbHeaders,
+    body: JSON.stringify(orderPatch),
+  });
+  const rows = await res.json().catch(() => []);
+  if (!res.ok) {
+    const message = Array.isArray(rows) ? 'Order debt update failed' : (rows?.message || rows?.error || 'Order debt update failed');
+    throw new Error(message);
+  }
+  return Array.isArray(rows) ? (rows[0] || null) : null;
+}
+
+async function reconcileOrderClientPaymentConfirmations(order, sb, sbHeaders) {
+  const payments = Array.isArray(order?.client_payments) ? order.client_payments : [];
+  if (!order?.id || !payments.length) return order;
+
+  const cashRows = (await fetchOrderDerivedCashEntries(order.id, sb, sbHeaders))
+    .filter(row => isActiveCashLedgerRow(row) && !String(row?.deleted_at || '').trim());
+  const approvalByKey = new Map();
+  cashRows.forEach(row => {
+    const key = getCashLedgerSourceKey(row);
+    if (!key || getOrderPaymentTypeFromSourceKey(key) !== 'client') return;
+    const status = String(row?.approval_status || '').trim().toLowerCase();
+    const approved = row?.fop_confirmed === true || status === 'confirmed' || status === 'not_required';
+    if (approved || !approvalByKey.has(key)) approvalByKey.set(key, approved);
+  });
+
+  const keyCounts = new Map();
+  const nextPayments = payments.map(payment => {
+    const baseKey = buildOrderPaymentSourceKey(order.id, payment?.method, 'client', payment);
+    const count = (keyCounts.get(baseKey) || 0) + 1;
+    keyCounts.set(baseKey, count);
+    const sourceKey = count === 1 ? baseKey : `${baseKey}|seq:${count}`;
+    const confirmed = isCashPaymentMethodForSync(payment?.method)
+      ? true
+      : approvalByKey.get(sourceKey) === true;
+    return payment?.confirmed === confirmed ? payment : { ...payment, confirmed };
+  });
+  const paid = sumPaymentAmounts(nextPayments);
+  const paymentStatus = calcClientPaymentStatus(paid, getOrderClientTotal(order));
+  const unchanged = JSON.stringify(nextPayments) === JSON.stringify(payments)
+    && Number(order?.debt || 0) === paid
+    && String(order?.payment_status || '') === paymentStatus;
+  if (unchanged) return order;
+
+  const patch = {
+    client_payments: nextPayments,
+    debt: paid,
+    payment_status: paymentStatus,
+  };
+  const res = await fetch(`${sb}/rest/v1/orders?id=eq.${encodeURIComponent(order.id)}`, {
+    method: 'PATCH',
+    headers: sbHeaders,
+    body: JSON.stringify(patch),
+  });
+  const rows = await res.json().catch(() => []);
+  if (!res.ok) {
+    const message = Array.isArray(rows) ? 'Order payment reconciliation failed' : (rows?.message || rows?.error || 'Order payment reconciliation failed');
+    throw new Error(message);
+  }
+  return Array.isArray(rows) && rows[0] ? { ...order, ...rows[0] } : { ...order, ...patch };
 }
 
 function ensureUniqueOrderCashEntrySourceKeys(entries = []) {

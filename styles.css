@@ -2386,6 +2386,139 @@ body {
   white-space: pre-line;
 }
 
+.client-statement-modal {
+  max-width: 620px;
+}
+
+.client-statement-subtitle {
+  margin-top: 3px;
+  color: var(--text3);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.client-statement-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.client-statement-mode {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface2);
+}
+
+.client-statement-mode-btn {
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text3);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.client-statement-mode-btn:hover {
+  color: var(--text);
+}
+
+.client-statement-mode-btn.active {
+  border-color: var(--border2);
+  background: var(--surface);
+  color: var(--accent);
+  box-shadow: var(--shadow-sm);
+}
+
+.client-statement-date-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.client-statement-date-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.client-statement-date-field > span {
+  color: var(--text3);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.client-statement-preview {
+  min-height: 112px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface2);
+}
+
+.client-statement-preview-empty {
+  display: flex;
+  min-height: 78px;
+  align-items: center;
+  justify-content: center;
+  color: var(--text3);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.client-statement-preview-title {
+  margin-bottom: 12px;
+  color: var(--text2);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.client-statement-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.client-statement-preview-item {
+  padding: 11px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.client-statement-preview-label {
+  color: var(--text3);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.client-statement-preview-value {
+  margin-top: 4px;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.client-statement-preview-item--paid .client-statement-preview-value {
+  color: var(--accent);
+}
+
+.client-statement-preview-item--left .client-statement-preview-value {
+  color: var(--red);
+}
+
 .order-modal-tabs {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -2621,6 +2754,14 @@ input[type="datetime-local"] {
   select,
   textarea {
     font-size: 16px !important;
+  }
+
+  .client-statement-date-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .client-statement-preview-grid {
+    grid-template-columns: 1fr;
   }
 
   .auth-card { padding: 28px 20px 32px; }

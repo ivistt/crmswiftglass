@@ -3,6 +3,239 @@
 // ============================================================
 
 let currentClientDetailKey = null;
+let clientStatementClientKey = null;
+let clientStatementMode = 'single';
+
+function getClientStatementClient() {
+  if (!clientStatementClientKey) return null;
+  const decoded = decodeURIComponent(clientStatementClientKey);
+  return getClients().find(client => (client.phone || client.name) === decoded) || null;
+}
+
+function getClientStatementPeriod() {
+  if (clientStatementMode === 'range') {
+    const from = document.getElementById('client-statement-from-date')?.value || '';
+    const to = document.getElementById('client-statement-to-date')?.value || '';
+    if (!from || !to) return { error: 'Укажите начало и конец периода' };
+    if (from > to) return { error: 'Дата начала не может быть позже даты окончания' };
+    return { from, to, label: from === to ? formatDate(from) : `${formatDate(from)} — ${formatDate(to)}` };
+  }
+
+  const date = document.getElementById('client-statement-single-date')?.value || '';
+  if (!date) return { error: 'Выберите дату' };
+  return { from: date, to: date, label: formatDate(date) };
+}
+
+function getClientStatementRows(client, period) {
+  if (!client || !period?.from || !period?.to) return [];
+  return (client.orders || [])
+    .filter(order => order?.workerDone && !order?.isCancelled && !isOrderDeleted(order))
+    .filter(order => String(order?.date || '') >= period.from && String(order?.date || '') <= period.to)
+    .sort((a, b) => String(a.date || '').localeCompare(String(b.date || ''))
+      || String(a.time || '').localeCompare(String(b.time || ''))
+      || String(a.id || '').localeCompare(String(b.id || '')))
+    .map(order => {
+      const total = getOrderClientTotalAmount(order);
+      const paid = getOrderClientPaidAmount(order);
+      return {
+        date: order.date || '',
+        total,
+        paid,
+        left: Math.max(0, total - paid),
+      };
+    });
+}
+
+function getClientStatementTotals(rows) {
+  return (rows || []).reduce((totals, row) => {
+    totals.total += Number(row?.total) || 0;
+    totals.paid += Number(row?.paid) || 0;
+    totals.left += Number(row?.left) || 0;
+    return totals;
+  }, { total: 0, paid: 0, left: 0 });
+}
+
+function formatClientStatementMoney(value) {
+  return `${(Number(value) || 0).toLocaleString('ru')} ₴`;
+}
+
+function openClientStatementModal(key) {
+  if (currentRole !== 'owner') return;
+  clientStatementClientKey = key || currentClientDetailKey;
+  const client = getClientStatementClient();
+  if (!client) return showToast('Клиент не найден', 'error');
+
+  const today = typeof todayStr === 'function' ? todayStr() : new Date().toISOString().slice(0, 10);
+  const singleInput = document.getElementById('client-statement-single-date');
+  const fromInput = document.getElementById('client-statement-from-date');
+  const toInput = document.getElementById('client-statement-to-date');
+  if (singleInput) singleInput.value = today;
+  if (fromInput) fromInput.value = today;
+  if (toInput) toInput.value = today;
+  const nameEl = document.getElementById('client-statement-client-name');
+  if (nameEl) nameEl.textContent = client.name || 'Клиент';
+
+  setClientStatementMode('single');
+  document.getElementById('client-statement-modal')?.classList.add('active');
+  renderClientStatementPreview();
+  initIcons();
+}
+
+function closeClientStatementModal() {
+  document.getElementById('client-statement-modal')?.classList.remove('active');
+  clientStatementClientKey = null;
+}
+
+function setClientStatementMode(mode) {
+  clientStatementMode = mode === 'range' ? 'range' : 'single';
+  document.querySelectorAll('[data-client-statement-mode]').forEach(button => {
+    button.classList.toggle('active', button.dataset.clientStatementMode === clientStatementMode);
+  });
+  const isRange = clientStatementMode === 'range';
+  const singleWrap = document.getElementById('client-statement-single-wrap');
+  const fromWrap = document.getElementById('client-statement-from-wrap');
+  const toWrap = document.getElementById('client-statement-to-wrap');
+  if (singleWrap) singleWrap.style.display = isRange ? 'none' : '';
+  if (fromWrap) fromWrap.style.display = isRange ? '' : 'none';
+  if (toWrap) toWrap.style.display = isRange ? '' : 'none';
+  renderClientStatementPreview();
+}
+
+function renderClientStatementPreview() {
+  const preview = document.getElementById('client-statement-preview');
+  const printButton = document.getElementById('client-statement-print-btn');
+  if (!preview) return;
+  const client = getClientStatementClient();
+  const period = getClientStatementPeriod();
+  if (!client || period.error) {
+    preview.innerHTML = `<div class="client-statement-preview-empty">${escapeHtml(period.error || 'Клиент не найден')}</div>`;
+    if (printButton) printButton.disabled = true;
+    return;
+  }
+
+  const rows = getClientStatementRows(client, period);
+  if (!rows.length) {
+    preview.innerHTML = '<div class="client-statement-preview-empty">За выбранный период нет завершённых заказов</div>';
+    if (printButton) printButton.disabled = true;
+    return;
+  }
+
+  const totals = getClientStatementTotals(rows);
+  preview.innerHTML = `
+    <div class="client-statement-preview-title">${escapeHtml(period.label)} · заказов: ${rows.length}</div>
+    <div class="client-statement-preview-grid">
+      <div class="client-statement-preview-item">
+        <div class="client-statement-preview-label">К оплате</div>
+        <div class="client-statement-preview-value">${formatClientStatementMoney(totals.total)}</div>
+      </div>
+      <div class="client-statement-preview-item client-statement-preview-item--paid">
+        <div class="client-statement-preview-label">Оплачено</div>
+        <div class="client-statement-preview-value">${formatClientStatementMoney(totals.paid)}</div>
+      </div>
+      <div class="client-statement-preview-item client-statement-preview-item--left">
+        <div class="client-statement-preview-label">Остаток</div>
+        <div class="client-statement-preview-value">${formatClientStatementMoney(totals.left)}</div>
+      </div>
+    </div>
+  `;
+  if (printButton) printButton.disabled = false;
+}
+
+function buildClientStatementPrintHtml(client, period, rows) {
+  const totals = getClientStatementTotals(rows);
+  const phone = String(client?.phone || '').trim();
+  const address = String(client?.address || '').trim();
+  const details = [phone, address].filter(Boolean).map(escapeHtml).join(' · ');
+  const bodyRows = rows.map(row => `
+    <tr>
+      <td>${escapeHtml(formatDate(row.date))}</td>
+      <td class="money">${escapeHtml(formatClientStatementMoney(row.total))}</td>
+      <td class="money paid">${escapeHtml(formatClientStatementMoney(row.paid))}</td>
+      <td class="money left">${escapeHtml(formatClientStatementMoney(row.left))}</td>
+    </tr>
+  `).join('');
+
+  return `<!doctype html>
+  <html lang="ru">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Чек — ${escapeHtml(client?.name || 'Клиент')}</title>
+    <style>
+      @page { size: A4; margin: 16mm; }
+      * { box-sizing: border-box; }
+      body { margin: 0; color: #15171b; font-family: Arial, sans-serif; font-size: 12px; }
+      .receipt { width: 100%; }
+      .top { display: flex; justify-content: space-between; gap: 24px; padding-bottom: 18px; border-bottom: 2px solid #15171b; }
+      h1 { margin: 0; font-size: 24px; letter-spacing: -0.4px; }
+      .client { margin-top: 6px; font-size: 14px; font-weight: 700; }
+      .details { margin-top: 4px; color: #60646c; }
+      .period { text-align: right; }
+      .period strong { display: block; margin-top: 4px; font-size: 15px; }
+      table { width: 100%; margin-top: 22px; border-collapse: collapse; }
+      th { padding: 9px 10px; border-bottom: 1px solid #9da1aa; color: #60646c; font-size: 10px; text-align: left; text-transform: uppercase; }
+      td { padding: 12px 10px; border-bottom: 1px solid #dde0e5; }
+      .money { text-align: right; white-space: nowrap; }
+      .paid { color: #087f5b; }
+      .left { color: #c92a2a; }
+      tfoot td { padding-top: 14px; border-top: 2px solid #15171b; border-bottom: 0; font-size: 13px; font-weight: 800; }
+      .generated { margin-top: 28px; color: #777b83; font-size: 10px; }
+      @media print { body { print-color-adjust: exact; -webkit-print-color-adjust: exact; } }
+    </style>
+  </head>
+  <body>
+    <main class="receipt">
+      <div class="top">
+        <div>
+          <h1>Чек клиента</h1>
+          <div class="client">${escapeHtml(client?.name || 'Клиент')}</div>
+          ${details ? `<div class="details">${details}</div>` : ''}
+        </div>
+        <div class="period">Период<strong>${escapeHtml(period.label)}</strong></div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Дата</th>
+            <th class="money">Общая сумма к оплате</th>
+            <th class="money">Оплаченная сумма</th>
+            <th class="money">Остаток к оплате</th>
+          </tr>
+        </thead>
+        <tbody>${bodyRows}</tbody>
+        <tfoot>
+          <tr>
+            <td>Итого</td>
+            <td class="money">${escapeHtml(formatClientStatementMoney(totals.total))}</td>
+            <td class="money paid">${escapeHtml(formatClientStatementMoney(totals.paid))}</td>
+            <td class="money left">${escapeHtml(formatClientStatementMoney(totals.left))}</td>
+          </tr>
+        </tfoot>
+      </table>
+      <div class="generated">Сформировано: ${escapeHtml(new Date().toLocaleString('ru-RU'))}</div>
+    </main>
+  </body>
+  </html>`;
+}
+
+function printClientStatement() {
+  if (currentRole !== 'owner') return;
+  const client = getClientStatementClient();
+  const period = getClientStatementPeriod();
+  if (!client) return showToast('Клиент не найден', 'error');
+  if (period.error) return showToast(period.error, 'error');
+  const rows = getClientStatementRows(client, period);
+  if (!rows.length) return showToast('За выбранный период нет завершённых заказов', 'error');
+
+  const printWindow = window.open('', '_blank', 'width=980,height=760');
+  if (!printWindow) return showToast('Браузер заблокировал окно печати', 'error');
+  printWindow.document.open();
+  printWindow.document.write(buildClientStatementPrintHtml(client, period, rows));
+  printWindow.document.close();
+  printWindow.focus();
+  closeClientStatementModal();
+  setTimeout(() => printWindow.print(), 180);
+}
 
 function buildClientDebtCopyText(client) {
   const debtOrders = (client?.orders || []).filter(order => getOrderDebtLeft(order) > 0);
@@ -129,6 +362,7 @@ function openClientDetail(key) {
             <div class="detail-subtitle">${c.phone || '—'}${c.address ? ' · ' + c.address : ''}</div>
           </div>
         <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;">
+          ${currentRole === 'owner' ? `<button class="btn-secondary" onclick="event.stopPropagation(); openClientStatementModal('${encodeURIComponent(c.phone || c.name)}')">${icon('printer')} Чек</button>` : ''}
           ${debtOrders.length ? `<button class="btn-secondary" onclick="event.stopPropagation(); copyClientDebtSummary('${encodeURIComponent(c.phone || c.name)}')">${icon('copy')} Скопировать</button>` : ''}
         ${clientTotalsHtml}
         </div>
