@@ -44,6 +44,78 @@ const SYSTEM_BANNER_CONFIGS = [
 let modalPageScrollY = 0;
 let modalPageScrollLocked = false;
 let modalScrollObserver = null;
+let modalTouchStartX = 0;
+let modalTouchStartY = 0;
+
+function getModalEventElement(target) {
+  if (target instanceof Element) return target;
+  return target?.parentElement || null;
+}
+
+function getModalScrollContainer(target, overlay) {
+  let node = getModalEventElement(target);
+  while (node && node !== overlay) {
+    const style = window.getComputedStyle(node);
+    const canScrollY = /(auto|scroll)/.test(style.overflowY)
+      && node.scrollHeight > node.clientHeight + 1;
+    if (canScrollY) return node;
+    node = node.parentElement;
+  }
+  return null;
+}
+
+function shouldBlockModalScroll(scrollContainer, deltaY) {
+  if (!scrollContainer) return true;
+  if (!deltaY) return false;
+  const atTop = scrollContainer.scrollTop <= 0;
+  const atBottom = scrollContainer.scrollTop + scrollContainer.clientHeight >= scrollContainer.scrollHeight - 1;
+  return (deltaY < 0 && atTop) || (deltaY > 0 && atBottom);
+}
+
+function handleModalTouchStart(event) {
+  if (!document.querySelector('.modal-overlay.active') || !event.touches?.length) return;
+  modalTouchStartX = event.touches[0].clientX;
+  modalTouchStartY = event.touches[0].clientY;
+}
+
+function handleModalTouchMove(event) {
+  if (!document.querySelector('.modal-overlay.active')) return;
+  if (event.touches?.length !== 1) {
+    event.preventDefault();
+    return;
+  }
+
+  const target = getModalEventElement(event.target);
+  const overlay = target?.closest('.modal-overlay.active');
+  if (!overlay) {
+    event.preventDefault();
+    return;
+  }
+
+  const touch = event.touches[0];
+  const deltaX = touch.clientX - modalTouchStartX;
+  const deltaY = touch.clientY - modalTouchStartY;
+  if (Math.abs(deltaX) > Math.abs(deltaY)) {
+    event.preventDefault();
+    return;
+  }
+
+  const scrollContainer = getModalScrollContainer(target, overlay);
+  // Палец вниз = попытка прокрутить содержимое вверх, поэтому знак инвертируем.
+  if (shouldBlockModalScroll(scrollContainer, -deltaY)) event.preventDefault();
+}
+
+function handleModalWheel(event) {
+  if (!document.querySelector('.modal-overlay.active')) return;
+  const target = getModalEventElement(event.target);
+  const overlay = target?.closest('.modal-overlay.active');
+  if (!overlay || Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
+    event.preventDefault();
+    return;
+  }
+  const scrollContainer = getModalScrollContainer(target, overlay);
+  if (shouldBlockModalScroll(scrollContainer, event.deltaY)) event.preventDefault();
+}
 
 function syncModalPageScrollLock() {
   const hasOpenModal = !!document.querySelector('.modal-overlay.active');
@@ -78,6 +150,9 @@ function initModalPageScrollLock() {
 }
 
 document.addEventListener('DOMContentLoaded', initModalPageScrollLock);
+document.addEventListener('touchstart', handleModalTouchStart, { passive: true, capture: true });
+document.addEventListener('touchmove', handleModalTouchMove, { passive: false, capture: true });
+document.addEventListener('wheel', handleModalWheel, { passive: false, capture: true });
 ['gesturestart', 'gesturechange', 'gestureend'].forEach(eventName => {
   document.addEventListener(eventName, event => event.preventDefault(), { passive: false });
 });

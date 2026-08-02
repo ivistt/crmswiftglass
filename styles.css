@@ -86,7 +86,10 @@
 
 html,
 body {
-  touch-action: pan-x pan-y;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  touch-action: pan-y;
 }
 
 body {
@@ -2282,6 +2285,7 @@ body {
 .modal-overlay.active {
   opacity: 1;
   pointer-events: all;
+  touch-action: pan-y;
 }
 
 .modal {
@@ -2567,14 +2571,20 @@ body {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
+  touch-action: pan-y;
 }
 
 html.modal-scroll-locked,
 body.modal-scroll-locked {
-  overflow: hidden;
+  width: 100%;
+  max-width: 100%;
+  height: 100%;
+  overflow: hidden !important;
   overscroll-behavior: none;
+  touch-action: none;
 }
 
 body.modal-scroll-locked {
@@ -2582,6 +2592,29 @@ body.modal-scroll-locked {
   left: 0;
   right: 0;
   width: 100%;
+}
+
+.modal-overlay.active .modal,
+.modal-overlay.active .modal-body {
+  max-width: 100%;
+  overscroll-behavior: contain;
+}
+
+.modal-order,
+.modal-order .modal-body,
+.modal-order .form-section,
+.modal-order .form-grid,
+.modal-order .form-row,
+.modal-order .form-group {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.modal-order input,
+.modal-order select,
+.modal-order textarea {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .modal-footer {
