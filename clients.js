@@ -39,6 +39,7 @@ function getClientStatementRows(client, period) {
       const paid = getOrderClientPaidAmount(order);
       return {
         date: order.date || '',
+        car: order.car || '—',
         total,
         paid,
         left: Math.max(0, total - paid),
@@ -149,6 +150,7 @@ function buildClientStatementPrintHtml(client, period, rows) {
   const bodyRows = rows.map(row => `
     <tr>
       <td>${escapeHtml(formatDate(row.date))}</td>
+      <td>${escapeHtml(row.car || '—')}</td>
       <td class="money">${escapeHtml(formatClientStatementMoney(row.total))}</td>
       <td class="money paid">${escapeHtml(formatClientStatementMoney(row.paid))}</td>
       <td class="money left">${escapeHtml(formatClientStatementMoney(row.left))}</td>
@@ -160,7 +162,7 @@ function buildClientStatementPrintHtml(client, period, rows) {
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Чек — ${escapeHtml(client?.name || 'Клиент')}</title>
+    <title>Сверка — ${escapeHtml(client?.name || 'Клиент')}</title>
     <style>
       @page { size: A4; margin: 16mm; }
       * { box-sizing: border-box; }
@@ -187,7 +189,7 @@ function buildClientStatementPrintHtml(client, period, rows) {
     <main class="receipt">
       <div class="top">
         <div>
-          <h1>Чек клиента</h1>
+          <h1>Сверка с клиентом</h1>
           <div class="client">${escapeHtml(client?.name || 'Клиент')}</div>
           ${details ? `<div class="details">${details}</div>` : ''}
         </div>
@@ -197,6 +199,7 @@ function buildClientStatementPrintHtml(client, period, rows) {
         <thead>
           <tr>
             <th>Дата</th>
+            <th>Автомобиль</th>
             <th class="money">Общая сумма к оплате</th>
             <th class="money">Оплаченная сумма</th>
             <th class="money">Остаток к оплате</th>
@@ -205,7 +208,7 @@ function buildClientStatementPrintHtml(client, period, rows) {
         <tbody>${bodyRows}</tbody>
         <tfoot>
           <tr>
-            <td>Итого</td>
+            <td colspan="2">Итого</td>
             <td class="money">${escapeHtml(formatClientStatementMoney(totals.total))}</td>
             <td class="money paid">${escapeHtml(formatClientStatementMoney(totals.paid))}</td>
             <td class="money left">${escapeHtml(formatClientStatementMoney(totals.left))}</td>
@@ -362,7 +365,7 @@ function openClientDetail(key) {
             <div class="detail-subtitle">${c.phone || '—'}${c.address ? ' · ' + c.address : ''}</div>
           </div>
         <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;">
-          ${currentRole === 'owner' ? `<button class="btn-secondary" onclick="event.stopPropagation(); openClientStatementModal('${encodeURIComponent(c.phone || c.name)}')">${icon('printer')} Чек</button>` : ''}
+          ${currentRole === 'owner' ? `<button class="btn-secondary" onclick="event.stopPropagation(); openClientStatementModal('${encodeURIComponent(c.phone || c.name)}')">${icon('printer')} Сверка</button>` : ''}
           ${debtOrders.length ? `<button class="btn-secondary" onclick="event.stopPropagation(); copyClientDebtSummary('${encodeURIComponent(c.phone || c.name)}')">${icon('copy')} Скопировать</button>` : ''}
         ${clientTotalsHtml}
         </div>
