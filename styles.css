@@ -2594,7 +2594,6 @@ body.modal-scroll-locked {
   width: 100%;
 }
 
-.modal-overlay.active .modal,
 .modal-overlay.active .modal-body {
   max-width: 100%;
   overscroll-behavior: contain;
@@ -3655,7 +3654,9 @@ input[type="datetime-local"] {
 
 /* ===== ORDER MODAL — REDESIGN ===== */
 
-.modal-order { max-width: 660px; }
+@media (min-width: 641px) {
+  .modal-overlay.active .modal-order { max-width: 660px; }
+}
 
 /* Live-total в хедере */
 .modal-live-total {
