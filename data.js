@@ -863,6 +863,19 @@ async function sbFetchCashLog(workerName, deletedMode = 'active') {
   return allRows;
 }
 
+async function sbFetchCashEntryBySourceKey(sourceKey) {
+  const normalizedSourceKey = String(sourceKey || '').trim();
+  if (!normalizedSourceKey) return null;
+  const res = await fetch(
+    `${WORKER_URL}/api/cash/by-source?source_key=${encodeURIComponent(normalizedSourceKey)}`,
+    { headers: getHeaders() }
+  );
+  if (res.status === 404) return null;
+  if (!res.ok) await throwApiError(res);
+  const row = await res.json();
+  return row && typeof row === 'object' && !Array.isArray(row) ? row : null;
+}
+
 async function sbFetchCashSummary(workerName = '') {
   const resolvedWorkerName = String(
     (workers || []).find(item => item.name === workerName || item.alias === workerName)?.name

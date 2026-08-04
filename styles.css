@@ -2616,6 +2616,68 @@ body.modal-scroll-locked {
   max-width: 100%;
 }
 
+.order-payment-history-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface2);
+}
+
+.order-payment-history-row > div:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.order-payment-history-actions,
+.order-payment-confirm-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.order-payment-history-actions {
+  flex-shrink: 0;
+}
+
+.order-payment-confirm-state {
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.order-payment-confirm-state.is-pending {
+  color: var(--yellow);
+}
+
+.order-payment-confirm-state.is-confirmed {
+  color: var(--accent);
+}
+
+.order-payment-confirm-btn {
+  min-height: 32px;
+  padding: 0 11px;
+  border-radius: 8px;
+  font-size: 11px;
+}
+
+@media (max-width: 640px) {
+  .order-payment-history-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .order-payment-history-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
 .modal-footer {
   display: flex; align-items: center; justify-content: flex-end;
   gap: 10px;

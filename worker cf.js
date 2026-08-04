@@ -954,6 +954,44 @@ export default {
       });
     }
 
+    if (url.pathname === '/api/cash/by-source' && request.method === 'GET') {
+      const sourceKey = String(url.searchParams.get('source_key') || '').trim();
+      if (!sourceKey) {
+        return Response.json({ error: 'Cash source key required' }, { status: 400, headers: cors });
+      }
+
+      const sourceRes = await fetch(
+        `${sb}/rest/v1/cash_log?${cashSourceEqFilter(sourceKey)}&deleted_at=is.null&limit=100`,
+        { headers: sbHeaders }
+      );
+      const sourceRows = await sourceRes.json().catch(() => []);
+      if (!sourceRes.ok) {
+        return Response.json({ error: sourceRows?.message || 'Failed to load cash entry' }, { status: sourceRes.status || 400, headers: cors });
+      }
+      const cashRow = chooseCanonicalOrderCashEntry(
+        (Array.isArray(sourceRows) ? sourceRows : []).filter(row => {
+          if (!isActiveCashLedgerRow(row)) return false;
+          return String(row?.ledger_status || 'posted').trim().toLowerCase() !== 'corrected';
+        })
+      );
+      if (!cashRow) {
+        return Response.json({ error: 'Cash entry not found' }, { status: 404, headers: cors });
+      }
+
+      const cashOwnerLabel = String(cashRow.cash_owner || cashRow.worker_name || '').trim();
+      const [sessionWorker, targetWorker] = await Promise.all([
+        findWorkerByIdentity(session.workerName, sb, sbHeaders),
+        findWorkerByIdentity(cashOwnerLabel, sb, sbHeaders),
+      ]);
+      const isOwnCashEntry = cashOwnerLabel === session.workerName
+        || (sessionWorker && targetWorker && normalizeWorkerIdentityText(sessionWorker.name) === normalizeWorkerIdentityText(targetWorker.name));
+      if (authedRole !== 'owner' && !isOwnCashEntry) {
+        return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
+      }
+
+      return Response.json(cashRow, { headers: { ...cors, 'Cache-Control': 'no-store' } });
+    }
+
     if (url.pathname === '/api/cash' && request.method === 'GET') {
       const workerName = url.searchParams.get('worker');
       const deletedMode = url.searchParams.get('deleted') || 'active';

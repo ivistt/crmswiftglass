@@ -2909,6 +2909,143 @@ function renderOrderPaymentRecipientLine(payment, paymentType = 'client') {
   return `<div style="font-size:11px;color:var(--text3);margin-top:2px;">Касса: ${escapeHtml(getWorkerDisplayName(recipient) || recipient)}</div>`;
 }
 
+function getOrderPaymentSourceKeyByIndex(order, payments, index, paymentType = 'client') {
+  const keyCounts = new Map();
+  for (let currentIndex = 0; currentIndex <= index; currentIndex += 1) {
+    const currentPayment = payments?.[currentIndex];
+    if (!currentPayment) continue;
+    const baseKey = buildPaymentSourceKey(order?.id || '', currentPayment.method, paymentType, currentPayment);
+    const count = (keyCounts.get(baseKey) || 0) + 1;
+    keyCounts.set(baseKey, count);
+    if (currentIndex === index) return count === 1 ? baseKey : `${baseKey}|seq:${count}`;
+  }
+  return '';
+}
+
+function getLoadedCashEntryBySourceKey(sourceKey) {
+  const rows = [
+    ...(Array.isArray(window.allCashLog) ? window.allCashLog : []),
+    ...(Array.isArray(window.ownerCashRecentLog) ? window.ownerCashRecentLog : []),
+    ...(typeof workerCashLog !== 'undefined' && Array.isArray(workerCashLog) ? workerCashLog : []),
+  ].filter(entry => getCashEntrySourceKey(entry) === sourceKey && !String(entry?.deleted_at || '').trim());
+  return rows.find(entry => getCashEntryApprovalStatus(entry) === 'confirmed')
+    || rows.find(entry => !['voided', 'reversed', 'corrected'].includes(String(entry?.ledger_status || 'posted').trim().toLowerCase()))
+    || null;
+}
+
+function currentUserOwnsOrderPayment(order, payment, paymentType = 'client') {
+  if (currentRole === 'owner') return true;
+  const method = normalizePaymentMethod(payment?.method || '');
+  if (!method) return false;
+  const fallbackWorker = String(order?.responsible || currentWorkerName || '').trim();
+  const route = resolveOrderPaymentCashRoute({ order, payment, paymentType, method, fallbackWorkerName: fallbackWorker });
+  const currentWorker = typeof getCurrentWorkerRecord === 'function' ? getCurrentWorkerRecord() : null;
+  const currentId = String(currentWorker?.id || '').trim();
+  const routeId = String(route?.workerId || '').trim();
+  if (currentId && routeId && currentId === routeId) return true;
+  const currentLabels = [currentWorkerName, currentWorker?.name, currentWorker?.alias]
+    .map(value => String(value || '').trim().toLowerCase())
+    .filter(Boolean);
+  const routeLabel = String(route?.workerName || '').trim().toLowerCase();
+  return !!routeLabel && currentLabels.includes(routeLabel);
+}
+
+function canCurrentUserConfirmOrderPayment(order, payment, paymentType = 'client') {
+  const method = normalizePaymentMethod(payment?.method || '');
+  if (!order?.id || !method || !isConfirmablePaymentMethod(method)) return false;
+  if (isOrderPaymentConfirmed(order, payment, paymentType)) return false;
+  return currentUserOwnsOrderPayment(order, payment, paymentType);
+}
+
+function renderOrderPaymentConfirmation(order, payment, index, paymentType = 'client') {
+  const method = normalizePaymentMethod(payment?.method || '');
+  if (!method || !isConfirmablePaymentMethod(method)) return '';
+  const confirmed = isOrderPaymentConfirmed(order, payment, paymentType);
+  if (confirmed) {
+    return '<div class="order-payment-confirm-state is-confirmed">Подтверждено</div>';
+  }
+  const button = canCurrentUserConfirmOrderPayment(order, payment, paymentType)
+    ? `<button type="button" class="btn-primary order-payment-confirm-btn" onclick="confirmOrderPaymentFromModal('${paymentType}', ${index}, this)">Подтвердить</button>`
+    : '';
+  return `<div class="order-payment-confirm-actions"><span class="order-payment-confirm-state is-pending">Ожидает подтверждения</span>${button}</div>`;
+}
+
+function mergeConfirmedCashEntryIntoLocalState(updatedEntry) {
+  if (!updatedEntry?.id) return;
+  const merge = rows => {
+    if (!Array.isArray(rows)) return rows;
+    const index = rows.findIndex(entry => String(entry?.id || '') === String(updatedEntry.id));
+    if (index < 0) return [updatedEntry, ...rows];
+    return rows.map((entry, rowIndex) => rowIndex === index ? { ...entry, ...updatedEntry } : entry);
+  };
+  if (Array.isArray(window.allCashLog)) window.allCashLog = merge(window.allCashLog);
+  if (Array.isArray(window.ownerCashRecentLog)) window.ownerCashRecentLog = merge(window.ownerCashRecentLog);
+  if (typeof workerCashLog !== 'undefined' && Array.isArray(workerCashLog)) workerCashLog = merge(workerCashLog);
+}
+
+async function confirmOrderPaymentFromModal(paymentType, index, button = null) {
+  const normalizedType = paymentType === 'supplier' ? 'supplier' : 'client';
+  const order = editingOrderId ? orders.find(item => item.id === editingOrderId) : null;
+  const payments = normalizedType === 'supplier' ? currentSupplierPayments : currentClientPayments;
+  const payment = payments?.[index];
+  if (!order || !payment) return showToast('Оплата не найдена', 'error');
+  if (!canCurrentUserConfirmOrderPayment(order, payment, normalizedType)) {
+    return showToast('У вас нет доступа к подтверждению этой оплаты', 'error');
+  }
+
+  const sourceKey = getOrderPaymentSourceKeyByIndex(order, payments, index, normalizedType);
+  if (!sourceKey) return showToast('Не удалось определить кассовую запись', 'error');
+  const oldButtonText = button?.textContent || 'Подтвердить';
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Подтверждаем…';
+  }
+
+  try {
+    let cashEntry = getLoadedCashEntryBySourceKey(sourceKey);
+    if (!cashEntry && typeof sbFetchCashEntryBySourceKey === 'function') {
+      cashEntry = await sbFetchCashEntryBySourceKey(sourceKey);
+    }
+    if (!cashEntry?.id) throw new Error('Кассовая запись для этой оплаты не найдена');
+    const updatedEntry = await sbUpdateCashEntry(cashEntry.id, { fop_confirmed: true });
+    mergeConfirmedCashEntryIntoLocalState({
+      ...cashEntry,
+      ...updatedEntry,
+      fop_confirmed: true,
+      approval_status: 'confirmed',
+    });
+
+    let refreshedOrder = null;
+    try {
+      orders = await sbFetchOrders();
+      refreshedOrder = orders.find(item => item.id === editingOrderId) || null;
+    } catch (refreshError) {
+      console.warn('Failed to refresh order after payment confirmation:', refreshError);
+    }
+    if (refreshedOrder) {
+      currentClientPayments = JSON.parse(JSON.stringify(refreshedOrder.clientPayments || []));
+      currentSupplierPayments = JSON.parse(JSON.stringify(refreshedOrder.supplierPayments || []));
+    } else {
+      payments[index] = { ...payment, confirmed: true };
+    }
+
+    renderClientPayments();
+    renderSupplierPayments();
+    syncClientPaidFromPayments();
+    syncSupplierPaidFromPayments();
+    recalcTotal();
+    if (typeof refreshActiveOrdersViews === 'function') refreshActiveOrdersViews();
+    showToast(`Оплата подтверждена: ${normalizePaymentMethod(payment.method)} ✓`);
+  } catch (e) {
+    showToast('Ошибка подтверждения: ' + e.message, 'error');
+  } finally {
+    if (button?.isConnected) {
+      button.disabled = false;
+      button.textContent = oldButtonText;
+    }
+  }
+}
+
 function resetOrdersFilters() {
   ordersFiltersOpen = true;
   orderDateFilterExact = '';
@@ -2942,20 +3079,23 @@ function renderClientPayments() {
     listEl.innerHTML = '<div style="font-size:11px;color:var(--text3);">Нет оплат</div>';
     return;
   }
+  const order = editingOrderId ? (orders.find(item => item.id === editingOrderId) || { id: editingOrderId }) : null;
   listEl.innerHTML = currentClientPayments.map((p, idx) => `
-    <div style="display:flex;align-items:center;justify-content:space-between;background:var(--surface2);padding:6px 10px;border-radius:6px;border:1px solid var(--border);">
+    <div class="order-payment-history-row">
       <div>
         <div style="font-size:13px;font-weight:700;color:var(--text2);">${Number(p.amount).toLocaleString('ru')} ₴</div>
         <div style="font-size:11px;color:var(--text3);">${formatDate(p.date)}</div>
         ${p.method ? `<div style="font-size:11px;color:var(--text3);margin-top:2px;">${escapeHtml(normalizePaymentMethod(p.method))}</div>` : ''}
-        ${p.confirmed === false ? '<div style="font-size:11px;color:var(--yellow);font-weight:800;margin-top:2px;">Ожидает подтверждения</div>' : ''}
         ${renderOrderPaymentRecipientLine(p, 'client')}
       </div>
-      ${canManagePayments && canRemovePayments ? `
-        <button type="button" class="icon-btn" style="width:20px;height:20px;" onclick="removeClientPayment(${idx})">
+      <div class="order-payment-history-actions">
+        ${renderOrderPaymentConfirmation(order, p, idx, 'client')}
+        ${canManagePayments && canRemovePayments ? `
+          <button type="button" class="icon-btn" style="width:20px;height:20px;" onclick="removeClientPayment(${idx})">
           <i data-lucide="trash-2" style="width:10px;height:10px;color:var(--red);"></i>
-        </button>
-      ` : ''}
+          </button>
+        ` : ''}
+      </div>
     </div>
   `).join('');
   initIcons();
@@ -2970,19 +3110,23 @@ function renderSupplierPayments() {
     listEl.innerHTML = '<div style="font-size:11px;color:var(--text3);">Нет оплат поставщику</div>';
     return;
   }
+  const order = editingOrderId ? (orders.find(item => item.id === editingOrderId) || { id: editingOrderId }) : null;
   listEl.innerHTML = currentSupplierPayments.map((p, idx) => `
-    <div style="display:flex;align-items:center;justify-content:space-between;background:var(--surface2);padding:6px 10px;border-radius:6px;border:1px solid var(--border);">
+    <div class="order-payment-history-row">
       <div>
         <div style="font-size:13px;font-weight:700;color:var(--text2);">${Number(p.amount).toLocaleString('ru')} ₴</div>
         <div style="font-size:11px;color:var(--text3);">${formatDate(p.date)}</div>
         ${p.method ? `<div style="font-size:11px;color:var(--text3);margin-top:2px;">${escapeHtml(normalizePaymentMethod(p.method))}</div>` : ''}
         ${renderOrderPaymentRecipientLine(p, 'supplier')}
       </div>
-      ${canManagePayments && canRemovePayments ? `
-        <button type="button" class="icon-btn" style="width:20px;height:20px;" onclick="removeSupplierPayment(${idx})">
-          <i data-lucide="trash-2" style="width:10px;height:10px;color:var(--red);"></i>
-        </button>
-      ` : ''}
+      <div class="order-payment-history-actions">
+        ${renderOrderPaymentConfirmation(order, p, idx, 'supplier')}
+        ${canManagePayments && canRemovePayments ? `
+          <button type="button" class="icon-btn" style="width:20px;height:20px;" onclick="removeSupplierPayment(${idx})">
+            <i data-lucide="trash-2" style="width:10px;height:10px;color:var(--red);"></i>
+          </button>
+        ` : ''}
+      </div>
     </div>
   `).join('');
   initIcons();
