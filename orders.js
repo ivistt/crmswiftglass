@@ -781,6 +781,10 @@ function orderHasDebtTabFinancialMeaning(order) {
   return !!order.workerDone || paid > 0;
 }
 
+function orderHasCompletedClientDebt(order) {
+  return !!order?.workerDone && orderHasDebtTabFinancialMeaning(order);
+}
+
 function renderManagerOrderCardMeta(order) {
   if (currentRole !== 'manager' || !order) return '';
   const clientTotal = getOrderClientTotal(order);
@@ -1175,6 +1179,9 @@ function _filterSpecialistOrdersByTab(list) {
   const currentWorker = typeof getCurrentWorkerRecord === 'function' ? getCurrentWorkerRecord() : null;
   const currentName = currentWorker?.name || currentWorkerName;
   list = list.filter(o => !isOrderDeleted(o));
+  if (currentWorkerTab === 'debt') {
+    return list.filter(o => _isCurrentWorkerOrder(o) && orderHasCompletedClientDebt(o));
+  }
   if (workerCanHandleSpecialService(currentWorker || currentName, 'tatu') && currentWorkerTab === 'tatuActual') {
     return list.filter(o => o.inWork && !o.isCancelled && orderHasSpecialService(o, 'tatu') && !o.tatuStatus && isCurrentWorkerAssignedSpecialService(o, 'tatu', currentWorker || currentName));
   }
@@ -1420,6 +1427,7 @@ function renderOrders() {
       today: '<h3>Нет сегодняшних записей</h3><p>На сегодня задач нет</p>',
       actual: '<h3>Нет актуальных записей</h3><p>В планёрке нет активных задач</p>',
       done: '<h3>Нет выполненных записей</h3><p>Пока ничего не завершено</p>',
+      debt: '<h3>Заказов с долгом нет</h3><p>Все выполненные заказы полностью оплачены</p>',
       future: '<h3>Нет будущих записей</h3><p>Будущих задач пока нет</p>',
       past: '<h3>Нет прошедших записей</h3><p>Просроченных задач нет</p>',
       all: '<h3>Записей не найдено</h3><p>У вас пока нет заказов</p>',
@@ -5339,6 +5347,7 @@ function initOrderTabs() {
         ${workerCanHandleSpecialService(currentWorker || currentName, 'toning') ? '<button class="orders-tab" id="tab-toning-actual" onclick="setWorkerTab(\'toningActual\')">Тонировка актуальные</button><button class="orders-tab" id="tab-toning-done" onclick="setWorkerTab(\'toningDone\')">Тонировка выполненные</button>' : ''}
         <button class="orders-tab" id="tab-today" onclick="setWorkerTab('today')">Сегодняшние</button>
         <button class="orders-tab" id="tab-done-worker" onclick="setWorkerTab('done')">Выполненные</button>
+        <button class="orders-tab" id="tab-debt-worker" onclick="setWorkerTab('debt')">Долг</button>
         <button class="orders-tab" id="tab-future" onclick="setWorkerTab('future')">Будущие</button>
         <button class="orders-tab" id="tab-past" onclick="setWorkerTab('past')">Прошедшие</button>
         ${currentUserHasPermission('own_warehouse_view') ? '<button class="orders-tab" id="tab-own-warehouse-worker" onclick="setWorkerTab(\'ownWarehouse\')">Наш склад</button>' : ''}
@@ -5361,6 +5370,7 @@ function setWorkerTab(tab) {
     actual: 'tab-actual',
     today: 'tab-today',
     done: 'tab-done-worker',
+    debt: 'tab-debt-worker',
     future: 'tab-future',
     past: 'tab-past',
     ownWarehouse: 'tab-own-warehouse-worker',
