@@ -1099,8 +1099,10 @@ function orderHasReminderForCurrentUser(order) {
 
 function getReminderOrders() {
   return (orders || [])
-    .filter(order => orderHasReminderForCurrentUser(order) && !order.workerDone && !order.isCancelled && !isOrderDeleted(order))
-    .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')) || String(a.time || '').localeCompare(String(b.time || '')));
+    .filter(order => orderHasReminderForCurrentUser(order) && !order.isCancelled && !isOrderDeleted(order))
+    .sort((a, b) => Number(!!a.workerDone) - Number(!!b.workerDone)
+      || String(a.date || '').localeCompare(String(b.date || ''))
+      || String(a.time || '').localeCompare(String(b.time || '')));
 }
 
 function updateOwnerRemindersCount() {
@@ -1125,11 +1127,11 @@ function openRemindersModal() {
   const container = document.getElementById('reminders-list');
   if (!container) return;
   container.innerHTML = list.length ? list.map(order => `
-    <button type="button" class="reminder-order-card" onclick="openOrderFromReminder('${escapeAttr(order.id)}')">
+    <button type="button" class="reminder-order-card${order.workerDone ? ' is-completed' : ''}" onclick="openOrderFromReminder('${escapeAttr(order.id)}')">
       <span class="reminder-order-icon"><i data-lucide="bell-ring" style="width:17px;height:17px;"></i></span>
       <span class="reminder-order-main">
         <strong>${escapeHtml(order.id || '—')} · ${escapeHtml(order.car || order.client || 'Без названия')}</strong>
-        <small>${order.client ? escapeHtml(order.client) + ' · ' : ''}${order.phone ? escapeHtml(order.phone) + ' · ' : ''}${escapeHtml(getWorkerDisplayName(order.manager || order.responsible) || 'Без ответственного')}</small>
+        <small>${order.workerDone ? '<span class="reminder-order-completed-label">Выполнен</span> · ' : ''}${order.client ? escapeHtml(order.client) + ' · ' : ''}${order.phone ? escapeHtml(order.phone) + ' · ' : ''}${escapeHtml(getWorkerDisplayName(order.manager || order.responsible) || 'Без ответственного')}</small>
         ${getOrderReminderComment(order) ? `<em>${escapeHtml(getOrderReminderComment(order))}</em>` : ''}
       </span>
       <span class="reminder-order-date"><strong>${order.date ? escapeHtml(formatDate(order.date)) : 'Без даты'}</strong><small>${escapeHtml(order.time || '')}</small></span>
