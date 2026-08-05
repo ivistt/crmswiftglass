@@ -38,6 +38,7 @@ function getClientStatementRows(client, period) {
       const total = getOrderClientTotalAmount(order);
       const paid = getOrderClientPaidAmount(order);
       return {
+        id: order.id || '—',
         date: order.date || '',
         car: order.car || '—',
         total,
@@ -149,6 +150,7 @@ function buildClientStatementPrintHtml(client, period, rows) {
   const details = [phone, address].filter(Boolean).map(escapeHtml).join(' · ');
   const bodyRows = rows.map(row => `
     <tr>
+      <td>${escapeHtml(row.id || '—')}</td>
       <td>${escapeHtml(formatDate(row.date))}</td>
       <td>${escapeHtml(row.car || '—')}</td>
       <td class="money">${escapeHtml(formatClientStatementMoney(row.total))}</td>
@@ -198,6 +200,7 @@ function buildClientStatementPrintHtml(client, period, rows) {
       <table>
         <thead>
           <tr>
+            <th>ID заказа</th>
             <th>Дата</th>
             <th>Автомобиль</th>
             <th class="money">Общая сумма к оплате</th>
@@ -208,7 +211,7 @@ function buildClientStatementPrintHtml(client, period, rows) {
         <tbody>${bodyRows}</tbody>
         <tfoot>
           <tr>
-            <td colspan="2">Итого</td>
+            <td colspan="3">Итого</td>
             <td class="money">${escapeHtml(formatClientStatementMoney(totals.total))}</td>
             <td class="money paid">${escapeHtml(formatClientStatementMoney(totals.paid))}</td>
             <td class="money left">${escapeHtml(formatClientStatementMoney(totals.left))}</td>
