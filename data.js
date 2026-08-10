@@ -1939,6 +1939,8 @@ function rowToManualClient(r) {
     name: r.name || '',
     phone: r.phone || '',
     address: r.address || '',
+    alias: r.alias || r.client_alias || '',
+    requisites: r.requisites || r.client_requisites || '',
     orders: [],
   };
 }
@@ -1948,6 +1950,8 @@ function manualClientToRow(c) {
     name: c.name || '',
     phone: c.phone || null,
     address: c.address || null,
+    alias: c.alias || c.name || null,
+    requisites: c.requisites || null,
   };
   if (c.id) row.id = c.id;
   return row;
@@ -2972,14 +2976,16 @@ function getClients() {
   for (const o of orders) {
     if (!o.client) continue;
     const key = o.phone || o.client;
-    if (!map[key]) map[key] = { name: o.client, phone: o.phone, address: o.address || '', orders: [] };
+    if (!map[key]) map[key] = { name: o.client, phone: o.phone, address: o.address || '', alias: o.client || '', requisites: '', orders: [] };
     map[key].orders.push(o);
     if (o.address) map[key].address = o.address;
   }
   if (typeof manualClients !== 'undefined') {
     for (const c of manualClients) {
       const key = c.phone || c.name;
-      if (!map[key]) map[key] = { name: c.name, phone: c.phone, address: c.address || '', orders: [] };
+      if (!map[key]) map[key] = { name: c.name, phone: c.phone, address: c.address || '', alias: c.alias || c.name || '', requisites: c.requisites || '', orders: [] };
+      map[key].alias = c.alias || map[key].alias || c.name || '';
+      map[key].requisites = c.requisites || map[key].requisites || '';
       if (c.address) map[key].address = c.address;
       if (c.id) map[key].id = c.id;
     }

@@ -167,6 +167,23 @@ function getClientStatementDateString(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
+function getClientInvoiceName(client, order = null) {
+  return String(client?.alias || client?.name || order?.client || 'Покупець').trim();
+}
+
+function buildClientInvoiceBuyerHtml(client, order = null, details = '') {
+  const invoiceName = getClientInvoiceName(client, order);
+  const requisites = String(client?.requisites || '').trim();
+  const requisitesHtml = requisites
+    ? requisites.split('\n').map(line => escapeHtml(line.trim())).filter(Boolean).join('<br>')
+    : '';
+  return `
+    ${escapeHtml(invoiceName || 'Покупець')}
+    ${requisitesHtml ? `<span class="party-note">${requisitesHtml}</span>` : ''}
+    ${details ? `<span class="party-note">${details}</span>` : ''}
+  `;
+}
+
 function getClientStatementNumber(client, period) {
   const raw = String(client?.phone || client?.name || 'client').replace(/\D/g, '').slice(-4);
   const datePart = String(period?.to || period?.from || '').replace(/\D/g, '').slice(2);
@@ -415,10 +432,7 @@ function buildClientStatementPrintHtml(client, period, rows) {
         </div>
         <div class="party-row">
           <div class="party-label">Покупець:</div>
-          <div class="party-value">
-            ${escapeHtml(client?.name || 'Клієнт')}
-            ${clientDetails ? `<span class="party-note">${clientDetails}</span>` : ''}
-          </div>
+          <div class="party-value">${buildClientInvoiceBuyerHtml(client, null, clientDetails)}</div>
         </div>
       </section>
 
@@ -498,8 +512,37 @@ function getClientOrderInvoiceItems(order) {
   const workAmount = Number(order?.total) || 0;
   const glassAmount = Number(order?.income) || 0;
   const deliveryAmount = Number(order?.delivery) || 0;
+  const workDetails = [
+    ['Монтаж', order?.mount],
+    ['Молдинг', order?.molding],
+    ['Додаткові роботи', order?.extraWork],
+    ['Тату', order?.tatu],
+    ['Тонування', order?.toning],
+  ]
+    .map(([title, amount]) => ({ title, amount: Number(amount) || 0 }))
+    .filter(item => item.amount > 0);
+  const workDetailsTotal = workDetails.reduce((sum, item) => sum + item.amount, 0);
 
-  if (workAmount > 0) {
+  workDetails.forEach(item => {
+    items.push({
+      title: item.title,
+      qty: 1,
+      unit: 'посл.',
+      price: item.amount,
+      sum: item.amount,
+    });
+  });
+
+  if (workAmount > workDetailsTotal) {
+    const restAmount = workAmount - workDetailsTotal;
+    items.push({
+      title: serviceNames.length ? serviceNames.join(', ') : `Роботи за замовленням ${formatClientStatementOrderId(order?.id)}`,
+      qty: 1,
+      unit: 'посл.',
+      price: restAmount,
+      sum: restAmount,
+    });
+  } else if (workAmount > 0 && !workDetails.length) {
     items.push({
       title: serviceNames.length ? serviceNames.join(', ') : `Роботи за замовленням ${formatClientStatementOrderId(order?.id)}`,
       qty: 1,
@@ -698,10 +741,7 @@ function buildClientOrderInvoicePrintHtml(client, order) {
         </div>
         <div class="party-row">
           <div class="party-label">Покупець:</div>
-          <div class="party-value">
-            ${escapeHtml(client?.name || order?.client || 'Клієнт')}
-            ${clientDetails ? `<span class="party-note">${clientDetails}</span>` : ''}
-          </div>
+          <div class="party-value">${buildClientInvoiceBuyerHtml(client, order, clientDetails)}</div>
         </div>
       </section>
 
@@ -804,7 +844,7 @@ function printClientOrderInvoice(orderId) {
   if (!order) return showToast('Заказ не найден', 'error');
   const decoded = decodeURIComponent(currentClientDetailKey || '');
   const client = getClients().find(item => (item.phone || item.name) === decoded)
-    || { name: order.client || '', phone: order.phone || '', address: order.address || '', orders: [order] };
+    || { name: order.client || '', alias: order.client || '', requisites: '', phone: order.phone || '', address: order.address || '', orders: [order] };
   printClientHtmlDocument(buildClientOrderInvoicePrintHtml(client, order));
 }
 
@@ -854,6 +894,8 @@ function renderClients() {
 
   if (search) list = list.filter(c =>
     (c.name  || '').toLowerCase().includes(search) ||
+    (c.alias || '').toLowerCase().includes(search) ||
+    (c.requisites || '').toLowerCase().includes(search) ||
     (c.phone || '').toLowerCase().includes(search)
   );
   if (debtFilter === 'debt') list = list.filter(c => c.debt > 0);
@@ -881,6 +923,7 @@ function renderClients() {
     <div class="client-card" onclick="openClientDetail('${escapeAttr(encodeURIComponent(c.phone || c.name))}')">
       <div class="client-info">
         <div class="client-name">${c.name}</div>
+        ${c.alias && c.alias !== c.name ? `<div class="client-phone">Псевдоним: ${escapeHtml(c.alias)}</div>` : ''}
         <div class="client-phone">${c.phone || '—'}</div>
         <div class="client-phone">${c.address || '—'}</div>
         <div class="client-orders">${icon('clipboard-list')} Заказов: ${c.orders.length}</div>
@@ -933,7 +976,7 @@ function openClientDetail(key) {
             <div class="detail-subtitle">${c.phone || '—'}${c.address ? ' · ' + c.address : ''}</div>
           </div>
         <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;">
-          ${currentRole === 'owner' || currentRole === 'manager' ? `<button class="btn-secondary" onclick="event.stopPropagation(); openClientNameEditModal('${escapeAttr(encodeURIComponent(c.phone || c.name))}')">${icon('pencil')} Имя</button>` : ''}
+          ${currentRole === 'owner' || currentRole === 'manager' ? `<button class="btn-secondary" onclick="event.stopPropagation(); openClientNameEditModal('${escapeAttr(encodeURIComponent(c.phone || c.name))}')">${icon('pencil')} Клиент</button>` : ''}
           ${canPrintClientStatement() ? `<button class="btn-secondary" onclick="event.stopPropagation(); openClientStatementModal('${escapeAttr(encodeURIComponent(c.phone || c.name))}')">${icon('printer')} Сверка</button>` : ''}
           ${debtOrders.length ? `<button class="btn-secondary" onclick="event.stopPropagation(); copyClientDebtSummary('${escapeAttr(encodeURIComponent(c.phone || c.name))}')">${icon('copy')} Скопировать</button>` : ''}
         ${clientTotalsHtml}
@@ -1023,6 +1066,8 @@ function openClientModal() {
   document.getElementById('c-name').value = '';
   document.getElementById('c-phone').value = '';
   document.getElementById('c-address').value = '';
+  document.getElementById('c-alias').value = '';
+  document.getElementById('c-requisites').value = '';
   ['c-phone', 'c-address'].forEach(id => {
     const input = document.getElementById(id);
     if (!input) return;
@@ -1044,6 +1089,8 @@ async function saveClient() {
   const name  = document.getElementById('c-name').value.trim();
   const phone = document.getElementById('c-phone').value.trim();
   const address = document.getElementById('c-address').value.trim();
+  const alias = document.getElementById('c-alias')?.value.trim() || name;
+  const requisites = document.getElementById('c-requisites')?.value.trim() || '';
 
   if (!name) {
     alert('Введите имя клиента');
@@ -1067,8 +1114,8 @@ async function saveClient() {
   if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '⏳'; }
 
   try {
-    const created = await sbInsertManualClient({ name, phone, address });
-    manualClients.push(created || { name, phone, address, orders: [] });
+    const created = await sbInsertManualClient({ name, phone, address, alias, requisites });
+    manualClients.push(created || { name, phone, address, alias, requisites, orders: [] });
     closeClientModal();
     renderClients();
     showToast('Клиент добавлен ✓');
@@ -1091,15 +1138,19 @@ function openClientNameEditModal(key) {
     name: client.name || '',
     phone: client.phone || '',
     address: client.address || '',
+    alias: client.alias || client.name || '',
+    requisites: client.requisites || '',
     key: client.phone || client.name || '',
     orderIds: (client.orders || []).map(order => order.id).filter(Boolean),
   };
 
   const title = document.getElementById('client-modal-title');
-  if (title) title.textContent = 'Редактировать имя';
+  if (title) title.textContent = 'Редактировать клиента';
   document.getElementById('c-name').value = client.name || '';
   document.getElementById('c-phone').value = client.phone || '';
   document.getElementById('c-address').value = client.address || '';
+  document.getElementById('c-alias').value = client.alias || client.name || '';
+  document.getElementById('c-requisites').value = client.requisites || '';
   ['c-phone', 'c-address'].forEach(id => {
     const input = document.getElementById(id);
     if (!input) return;
@@ -1115,19 +1166,25 @@ function openClientNameEditModal(key) {
 async function saveClientNameEdit(name) {
   const original = editingClientOriginal;
   if (!original) return;
-  if (name === original.name) {
+  const alias = document.getElementById('c-alias')?.value.trim() || name;
+  const requisites = document.getElementById('c-requisites')?.value.trim() || '';
+  const nameChanged = name !== original.name;
+  const invoiceFieldsChanged = alias !== (original.alias || original.name || '') || requisites !== (original.requisites || '');
+  if (!nameChanged && !invoiceFieldsChanged) {
     closeClientModal();
     return;
   }
 
   const nextKey = original.phone || name;
-  const duplicate = getClients().find(client => {
-    const key = client.phone || client.name;
-    return key === nextKey && key !== original.key;
-  });
-  if (duplicate) {
-    showToast('Клиент с таким именем уже существует', 'error');
-    return;
+  if (nameChanged) {
+    const duplicate = getClients().find(client => {
+      const key = client.phone || client.name;
+      return key === nextKey && key !== original.key;
+    });
+    if (duplicate) {
+      showToast('Клиент с таким именем уже существует', 'error');
+      return;
+    }
   }
 
   const saveBtn = document.getElementById('client-save-btn');
@@ -1135,29 +1192,31 @@ async function saveClientNameEdit(name) {
 
   try {
     const orderIds = original.orderIds || [];
-    const savedOrders = await Promise.all(orderIds.map(id => sbPatchOrderFields(id, { client: name })));
-    savedOrders.forEach(savedOrder => {
-      if (!savedOrder?.id) return;
-      const idx = orders.findIndex(order => order.id === savedOrder.id);
-      if (idx !== -1) orders[idx] = savedOrder;
-    });
-
-    if (original.id || original.phone || !orderIds.length) {
-      const savedClient = await sbUpsertManualClient({
-        id: original.id || null,
-        name,
-        phone: original.phone,
-        address: original.address,
+    if (nameChanged) {
+      const savedOrders = await Promise.all(orderIds.map(id => sbPatchOrderFields(id, { client: name })));
+      savedOrders.forEach(savedOrder => {
+        if (!savedOrder?.id) return;
+        const idx = orders.findIndex(order => order.id === savedOrder.id);
+        if (idx !== -1) orders[idx] = savedOrder;
       });
-      const manualIdx = manualClients.findIndex(client =>
-        (original.id && client.id === original.id) ||
-        ((client.phone || client.name) === original.key)
-      );
-      if (manualIdx !== -1) {
-        manualClients[manualIdx] = { ...manualClients[manualIdx], ...savedClient, name };
-      } else if (savedClient?.id || !orderIds.length) {
-        manualClients.push(savedClient || { name, phone: original.phone, address: original.address, orders: [] });
-      }
+    }
+
+    const savedClient = await sbUpsertManualClient({
+      id: original.id || null,
+      name,
+      phone: original.phone,
+      address: original.address,
+      alias,
+      requisites,
+    });
+    const manualIdx = manualClients.findIndex(client =>
+      (original.id && client.id === original.id) ||
+      ((client.phone || client.name) === original.key)
+    );
+    if (manualIdx !== -1) {
+      manualClients[manualIdx] = { ...manualClients[manualIdx], ...savedClient, name, alias, requisites };
+    } else {
+      manualClients.push(savedClient || { name, phone: original.phone, address: original.address, alias, requisites, orders: [] });
     }
 
     const newKey = encodeURIComponent(original.phone || name);

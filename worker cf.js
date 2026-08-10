@@ -461,7 +461,13 @@ export default {
         const res = await fetch(`${sb}/rest/v1/clients`, {
           method: 'POST',
           headers: sbHeaders,
-          body: JSON.stringify({ name: body.name, phone: body.phone || null, address: body.address || null }),
+          body: JSON.stringify({
+            name: body.name,
+            phone: body.phone || null,
+            address: body.address || null,
+            alias: body.alias || body.name || null,
+            requisites: body.requisites || null,
+          }),
         });
         const data = await res.json();
         return Response.json(data, { headers: cors });
@@ -485,7 +491,13 @@ export default {
             : `name=eq.${encodeURIComponent(body.name)}`);
         const existingRes = await fetch(`${sb}/rest/v1/clients?${keyFilter}&limit=1`, { headers: sbHeaders });
         const existingRows = await existingRes.json().catch(() => []);
-        const payload = { name: body.name || '', phone: body.phone || null, address: body.address || null };
+        const payload = {
+          name: body.name || '',
+          phone: body.phone || null,
+          address: body.address || null,
+          alias: body.alias || body.name || null,
+          requisites: body.requisites || null,
+        };
 
         if (Array.isArray(existingRows) && existingRows.length) {
           const id = existingRows[0].id;
