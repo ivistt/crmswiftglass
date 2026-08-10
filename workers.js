@@ -31,7 +31,7 @@ const WORKER_PERMISSION_DEFINITIONS = [
   { key: 'action_panel_view', label: 'Показать панель-островок' },
   { key: 'action_panel_reminders', label: 'Островок: напоминания' },
   { key: 'action_panel_client_data', label: 'Островок: данные для клиента' },
-  { key: 'client_statement_print', label: 'Может видеть сверку' },
+  { key: 'client_statement_print', label: 'Может видеть счет' },
 ];
 
 const WORKER_ROLE_PERMISSION_PRESETS = {

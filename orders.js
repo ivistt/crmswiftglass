@@ -3568,7 +3568,7 @@ async function openOrderModal(id) {
 
   [
     'f-mount','f-molding','f-extra-work','f-tatu','f-toning','f-total','f-delivery',
-    'f-purchase','f-income','f-client','f-phone','f-car'
+    'f-purchase','f-income','f-client','f-phone','f-car','f-license-plate'
   ].forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
@@ -3965,6 +3965,7 @@ function renderOrderSummary(order = null) {
         ['VIN', formatOrderSummaryValue(document.getElementById('f-vin')?.value?.trim())],
         ['Доп заметка', formatOrderSummaryValue(document.getElementById('f-extra-note')?.value?.trim())],
         ['Автомобиль', formatOrderSummaryValue(document.getElementById('f-car')?.value?.trim())],
+        ['Госномер', formatOrderSummaryValue(document.getElementById('f-license-plate')?.value?.trim())],
         ['Еврокод', formatOrderSummaryValue(document.getElementById('f-code')?.value?.trim())],
         ['Производитель', formatOrderSummaryValue(document.getElementById('f-glass-manufacturer')?.value?.trim())],
       ],
@@ -4100,7 +4101,7 @@ function updateOrderModalAccess(order = null) {
 
   const basicFieldIds = [
     'f-date','f-time','f-responsible','f-assistant','f-manager','f-client','f-phone','f-address',
-    'f-vin','f-extra-note','f-car','f-code','f-glass-manufacturer','f-new-post','f-warehouse',
+    'f-vin','f-extra-note','f-car','f-license-plate','f-code','f-glass-manufacturer','f-new-post','f-warehouse',
     'f-warehouse-code','f-notes','f-order-status','f-only-sale','f-toning-external','f-priority-task','f-reminder','f-reminder-comment','f-configuration'
   ];
   basicFieldIds.forEach(id => setElementDisabledState(document.getElementById(id), !isPrivileged));
@@ -4311,6 +4312,7 @@ function fillOrderForm(o) {
   set('f-vin', o.vin);
   set('f-extra-note', o.extraNote);
   set('f-car', o.car);
+  set('f-license-plate', o.licensePlate);
   set('f-code', o.code);
   set('f-glass-manufacturer', o.glassManufacturer);
   set('f-notes', o.notes);
@@ -4428,7 +4430,7 @@ function fillOrderForm(o) {
 
 function clearOrderForm() {
   const ids = [
-    'f-date','f-time','f-responsible','f-client','f-phone','f-address','f-vin','f-extra-note','f-car','f-code',
+    'f-date','f-time','f-responsible','f-client','f-phone','f-address','f-vin','f-extra-note','f-car','f-license-plate','f-code',
     'f-glass-manufacturer','f-notes','f-mount','f-service-type','f-molding',
     'f-extra-work','f-tatu','f-toning','f-delivery','f-warehouse','f-warehouse-code','f-configuration',
     'f-payment-status','f-check','f-supplier-left','f-debt','f-client-left','f-debt-date','f-total',
@@ -4625,6 +4627,7 @@ async function saveOrder() {
     vin:             get('f-vin'),
     extraNote:       get('f-extra-note'),
     car:             get('f-car'),
+    licensePlate:    get('f-license-plate'),
     code:            get('f-code'),
     glassManufacturer: get('f-glass-manufacturer'),
     notes:           get('f-notes'),

@@ -49,12 +49,21 @@ function getClientStatementRows(client, period) {
       return {
         id: formatClientStatementOrderId(order.id),
         date: order.date || '',
-        car: order.car || '—',
+        car: formatClientOrderCarLine(order, 'держ. номер'),
         total,
         paid,
         left: Math.max(0, total - paid),
       };
     });
+}
+
+function formatClientOrderCarLine(order, licenseLabel = 'госномер') {
+  const parts = [];
+  const car = String(order?.car || '').trim();
+  const licensePlate = String(order?.licensePlate || order?.license_plate || '').trim();
+  if (car) parts.push(car);
+  if (licensePlate) parts.push(`${licenseLabel}: ${licensePlate}`);
+  return parts.join(', ') || '—';
 }
 
 function getClientStatementTotals(rows) {
@@ -554,6 +563,7 @@ function getClientOrderInvoiceItems(order) {
   if (glassAmount > 0) {
     const glassParts = ['Скло автомобільне'];
     if (order?.car) glassParts.push(order.car);
+    if (order?.licensePlate || order?.license_plate) glassParts.push(`держ. номер ${order.licensePlate || order.license_plate}`);
     if (order?.code) glassParts.push(order.code);
     items.push({
       title: glassParts.join(' '),
@@ -585,10 +595,13 @@ function getClientOrderInvoiceItems(order) {
   return items;
 }
 
-function buildClientOrderInvoicePrintHtml(client, order) {
+function buildClientOrderInvoicePrintHtml(client, order, documentType = 'invoice') {
   const invoiceNumber = formatClientStatementOrderId(order?.id);
   const invoiceDate = order?.date || getClientStatementDateString();
-  const invoiceTitle = `Рахунок на оплату № ${invoiceNumber} від ${formatClientStatementLongDateUa(invoiceDate)}`;
+  const isAct = documentType === 'act';
+  const invoiceTitle = isAct
+    ? `Акт виконаних робіт № ${invoiceNumber} від ${formatClientStatementLongDateUa(invoiceDate)}`
+    : `Рахунок на оплату № ${invoiceNumber} від ${formatClientStatementLongDateUa(invoiceDate)}`;
   const phone = String(order?.phone || client?.phone || '').trim();
   const address = String(order?.address || client?.address || '').trim();
   const clientDetails = [
@@ -608,6 +621,62 @@ function buildClientOrderInvoicePrintHtml(client, order) {
       <td class="money">${escapeHtml(formatClientStatementMoney(item.sum))}</td>
     </tr>
   `).join('');
+  const paymentHeaderHtml = isAct ? '' : `
+      <div class="notice">
+        Увага! Оплата цього рахунку означає погодження з умовами поставки товарів. Повідомлення про оплату є обов'язковим, в іншому випадку не гарантується наявність товарів на складі. Товар відпускається за фактом надходження коштів на р/р Постачальника, самовивозом, за наявності довіреності та паспорта.
+      </div>
+
+      <div class="payment-title">Зразок заповнення платіжного доручення</div>
+      <section class="payment-box">
+        <div>
+          <div class="payment-line">
+            <div class="payment-label">Отримувач</div>
+            <div class="payment-value plain">${escapeHtml(CLIENT_STATEMENT_COMPANY.name)}</div>
+          </div>
+          <div class="payment-line">
+            <div class="payment-label">Код</div>
+            <div class="payment-value boxed">${escapeHtml(CLIENT_STATEMENT_COMPANY.taxId)}</div>
+          </div>
+          <div class="payment-line">
+            <div class="payment-label">Банк отримувача</div>
+            <div class="payment-value">${escapeHtml(CLIENT_STATEMENT_COMPANY.bank)}</div>
+          </div>
+        </div>
+        <div>
+          <div class="credit-title">КРЕДИТ рах. №</div>
+          <div class="payment-line">
+            <div class="payment-label">IBAN</div>
+            <div class="payment-value boxed">${escapeHtml(CLIENT_STATEMENT_COMPANY.iban)}</div>
+          </div>
+        </div>
+      </section>
+`;
+  const signatureHtml = isAct ? `
+      <section class="signature signature-act">
+        <div class="act-signature-stack">
+          <div class="act-signature-row">
+            <div class="act-signature-label">Виконавець:</div>
+            <div class="act-signature-line"></div>
+            <div class="act-signature-name">БАБЕНКО О.А.</div>
+          </div>
+          <div class="act-signature-row">
+            <div class="act-signature-label">Замовник:</div>
+            <div class="act-signature-line"></div>
+            <div class="act-signature-name"></div>
+          </div>
+          <img class="act-signature-stamp" src="images/shtamp.png" alt="">
+        </div>
+      </section>
+` : `
+      <section class="signature">
+        <div></div>
+        <div>
+          Виписав(ла):
+          <div class="signature-line"></div>
+          <img class="signature-stamp" src="images/shtamp.png" alt="">
+        </div>
+      </section>
+`;
 
   return `<!doctype html>
   <html lang="uk">
@@ -695,39 +764,51 @@ function buildClientOrderInvoicePrintHtml(client, order) {
       }
       .signature-line { border-bottom: 1.5px solid #000; height: 18px; }
       .signature-stamp { display: block; width: 160px; max-height: 90px; object-fit: contain; margin-top: -16px; }
+      .signature-act {
+        display: block;
+        margin: 28px 28px 0 auto;
+        width: 460px;
+      }
+      .act-signature-stack {
+        position: relative;
+        display: grid;
+        gap: 18px;
+        padding-top: 4px;
+        font-size: 14px;
+        font-weight: 800;
+      }
+      .act-signature-row {
+        display: grid;
+        grid-template-columns: 112px 1fr auto;
+        gap: 12px;
+        align-items: end;
+        min-height: 26px;
+      }
+      .act-signature-line {
+        min-height: 24px;
+        border-bottom: 1.5px solid #000;
+      }
+      .act-signature-name {
+        min-width: 118px;
+        padding-bottom: 3px;
+        white-space: nowrap;
+      }
+      .act-signature-stamp {
+        position: absolute;
+        right: 72px;
+        top: -20px;
+        width: 170px;
+        max-height: 106px;
+        object-fit: contain;
+        opacity: 0.96;
+        pointer-events: none;
+      }
       @media print { body { print-color-adjust: exact; -webkit-print-color-adjust: exact; } }
     </style>
   </head>
   <body>
     <main class="sheet">
-      <div class="notice">
-        Увага! Оплата цього рахунку означає погодження з умовами поставки товарів. Повідомлення про оплату є обов'язковим, в іншому випадку не гарантується наявність товарів на складі. Товар відпускається за фактом надходження коштів на р/р Постачальника, самовивозом, за наявності довіреності та паспорта.
-      </div>
-
-      <div class="payment-title">Зразок заповнення платіжного доручення</div>
-      <section class="payment-box">
-        <div>
-          <div class="payment-line">
-            <div class="payment-label">Отримувач</div>
-            <div class="payment-value plain">${escapeHtml(CLIENT_STATEMENT_COMPANY.name)}</div>
-          </div>
-          <div class="payment-line">
-            <div class="payment-label">Код</div>
-            <div class="payment-value boxed">${escapeHtml(CLIENT_STATEMENT_COMPANY.taxId)}</div>
-          </div>
-          <div class="payment-line">
-            <div class="payment-label">Банк отримувача</div>
-            <div class="payment-value">${escapeHtml(CLIENT_STATEMENT_COMPANY.bank)}</div>
-          </div>
-        </div>
-        <div>
-          <div class="credit-title">КРЕДИТ рах. №</div>
-          <div class="payment-line">
-            <div class="payment-label">IBAN</div>
-            <div class="payment-value boxed">${escapeHtml(CLIENT_STATEMENT_COMPANY.iban)}</div>
-          </div>
-        </div>
-      </section>
+${paymentHeaderHtml}
 
       <h1>${escapeHtml(invoiceTitle)}</h1>
 
@@ -783,14 +864,7 @@ function buildClientOrderInvoicePrintHtml(client, order) {
       </section>
 
       <div class="footer-line"></div>
-      <section class="signature">
-        <div></div>
-        <div>
-          Виписав(ла):
-          <div class="signature-line"></div>
-          <img class="signature-stamp" src="images/shtamp.png" alt="">
-        </div>
-      </section>
+${signatureHtml}
     </main>
   </body>
   </html>`;
@@ -838,14 +912,14 @@ function printClientStatement() {
   closeClientStatementModal();
 }
 
-function printClientOrderInvoice(orderId) {
+function printClientOrderInvoice(orderId, documentType = 'invoice') {
   if (!canPrintClientStatement()) return;
   const order = (orders || []).find(item => String(item.id) === String(orderId));
   if (!order) return showToast('Заказ не найден', 'error');
   const decoded = decodeURIComponent(currentClientDetailKey || '');
   const client = getClients().find(item => (item.phone || item.name) === decoded)
     || { name: order.client || '', alias: order.client || '', requisites: '', phone: order.phone || '', address: order.address || '', orders: [order] };
-  printClientHtmlDocument(buildClientOrderInvoicePrintHtml(client, order));
+  printClientHtmlDocument(buildClientOrderInvoicePrintHtml(client, order, documentType));
 }
 
 function buildClientDebtCopyText(client) {
@@ -977,7 +1051,7 @@ function openClientDetail(key) {
           </div>
         <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;">
           ${currentRole === 'owner' || currentRole === 'manager' ? `<button class="btn-secondary" onclick="event.stopPropagation(); openClientNameEditModal('${escapeAttr(encodeURIComponent(c.phone || c.name))}')">${icon('pencil')} Клиент</button>` : ''}
-          ${canPrintClientStatement() ? `<button class="btn-secondary" onclick="event.stopPropagation(); openClientStatementModal('${escapeAttr(encodeURIComponent(c.phone || c.name))}')">${icon('printer')} Сверка</button>` : ''}
+          ${canPrintClientStatement() ? `<button class="btn-secondary" onclick="event.stopPropagation(); openClientStatementModal('${escapeAttr(encodeURIComponent(c.phone || c.name))}')">${icon('printer')} Счет</button>` : ''}
           ${debtOrders.length ? `<button class="btn-secondary" onclick="event.stopPropagation(); copyClientDebtSummary('${escapeAttr(encodeURIComponent(c.phone || c.name))}')">${icon('copy')} Скопировать</button>` : ''}
         ${clientTotalsHtml}
         </div>
@@ -1017,12 +1091,17 @@ function renderClientOrderHistoryCard(o, compact = false) {
             ${statusBadge(getEffectivePaymentStatus(o))}
             ${left > 0 ? `<span class="status-badge status-debt">Долг ${left.toLocaleString('ru')} ₴</span>` : ''}
           </div>
-          <span class="order-name">${o.car || '—'}</span>
+          <span class="order-name">${escapeHtml(formatClientOrderCarLine(o))}</span>
         </div>
         ${canPrintClientStatement() ? `
-          <button class="btn-secondary" style="padding:7px 10px;min-height:0;" onclick="event.stopPropagation(); printClientOrderInvoice('${escapeAttr(o.id)}')">
-            ${icon('printer')} Сверка
-          </button>
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+            <button class="btn-secondary" style="padding:7px 10px;min-height:0;" onclick="event.stopPropagation(); printClientOrderInvoice('${escapeAttr(o.id)}', 'invoice')">
+              ${icon('printer')} Счет
+            </button>
+            <button class="btn-secondary" style="padding:7px 10px;min-height:0;" onclick="event.stopPropagation(); printClientOrderInvoice('${escapeAttr(o.id)}', 'act')">
+              ${icon('file-text')} Акт
+            </button>
+          </div>
         ` : ''}
       </div>
       <div class="order-card-meta">

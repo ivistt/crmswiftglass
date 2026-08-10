@@ -1999,6 +1999,7 @@ const SPECIALIST_ORDER_SELECT = [
   'address',
   'vin',
   'car',
+  'license_plate',
   'code',
   'glass_manufacturer',
   'notes',
