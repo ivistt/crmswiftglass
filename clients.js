@@ -5,6 +5,15 @@
 let currentClientDetailKey = null;
 let clientStatementClientKey = null;
 let clientStatementMode = 'single';
+let editingClientKey = null;
+let editingClientOriginal = null;
+
+const CLIENT_STATEMENT_COMPANY = {
+  name: 'ФОП БАБЕНКО ОЛЕГ АНАТОЛІЙОВИЧ',
+  taxId: '2937309974',
+  iban: 'UA033052990000026003004928133',
+  bank: 'АТ КБ «ПриватБанк»',
+};
 
 function getClientStatementClient() {
   if (!clientStatementClientKey) return null;
@@ -38,7 +47,7 @@ function getClientStatementRows(client, period) {
       const total = getOrderClientTotalAmount(order);
       const paid = getOrderClientPaidAmount(order);
       return {
-        id: order.id || '—',
+        id: formatClientStatementOrderId(order.id),
         date: order.date || '',
         car: order.car || '—',
         total,
@@ -58,11 +67,114 @@ function getClientStatementTotals(rows) {
 }
 
 function formatClientStatementMoney(value) {
-  return `${(Number(value) || 0).toLocaleString('ru')} ₴`;
+  return `${(Number(value) || 0).toLocaleString('uk-UA')} ₴`;
+}
+
+function formatClientStatementOrderId(id) {
+  const raw = String(id || '').trim();
+  if (!raw || raw === '—') return '—';
+  const sgMatch = raw.match(/^SG-(\d+)$/i);
+  if (sgMatch) return `SG-${sgMatch[1].padStart(4, '0')}`;
+  if (/^\d+$/.test(raw)) return `SG-${raw.padStart(4, '0')}`;
+  return raw;
+}
+
+function pluralClientStatementRu(value, forms) {
+  const n = Math.abs(Number(value) || 0) % 100;
+  const n1 = n % 10;
+  if (n > 10 && n < 20) return forms[2];
+  if (n1 > 1 && n1 < 5) return forms[1];
+  if (n1 === 1) return forms[0];
+  return forms[2];
+}
+
+function clientStatementTripletToWordsUa(value, gender = 'male') {
+  const units = {
+    male: ['', 'один', 'два', 'три', 'чотири', "п'ять", 'шість', 'сім', 'вісім', "дев'ять"],
+    female: ['', 'одна', 'дві', 'три', 'чотири', "п'ять", 'шість', 'сім', 'вісім', "дев'ять"],
+  };
+  const teens = ['десять', 'одинадцять', 'дванадцять', 'тринадцять', 'чотирнадцять', "п'ятнадцять", 'шістнадцять', 'сімнадцять', 'вісімнадцять', "дев'ятнадцять"];
+  const tens = ['', '', 'двадцять', 'тридцять', 'сорок', "п'ятдесят", 'шістдесят', 'сімдесят', 'вісімдесят', "дев'яносто"];
+  const hundreds = ['', 'сто', 'двісті', 'триста', 'чотириста', "п'ятсот", 'шістсот', 'сімсот', 'вісімсот', "дев'ятсот"];
+  const n = Number(value) || 0;
+  const parts = [];
+  const h = Math.floor(n / 100);
+  const t = Math.floor((n % 100) / 10);
+  const u = n % 10;
+  if (h) parts.push(hundreds[h]);
+  if (t === 1) {
+    parts.push(teens[u]);
+  } else {
+    if (t) parts.push(tens[t]);
+    if (u) parts.push((units[gender] || units.male)[u]);
+  }
+  return parts.join(' ');
+}
+
+function formatClientStatementMoneyWordsUa(value) {
+  const amount = Math.max(0, Number(value) || 0);
+  let hryvnia = Math.floor(amount);
+  let kop = Math.round((amount - hryvnia) * 100);
+  if (kop >= 100) {
+    hryvnia += 1;
+    kop = 0;
+  }
+  const scales = [
+    { forms: ['', '', ''], gender: 'female' },
+    { forms: ['тисяча', 'тисячі', 'тисяч'], gender: 'female' },
+    { forms: ['мільйон', 'мільйони', 'мільйонів'], gender: 'male' },
+    { forms: ['мільярд', 'мільярди', 'мільярдів'], gender: 'male' },
+  ];
+  if (!hryvnia) return `нуль гривень ${String(kop).padStart(2, '0')} копійок`;
+
+  const words = [];
+  let rest = hryvnia;
+  let scaleIndex = 0;
+  while (rest > 0 && scaleIndex < scales.length) {
+    const triplet = rest % 1000;
+    if (triplet) {
+      const scale = scales[scaleIndex];
+      const tripletWords = clientStatementTripletToWordsUa(triplet, scale.gender);
+      const scaleWord = scaleIndex ? pluralClientStatementRu(triplet, scale.forms) : '';
+      words.unshift([tripletWords, scaleWord].filter(Boolean).join(' '));
+    }
+    rest = Math.floor(rest / 1000);
+    scaleIndex += 1;
+  }
+
+  const hryvniaWord = pluralClientStatementRu(hryvnia, ['гривня', 'гривні', 'гривень']);
+  return `${words.join(' ')} ${hryvniaWord} ${String(kop).padStart(2, '0')} копійок`;
+}
+
+function parseClientStatementDate(dateString) {
+  const parts = String(dateString || '').split('-').map(Number);
+  if (parts.length !== 3 || parts.some(part => !Number.isFinite(part))) return new Date();
+  return new Date(parts[0], parts[1] - 1, parts[2]);
+}
+
+function formatClientStatementLongDateUa(dateString) {
+  const months = ['січня', 'лютого', 'березня', 'квітня', 'травня', 'червня', 'липня', 'серпня', 'вересня', 'жовтня', 'листопада', 'грудня'];
+  const date = dateString instanceof Date ? dateString : parseClientStatementDate(dateString);
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${day} ${months[date.getMonth()]} ${date.getFullYear()} р.`;
+}
+
+function getClientStatementDateString(date = new Date()) {
+  if (typeof todayStr === 'function') return todayStr();
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function getClientStatementNumber(client, period) {
+  const raw = String(client?.phone || client?.name || 'client').replace(/\D/g, '').slice(-4);
+  const datePart = String(period?.to || period?.from || '').replace(/\D/g, '').slice(2);
+  return [datePart || '000000', raw || '0000'].join('-');
 }
 
 function openClientStatementModal(key) {
-  if (currentRole !== 'owner') return;
+  if (!canPrintClientStatement()) return;
   clientStatementClientKey = key || currentClientDetailKey;
   const client = getClientStatementClient();
   if (!client) return showToast('Клиент не найден', 'error');
@@ -147,85 +259,534 @@ function buildClientStatementPrintHtml(client, period, rows) {
   const totals = getClientStatementTotals(rows);
   const phone = String(client?.phone || '').trim();
   const address = String(client?.address || '').trim();
-  const details = [phone, address].filter(Boolean).map(escapeHtml).join(' · ');
-  const bodyRows = rows.map(row => `
+  const clientDetails = [
+    phone ? `тел. ${phone}` : '',
+    address ? `адреса: ${address}` : '',
+  ].filter(Boolean).map(escapeHtml).join(', ');
+  const invoiceNumber = formatClientStatementOrderId(rows?.[0]?.id || getClientStatementNumber(client, period));
+  const invoiceDate = rows?.[0]?.date || getClientStatementDateString();
+  const invoiceTitle = `Рахунок на оплату № ${invoiceNumber} від ${formatClientStatementLongDateUa(invoiceDate)}`;
+  const bodyRows = rows.map((row, index) => `
     <tr>
-      <td>${escapeHtml(row.id || '—')}</td>
-      <td>${escapeHtml(formatDate(row.date))}</td>
+      <td class="col-number">${index + 1}</td>
+      <td class="col-id">${escapeHtml(row.id || '—')}</td>
+      <td class="col-date">${escapeHtml(formatDate(row.date))}</td>
       <td>${escapeHtml(row.car || '—')}</td>
       <td class="money">${escapeHtml(formatClientStatementMoney(row.total))}</td>
-      <td class="money paid">${escapeHtml(formatClientStatementMoney(row.paid))}</td>
-      <td class="money left">${escapeHtml(formatClientStatementMoney(row.left))}</td>
+      <td class="money">${escapeHtml(formatClientStatementMoney(row.paid))}</td>
+      <td class="money">${escapeHtml(formatClientStatementMoney(row.left))}</td>
     </tr>
   `).join('');
+  const rowsWord = pluralClientStatementRu(rows.length, ['замовлення', 'замовлення', 'замовлень']);
+  const totalLeftWords = formatClientStatementMoneyWordsUa(totals.left);
 
   return `<!doctype html>
-  <html lang="ru">
+  <html lang="uk">
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Сверка — ${escapeHtml(client?.name || 'Клиент')}</title>
+    <title>${escapeHtml(invoiceTitle)}</title>
     <style>
-      @page { size: A4; margin: 16mm; }
+      @page { size: A4; margin: 0; }
       * { box-sizing: border-box; }
-      body { margin: 0; color: #15171b; font-family: Arial, sans-serif; font-size: 12px; }
-      .receipt { width: 100%; }
-      .top { display: flex; justify-content: space-between; gap: 24px; padding-bottom: 18px; border-bottom: 2px solid #15171b; }
-      h1 { margin: 0; font-size: 24px; letter-spacing: -0.4px; }
-      .client { margin-top: 6px; font-size: 14px; font-weight: 700; }
-      .details { margin-top: 4px; color: #60646c; }
-      .period { text-align: right; }
-      .period strong { display: block; margin-top: 4px; font-size: 15px; }
-      table { width: 100%; margin-top: 22px; border-collapse: collapse; }
-      th { padding: 9px 10px; border-bottom: 1px solid #9da1aa; color: #60646c; font-size: 10px; text-align: left; text-transform: uppercase; }
-      td { padding: 12px 10px; border-bottom: 1px solid #dde0e5; }
+      body { margin: 0; color: #000; background: #fff; font-family: Arial, sans-serif; font-size: 12px; line-height: 1.2; }
+      .sheet { width: 100%; min-height: 297mm; padding: 13mm 12mm; }
+      .notice {
+        margin: 0 auto 10px;
+        max-width: 930px;
+        border: 1.5px solid #000;
+        padding: 4px 10px;
+        text-align: center;
+        font-size: 10px;
+        line-height: 1.15;
+      }
+      .payment-title {
+        margin: 0 0 3px;
+        text-align: center;
+        font-size: 15px;
+        font-weight: 800;
+      }
+      .payment-box {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+        margin: 0 auto 28px;
+        max-width: 930px;
+        border: 1.5px solid #000;
+        padding: 22px 70px 20px;
+      }
+      .payment-line { display: grid; grid-template-columns: 86px 1fr; gap: 10px; align-items: center; margin-bottom: 8px; }
+      .payment-label { font-size: 11px; }
+      .payment-value { min-height: 19px; border-bottom: 1.5px solid #000; padding: 2px 4px 3px; font-weight: 800; }
+      .payment-value.boxed { border: 1.5px solid #000; text-align: center; }
+      .payment-value.plain { border-bottom: 0; }
+      .credit-title { margin: 29px 0 3px; text-align: center; font-size: 11px; }
+      h1 {
+        margin: 0 0 7px 4px;
+        padding-bottom: 5px;
+        border-bottom: 2px solid #000;
+        font-size: 21px;
+        line-height: 1.15;
+      }
+      .parties { margin: 13px 4px 24px; }
+      .party-row { display: grid; grid-template-columns: 126px 1fr; gap: 12px; margin-bottom: 9px; }
+      .party-label { text-decoration: underline; }
+      .party-value { font-size: 14px; font-weight: 800; }
+      .party-note { display: block; margin-top: 3px; font-size: 11px; font-weight: 400; }
+      .contract-row { display: grid; grid-template-columns: 86px 1fr; gap: 12px; margin-top: 22px; font-size: 14px; }
+      table.statement-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+      .statement-table th,
+      .statement-table td { border: 1.5px solid #000; padding: 5px 4px; vertical-align: top; }
+      .statement-table th { background: #e9e9e9; text-align: center; font-size: 13px; font-weight: 800; }
+      .statement-table td { font-size: 11px; }
+      .col-number { width: 42px; text-align: center; }
+      .col-id { width: 82px; text-align: center; }
+      .col-date { width: 82px; text-align: center; white-space: nowrap; }
+      .col-car { width: auto; }
+      .col-money { width: 118px; }
       .money { text-align: right; white-space: nowrap; }
-      .paid { color: #087f5b; }
-      .left { color: #c92a2a; }
-      tfoot td { padding-top: 14px; border-top: 2px solid #15171b; border-bottom: 0; font-size: 13px; font-weight: 800; }
-      .generated { margin-top: 28px; color: #777b83; font-size: 10px; }
+      .totals {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 250px;
+        gap: 24px;
+        margin-top: 10px;
+        align-items: start;
+      }
+      .totals-table { width: 100%; border-collapse: collapse; font-size: 14px; font-weight: 800; }
+      .totals-table td { padding: 2px 4px; }
+      .totals-table td:first-child { text-align: right; }
+      .totals-table td:last-child { text-align: right; white-space: nowrap; }
+      .amount-text { margin: 18px 4px 0; font-size: 12px; }
+      .amount-text strong { display: block; margin-top: 4px; font-size: 14px; }
+      .footer-line { margin: 14px 4px 0; border-top: 2px solid #000; }
+      .signature {
+        display: grid;
+        grid-template-columns: 220px 1fr;
+        gap: 240px;
+        margin: 18px 28px 0;
+        font-size: 14px;
+        font-weight: 800;
+      }
+      .signature-line { border-bottom: 1.5px solid #000; height: 18px; }
+      .signature-stamp { display: block; width: 160px; max-height: 90px; object-fit: contain; margin-top: 4px; }
       @media print { body { print-color-adjust: exact; -webkit-print-color-adjust: exact; } }
     </style>
   </head>
   <body>
-    <main class="receipt">
-      <div class="top">
-        <div>
-          <h1>Сверка с клиентом</h1>
-          <div class="client">${escapeHtml(client?.name || 'Клиент')}</div>
-          ${details ? `<div class="details">${details}</div>` : ''}
-        </div>
-        <div class="period">Период<strong>${escapeHtml(period.label)}</strong></div>
+    <main class="sheet">
+      <div class="notice">
+        Увага! Оплата цього рахунку означає погодження з умовами поставки товарів. Повідомлення про оплату є обов'язковим, в іншому випадку не гарантується наявність товарів на складі. Товар відпускається за фактом надходження коштів на р/р Постачальника, самовивозом, за наявності довіреності та паспорта.
       </div>
-      <table>
+
+      <div class="payment-title">Зразок заповнення платіжного доручення</div>
+      <section class="payment-box">
+        <div>
+          <div class="payment-line">
+            <div class="payment-label">Отримувач</div>
+            <div class="payment-value plain">${escapeHtml(CLIENT_STATEMENT_COMPANY.name)}</div>
+          </div>
+          <div class="payment-line">
+            <div class="payment-label">Код</div>
+            <div class="payment-value boxed">${escapeHtml(CLIENT_STATEMENT_COMPANY.taxId)}</div>
+          </div>
+          <div class="payment-line">
+            <div class="payment-label">Банк отримувача</div>
+            <div class="payment-value">${escapeHtml(CLIENT_STATEMENT_COMPANY.bank)}</div>
+          </div>
+        </div>
+        <div>
+          <div class="credit-title">КРЕДИТ рах. №</div>
+          <div class="payment-line">
+            <div class="payment-label">IBAN</div>
+            <div class="payment-value boxed">${escapeHtml(CLIENT_STATEMENT_COMPANY.iban)}</div>
+          </div>
+        </div>
+      </section>
+
+      <h1>${escapeHtml(invoiceTitle)}</h1>
+
+      <section class="parties">
+        <div class="party-row">
+          <div class="party-label">Постачальник:</div>
+          <div class="party-value">
+            ${escapeHtml(CLIENT_STATEMENT_COMPANY.name)}
+            <span class="party-note">РНОКПП: ${escapeHtml(CLIENT_STATEMENT_COMPANY.taxId)}, IBAN: ${escapeHtml(CLIENT_STATEMENT_COMPANY.iban)}, банк: ${escapeHtml(CLIENT_STATEMENT_COMPANY.bank)}</span>
+          </div>
+        </div>
+        <div class="party-row">
+          <div class="party-label">Покупець:</div>
+          <div class="party-value">
+            ${escapeHtml(client?.name || 'Клієнт')}
+            ${clientDetails ? `<span class="party-note">${clientDetails}</span>` : ''}
+          </div>
+        </div>
+      </section>
+
+      <table class="statement-table">
+        <colgroup>
+          <col style="width:42px;">
+          <col style="width:82px;">
+          <col style="width:82px;">
+          <col>
+          <col style="width:118px;">
+          <col style="width:118px;">
+          <col style="width:118px;">
+        </colgroup>
         <thead>
           <tr>
-            <th>ID заказа</th>
+            <th class="col-number">№</th>
+            <th class="col-id">ID замовлення</th>
             <th>Дата</th>
-            <th>Автомобиль</th>
-            <th class="money">Общая сумма к оплате</th>
-            <th class="money">Оплаченная сумма</th>
-            <th class="money">Остаток к оплате</th>
+            <th class="col-car">Автомобіль</th>
+            <th class="col-money">Загальна сума до сплати</th>
+            <th class="col-money">Сплачена сума</th>
+            <th class="col-money">Залишок до сплати</th>
           </tr>
         </thead>
         <tbody>${bodyRows}</tbody>
-        <tfoot>
-          <tr>
-            <td colspan="3">Итого</td>
-            <td class="money">${escapeHtml(formatClientStatementMoney(totals.total))}</td>
-            <td class="money paid">${escapeHtml(formatClientStatementMoney(totals.paid))}</td>
-            <td class="money left">${escapeHtml(formatClientStatementMoney(totals.left))}</td>
-          </tr>
-        </tfoot>
       </table>
-      <div class="generated">Сформировано: ${escapeHtml(new Date().toLocaleString('ru-RU'))}</div>
+
+      <section class="totals">
+        <div></div>
+        <table class="totals-table">
+          <tr>
+            <td>Разом:</td>
+            <td>${escapeHtml(formatClientStatementMoney(totals.total))}</td>
+          </tr>
+          <tr>
+            <td>Сплачено:</td>
+            <td>${escapeHtml(formatClientStatementMoney(totals.paid))}</td>
+          </tr>
+          <tr>
+            <td>Залишок:</td>
+            <td>${escapeHtml(formatClientStatementMoney(totals.left))}</td>
+          </tr>
+        </table>
+      </section>
+
+      <section class="amount-text">
+        Всього ${rows.length} ${rowsWord}, на суму ${escapeHtml(formatClientStatementMoney(totals.total))}.
+        <strong>Залишок до сплати: ${escapeHtml(totalLeftWords.charAt(0).toUpperCase() + totalLeftWords.slice(1))}</strong>
+      </section>
+
+      <div class="footer-line"></div>
+      <section class="signature">
+        <div></div>
+        <div>
+          Виписав(ла):
+          <div class="signature-line"></div>
+          <img class="signature-stamp" src="images/shtamp.png" alt="">
+        </div>
+      </section>
     </main>
   </body>
   </html>`;
 }
 
+function getClientOrderInvoiceItems(order) {
+  const items = [];
+  const serviceSelections = typeof getOrderServiceSelections === 'function'
+    ? getOrderServiceSelections(order?.serviceType)
+    : (typeof parseOrderServiceSelections === 'function' ? parseOrderServiceSelections(order?.serviceType) : []);
+  const serviceNames = (serviceSelections || [])
+    .map(item => {
+      if (typeof formatOrderServiceLabel === 'function') return formatOrderServiceLabel(item.name, item.qty);
+      const qty = Math.max(1, Number(item?.qty) || 1);
+      return qty > 1 ? `${item.name} ×${qty}` : item.name;
+    })
+    .filter(Boolean);
+  const workAmount = Number(order?.total) || 0;
+  const glassAmount = Number(order?.income) || 0;
+  const deliveryAmount = Number(order?.delivery) || 0;
+
+  if (workAmount > 0) {
+    items.push({
+      title: serviceNames.length ? serviceNames.join(', ') : `Роботи за замовленням ${formatClientStatementOrderId(order?.id)}`,
+      qty: 1,
+      unit: 'посл.',
+      price: workAmount,
+      sum: workAmount,
+    });
+  }
+  if (glassAmount > 0) {
+    const glassParts = ['Скло автомобільне'];
+    if (order?.car) glassParts.push(order.car);
+    if (order?.code) glassParts.push(order.code);
+    items.push({
+      title: glassParts.join(' '),
+      qty: 1,
+      unit: 'шт',
+      price: glassAmount,
+      sum: glassAmount,
+    });
+  }
+  if (deliveryAmount > 0) {
+    items.push({
+      title: 'Доставка',
+      qty: 1,
+      unit: 'посл.',
+      price: deliveryAmount,
+      sum: deliveryAmount,
+    });
+  }
+  if (!items.length) {
+    const total = getOrderClientTotalAmount(order);
+    items.push({
+      title: `Послуги за замовленням ${formatClientStatementOrderId(order?.id)}`,
+      qty: 1,
+      unit: 'посл.',
+      price: total,
+      sum: total,
+    });
+  }
+  return items;
+}
+
+function buildClientOrderInvoicePrintHtml(client, order) {
+  const invoiceNumber = formatClientStatementOrderId(order?.id);
+  const invoiceDate = order?.date || getClientStatementDateString();
+  const invoiceTitle = `Рахунок на оплату № ${invoiceNumber} від ${formatClientStatementLongDateUa(invoiceDate)}`;
+  const phone = String(order?.phone || client?.phone || '').trim();
+  const address = String(order?.address || client?.address || '').trim();
+  const clientDetails = [
+    phone ? `тел. ${phone}` : '',
+    address ? `адреса: ${address}` : '',
+  ].filter(Boolean).map(escapeHtml).join(', ');
+  const items = getClientOrderInvoiceItems(order);
+  const total = items.reduce((sum, item) => sum + (Number(item.sum) || 0), 0);
+  const totalWords = formatClientStatementMoneyWordsUa(total);
+  const itemRows = items.map((item, index) => `
+    <tr>
+      <td class="col-number">${index + 1}</td>
+      <td>${escapeHtml(item.title || '—')}</td>
+      <td class="qty">${escapeHtml(String(item.qty || 1))}</td>
+      <td class="unit">${escapeHtml(item.unit || 'посл.')}</td>
+      <td class="money">${escapeHtml(formatClientStatementMoney(item.price))}</td>
+      <td class="money">${escapeHtml(formatClientStatementMoney(item.sum))}</td>
+    </tr>
+  `).join('');
+
+  return `<!doctype html>
+  <html lang="uk">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>${escapeHtml(invoiceTitle)}</title>
+    <style>
+      @page { size: A4; margin: 0; }
+      * { box-sizing: border-box; }
+      body { margin: 0; color: #000; background: #fff; font-family: Arial, sans-serif; font-size: 12px; line-height: 1.2; }
+      .sheet { width: 100%; min-height: 297mm; padding: 13mm 12mm; }
+      .notice {
+        margin: 0 auto 10px;
+        max-width: 930px;
+        border: 1.5px solid #000;
+        padding: 4px 10px;
+        text-align: center;
+        font-size: 10px;
+        line-height: 1.15;
+      }
+      .payment-title { margin: 0 0 3px; text-align: center; font-size: 15px; font-weight: 800; }
+      .payment-box {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+        margin: 0 auto 28px;
+        max-width: 930px;
+        border: 1.5px solid #000;
+        padding: 22px 70px 20px;
+      }
+      .payment-line { display: grid; grid-template-columns: 86px 1fr; gap: 10px; align-items: center; margin-bottom: 8px; }
+      .payment-label { font-size: 11px; }
+      .payment-value { min-height: 19px; border-bottom: 1.5px solid #000; padding: 2px 4px 3px; font-weight: 800; }
+      .payment-value.boxed { border: 1.5px solid #000; text-align: center; }
+      .payment-value.plain { border-bottom: 0; }
+      .credit-title { margin: 29px 0 3px; text-align: center; font-size: 11px; }
+      h1 {
+        margin: 0 0 7px 4px;
+        padding-bottom: 5px;
+        border-bottom: 2px solid #000;
+        font-size: 21px;
+        line-height: 1.15;
+      }
+      .parties { margin: 13px 4px 24px; }
+      .party-row { display: grid; grid-template-columns: 126px 1fr; gap: 12px; margin-bottom: 9px; }
+      .party-label { text-decoration: underline; }
+      .party-value { font-size: 14px; font-weight: 800; }
+      .party-note { display: block; margin-top: 3px; font-size: 11px; font-weight: 400; }
+      table.invoice-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+      .invoice-table th,
+      .invoice-table td { border: 1.5px solid #000; padding: 5px 4px; vertical-align: top; }
+      .invoice-table th { background: #e1e1e1; text-align: center; font-size: 20px; line-height: 1; font-weight: 900; }
+      .invoice-table td { font-size: 12px; }
+      .col-number { width: 5%; text-align: center; }
+      .col-title { width: auto; text-align: left !important; }
+      .col-qty { width: 10%; }
+      .col-unit { width: 21%; }
+      .col-price,
+      .col-sum { width: 13%; }
+      .qty,
+      .unit { text-align: center; white-space: nowrap; }
+      .money { text-align: right; white-space: nowrap; }
+      .totals {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 250px;
+        gap: 24px;
+        margin-top: 10px;
+        align-items: start;
+      }
+      .totals-table { width: 100%; border-collapse: collapse; font-size: 14px; font-weight: 800; }
+      .totals-table td { padding: 2px 4px; }
+      .totals-table td:first-child { text-align: right; }
+      .totals-table td:last-child { text-align: right; white-space: nowrap; }
+      .amount-text { margin: 18px 4px 0; font-size: 12px; }
+      .amount-text strong { display: block; margin-top: 4px; font-size: 14px; }
+      .footer-line { margin: 14px 4px 0; border-top: 2px solid #000; }
+      .signature {
+        display: grid;
+        grid-template-columns: 220px 1fr;
+        gap: 240px;
+        margin: 18px 28px 0;
+        font-size: 14px;
+        font-weight: 800;
+      }
+      .signature-line { border-bottom: 1.5px solid #000; height: 18px; }
+      .signature-stamp { display: block; width: 160px; max-height: 90px; object-fit: contain; margin-top: 4px; }
+      @media print { body { print-color-adjust: exact; -webkit-print-color-adjust: exact; } }
+    </style>
+  </head>
+  <body>
+    <main class="sheet">
+      <div class="notice">
+        Увага! Оплата цього рахунку означає погодження з умовами поставки товарів. Повідомлення про оплату є обов'язковим, в іншому випадку не гарантується наявність товарів на складі. Товар відпускається за фактом надходження коштів на р/р Постачальника, самовивозом, за наявності довіреності та паспорта.
+      </div>
+
+      <div class="payment-title">Зразок заповнення платіжного доручення</div>
+      <section class="payment-box">
+        <div>
+          <div class="payment-line">
+            <div class="payment-label">Отримувач</div>
+            <div class="payment-value plain">${escapeHtml(CLIENT_STATEMENT_COMPANY.name)}</div>
+          </div>
+          <div class="payment-line">
+            <div class="payment-label">Код</div>
+            <div class="payment-value boxed">${escapeHtml(CLIENT_STATEMENT_COMPANY.taxId)}</div>
+          </div>
+          <div class="payment-line">
+            <div class="payment-label">Банк отримувача</div>
+            <div class="payment-value">${escapeHtml(CLIENT_STATEMENT_COMPANY.bank)}</div>
+          </div>
+        </div>
+        <div>
+          <div class="credit-title">КРЕДИТ рах. №</div>
+          <div class="payment-line">
+            <div class="payment-label">IBAN</div>
+            <div class="payment-value boxed">${escapeHtml(CLIENT_STATEMENT_COMPANY.iban)}</div>
+          </div>
+        </div>
+      </section>
+
+      <h1>${escapeHtml(invoiceTitle)}</h1>
+
+      <section class="parties">
+        <div class="party-row">
+          <div class="party-label">Постачальник:</div>
+          <div class="party-value">
+            ${escapeHtml(CLIENT_STATEMENT_COMPANY.name)}
+            <span class="party-note">РНОКПП: ${escapeHtml(CLIENT_STATEMENT_COMPANY.taxId)}, IBAN: ${escapeHtml(CLIENT_STATEMENT_COMPANY.iban)}, банк: ${escapeHtml(CLIENT_STATEMENT_COMPANY.bank)}</span>
+          </div>
+        </div>
+        <div class="party-row">
+          <div class="party-label">Покупець:</div>
+          <div class="party-value">
+            ${escapeHtml(client?.name || order?.client || 'Клієнт')}
+            ${clientDetails ? `<span class="party-note">${clientDetails}</span>` : ''}
+          </div>
+        </div>
+      </section>
+
+      <table class="invoice-table">
+        <colgroup>
+          <col style="width:5%;">
+          <col>
+          <col style="width:10%;">
+          <col style="width:21%;">
+          <col style="width:13%;">
+          <col style="width:13%;">
+        </colgroup>
+        <thead>
+          <tr>
+            <th class="col-number">№</th>
+            <th class="col-title">Товари (роботи, послуги)</th>
+            <th class="col-qty">Кіл-сть</th>
+            <th class="col-unit">Од.</th>
+            <th class="col-price">Ціна</th>
+            <th class="col-sum">Сума</th>
+          </tr>
+        </thead>
+        <tbody>${itemRows}</tbody>
+      </table>
+
+      <section class="totals">
+        <div></div>
+        <table class="totals-table">
+          <tr>
+            <td>Разом:</td>
+            <td>${escapeHtml(formatClientStatementMoney(total))}</td>
+          </tr>
+        </table>
+      </section>
+
+      <section class="amount-text">
+        Всього найменувань ${items.length}, на суму ${escapeHtml(formatClientStatementMoney(total))}.
+        <strong>${escapeHtml(totalWords.charAt(0).toUpperCase() + totalWords.slice(1))}</strong>
+      </section>
+
+      <div class="footer-line"></div>
+      <section class="signature">
+        <div></div>
+        <div>
+          Виписав(ла):
+          <div class="signature-line"></div>
+          <img class="signature-stamp" src="images/shtamp.png" alt="">
+        </div>
+      </section>
+    </main>
+  </body>
+  </html>`;
+}
+
+function printClientHtmlDocument(html) {
+  const existingFrame = document.getElementById('client-statement-print-frame');
+  if (existingFrame) existingFrame.remove();
+
+  const printFrame = document.createElement('iframe');
+  printFrame.id = 'client-statement-print-frame';
+  printFrame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0;pointer-events:none;';
+  document.body.appendChild(printFrame);
+
+  const printDocument = printFrame.contentWindow?.document;
+  if (!printDocument) {
+    printFrame.remove();
+    showToast('Не удалось открыть печать', 'error');
+    return false;
+  }
+  printDocument.open();
+  printDocument.write(html);
+  printDocument.close();
+  setTimeout(() => {
+    try {
+      printFrame.contentWindow?.focus();
+      printFrame.contentWindow?.print();
+    } finally {
+      setTimeout(() => printFrame.remove(), 1200);
+    }
+  }, 180);
+  return true;
+}
+
 function printClientStatement() {
-  if (currentRole !== 'owner') return;
+  if (!canPrintClientStatement()) return;
   const client = getClientStatementClient();
   const period = getClientStatementPeriod();
   if (!client) return showToast('Клиент не найден', 'error');
@@ -233,14 +794,18 @@ function printClientStatement() {
   const rows = getClientStatementRows(client, period);
   if (!rows.length) return showToast('За выбранный период нет завершённых заказов', 'error');
 
-  const printWindow = window.open('', '_blank', 'width=980,height=760');
-  if (!printWindow) return showToast('Браузер заблокировал окно печати', 'error');
-  printWindow.document.open();
-  printWindow.document.write(buildClientStatementPrintHtml(client, period, rows));
-  printWindow.document.close();
-  printWindow.focus();
+  if (!printClientHtmlDocument(buildClientStatementPrintHtml(client, period, rows))) return;
   closeClientStatementModal();
-  setTimeout(() => printWindow.print(), 180);
+}
+
+function printClientOrderInvoice(orderId) {
+  if (!canPrintClientStatement()) return;
+  const order = (orders || []).find(item => String(item.id) === String(orderId));
+  if (!order) return showToast('Заказ не найден', 'error');
+  const decoded = decodeURIComponent(currentClientDetailKey || '');
+  const client = getClients().find(item => (item.phone || item.name) === decoded)
+    || { name: order.client || '', phone: order.phone || '', address: order.address || '', orders: [order] };
+  printClientHtmlDocument(buildClientOrderInvoicePrintHtml(client, order));
 }
 
 function buildClientDebtCopyText(client) {
@@ -313,7 +878,7 @@ function renderClients() {
   }
 
   container.innerHTML = list.map(c => `
-    <div class="client-card" onclick="openClientDetail('${encodeURIComponent(c.phone || c.name)}')">
+    <div class="client-card" onclick="openClientDetail('${escapeAttr(encodeURIComponent(c.phone || c.name))}')">
       <div class="client-info">
         <div class="client-name">${c.name}</div>
         <div class="client-phone">${c.phone || '—'}</div>
@@ -368,8 +933,9 @@ function openClientDetail(key) {
             <div class="detail-subtitle">${c.phone || '—'}${c.address ? ' · ' + c.address : ''}</div>
           </div>
         <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;">
-          ${currentRole === 'owner' ? `<button class="btn-secondary" onclick="event.stopPropagation(); openClientStatementModal('${encodeURIComponent(c.phone || c.name)}')">${icon('printer')} Сверка</button>` : ''}
-          ${debtOrders.length ? `<button class="btn-secondary" onclick="event.stopPropagation(); copyClientDebtSummary('${encodeURIComponent(c.phone || c.name)}')">${icon('copy')} Скопировать</button>` : ''}
+          ${currentRole === 'owner' || currentRole === 'manager' ? `<button class="btn-secondary" onclick="event.stopPropagation(); openClientNameEditModal('${escapeAttr(encodeURIComponent(c.phone || c.name))}')">${icon('pencil')} Имя</button>` : ''}
+          ${canPrintClientStatement() ? `<button class="btn-secondary" onclick="event.stopPropagation(); openClientStatementModal('${escapeAttr(encodeURIComponent(c.phone || c.name))}')">${icon('printer')} Сверка</button>` : ''}
+          ${debtOrders.length ? `<button class="btn-secondary" onclick="event.stopPropagation(); copyClientDebtSummary('${escapeAttr(encodeURIComponent(c.phone || c.name))}')">${icon('copy')} Скопировать</button>` : ''}
         ${clientTotalsHtml}
         </div>
       </div>
@@ -400,7 +966,7 @@ function renderClientOrderHistoryCard(o, compact = false) {
   const paid = getOrderClientPaidAmount(o);
   const left = getOrderDebtLeft(o);
   return `
-    <div class="order-card ${getOrderCardStateClass(o)}" onclick="openOrderDetail('${o.id}')">
+    <div class="order-card ${getOrderCardStateClass(o)}" onclick="openOrderDetail('${escapeAttr(o.id)}')">
       <div class="order-card-top">
         <div class="order-card-left">
           <div class="order-card-status-row">
@@ -410,6 +976,11 @@ function renderClientOrderHistoryCard(o, compact = false) {
           </div>
           <span class="order-name">${o.car || '—'}</span>
         </div>
+        ${canPrintClientStatement() ? `
+          <button class="btn-secondary" style="padding:7px 10px;min-height:0;" onclick="event.stopPropagation(); printClientOrderInvoice('${escapeAttr(o.id)}')">
+            ${icon('printer')} Сверка
+          </button>
+        ` : ''}
       </div>
       <div class="order-card-meta">
         <span class="order-meta-item">${icon('calendar')} ${formatDate(o.date)}</span>
@@ -445,15 +1016,28 @@ async function loadManualClients() {
 }
 
 function openClientModal() {
+  editingClientKey = null;
+  editingClientOriginal = null;
+  const title = document.getElementById('client-modal-title');
+  if (title) title.textContent = 'Новый клиент';
   document.getElementById('c-name').value = '';
   document.getElementById('c-phone').value = '';
   document.getElementById('c-address').value = '';
+  ['c-phone', 'c-address'].forEach(id => {
+    const input = document.getElementById(id);
+    if (!input) return;
+    input.disabled = false;
+    const group = input.closest('.form-group');
+    if (group) group.style.display = '';
+  });
   document.getElementById('client-modal').classList.add('active');
   setTimeout(() => document.getElementById('c-name').focus(), 100);
 }
 
 function closeClientModal() {
   document.getElementById('client-modal').classList.remove('active');
+  editingClientKey = null;
+  editingClientOriginal = null;
 }
 
 async function saveClient() {
@@ -465,6 +1049,10 @@ async function saveClient() {
     alert('Введите имя клиента');
     document.getElementById('c-name').focus();
     return;
+  }
+
+  if (editingClientOriginal) {
+    return saveClientNameEdit(name);
   }
 
   // Проверяем дубли среди существующих клиентов из заказов
@@ -488,5 +1076,102 @@ async function saveClient() {
     showToast('Ошибка: ' + e.message, 'error');
   } finally {
     if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 Сохранить'; }
+  }
+}
+
+function openClientNameEditModal(key) {
+  if (currentRole !== 'owner' && currentRole !== 'manager') return;
+  const decoded = decodeURIComponent(key || currentClientDetailKey || '');
+  const client = getClients().find(item => (item.phone || item.name) === decoded);
+  if (!client) return showToast('Клиент не найден', 'error');
+
+  editingClientKey = key || encodeURIComponent(client.phone || client.name);
+  editingClientOriginal = {
+    id: client.id || '',
+    name: client.name || '',
+    phone: client.phone || '',
+    address: client.address || '',
+    key: client.phone || client.name || '',
+    orderIds: (client.orders || []).map(order => order.id).filter(Boolean),
+  };
+
+  const title = document.getElementById('client-modal-title');
+  if (title) title.textContent = 'Редактировать имя';
+  document.getElementById('c-name').value = client.name || '';
+  document.getElementById('c-phone').value = client.phone || '';
+  document.getElementById('c-address').value = client.address || '';
+  ['c-phone', 'c-address'].forEach(id => {
+    const input = document.getElementById(id);
+    if (!input) return;
+    input.disabled = true;
+    const group = input.closest('.form-group');
+    if (group) group.style.display = 'none';
+  });
+  document.getElementById('client-modal').classList.add('active');
+  setTimeout(() => document.getElementById('c-name').focus(), 100);
+  initIcons();
+}
+
+async function saveClientNameEdit(name) {
+  const original = editingClientOriginal;
+  if (!original) return;
+  if (name === original.name) {
+    closeClientModal();
+    return;
+  }
+
+  const nextKey = original.phone || name;
+  const duplicate = getClients().find(client => {
+    const key = client.phone || client.name;
+    return key === nextKey && key !== original.key;
+  });
+  if (duplicate) {
+    showToast('Клиент с таким именем уже существует', 'error');
+    return;
+  }
+
+  const saveBtn = document.getElementById('client-save-btn');
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '⏳'; }
+
+  try {
+    const orderIds = original.orderIds || [];
+    const savedOrders = await Promise.all(orderIds.map(id => sbPatchOrderFields(id, { client: name })));
+    savedOrders.forEach(savedOrder => {
+      if (!savedOrder?.id) return;
+      const idx = orders.findIndex(order => order.id === savedOrder.id);
+      if (idx !== -1) orders[idx] = savedOrder;
+    });
+
+    if (original.id || original.phone || !orderIds.length) {
+      const savedClient = await sbUpsertManualClient({
+        id: original.id || null,
+        name,
+        phone: original.phone,
+        address: original.address,
+      });
+      const manualIdx = manualClients.findIndex(client =>
+        (original.id && client.id === original.id) ||
+        ((client.phone || client.name) === original.key)
+      );
+      if (manualIdx !== -1) {
+        manualClients[manualIdx] = { ...manualClients[manualIdx], ...savedClient, name };
+      } else if (savedClient?.id || !orderIds.length) {
+        manualClients.push(savedClient || { name, phone: original.phone, address: original.address, orders: [] });
+      }
+    }
+
+    const newKey = encodeURIComponent(original.phone || name);
+    closeClientModal();
+    renderClients();
+    openClientDetail(newKey);
+    showToast('Имя клиента обновлено ✓');
+  } catch (e) {
+    showToast('Ошибка переименования: ' + e.message, 'error');
+  } finally {
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.innerHTML = '<i data-lucide="save" style="width:14px;height:14px;"></i> Сохранить';
+      initIcons();
+    }
   }
 }

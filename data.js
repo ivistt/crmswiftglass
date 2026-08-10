@@ -35,6 +35,7 @@ const WORKER_PERMISSION_PRESETS = {
     action_panel_view: true,
     action_panel_reminders: true,
     action_panel_client_data: true,
+    client_statement_print: true,
   },
   manager: {
     orders_view_all: true,
@@ -65,6 +66,7 @@ const WORKER_PERMISSION_PRESETS = {
     action_panel_view: false,
     action_panel_reminders: false,
     action_panel_client_data: false,
+    client_statement_print: false,
   },
   senior: {
     orders_view_all: false,
@@ -95,6 +97,7 @@ const WORKER_PERMISSION_PRESETS = {
     action_panel_view: false,
     action_panel_reminders: false,
     action_panel_client_data: false,
+    client_statement_print: false,
   },
   junior: {
     orders_view_all: false,
@@ -125,6 +128,7 @@ const WORKER_PERMISSION_PRESETS = {
     action_panel_view: false,
     action_panel_reminders: false,
     action_panel_client_data: false,
+    client_statement_print: false,
   },
   extra: {
     orders_view_all: false,
@@ -155,6 +159,7 @@ const WORKER_PERMISSION_PRESETS = {
     action_panel_view: false,
     action_panel_reminders: false,
     action_panel_client_data: false,
+    client_statement_print: false,
   },
 };
 
@@ -1939,11 +1944,13 @@ function rowToManualClient(r) {
 }
 
 function manualClientToRow(c) {
-  return {
+  const row = {
     name: c.name || '',
     phone: c.phone || null,
     address: c.address || null,
   };
+  if (c.id) row.id = c.id;
+  return row;
 }
 
 // ── WORKER FORMULA API ───────────────────────────────────────
@@ -2945,6 +2952,7 @@ function canEditPrice(order) {
   return false;
 }
 function canViewClients()  { return currentRole === 'owner' || currentUserHasPermission('clients_view', currentRole === 'manager'); }
+function canPrintClientStatement() { return currentRole === 'owner' || currentUserHasPermission('client_statement_print'); }
 function canViewWorkers()  { return currentRole === 'owner' || currentUserHasPermission('workers_view'); }
 function canViewCarDirectory() { return currentRole === 'owner' || currentUserHasPermission('car_directory_view'); }
 function canDeleteOrder()  { return currentRole === 'owner' || currentUserHasPermission('orders_delete', false); }

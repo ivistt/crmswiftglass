@@ -31,6 +31,7 @@ const WORKER_PERMISSION_DEFINITIONS = [
   { key: 'action_panel_view', label: 'Показать панель-островок' },
   { key: 'action_panel_reminders', label: 'Островок: напоминания' },
   { key: 'action_panel_client_data', label: 'Островок: данные для клиента' },
+  { key: 'client_statement_print', label: 'Может видеть сверку' },
 ];
 
 const WORKER_ROLE_PERMISSION_PRESETS = {
@@ -62,6 +63,7 @@ const WORKER_ROLE_PERMISSION_PRESETS = {
     action_panel_view: true,
     action_panel_reminders: true,
     action_panel_client_data: true,
+    client_statement_print: true,
   },
   manager: {
     orders_view_all: true,
@@ -91,6 +93,7 @@ const WORKER_ROLE_PERMISSION_PRESETS = {
     action_panel_view: false,
     action_panel_reminders: false,
     action_panel_client_data: false,
+    client_statement_print: false,
   },
   senior: {
     orders_view_all: false,
@@ -120,6 +123,7 @@ const WORKER_ROLE_PERMISSION_PRESETS = {
     action_panel_view: false,
     action_panel_reminders: false,
     action_panel_client_data: false,
+    client_statement_print: false,
   },
   junior: {
     orders_view_all: false,
@@ -149,6 +153,7 @@ const WORKER_ROLE_PERMISSION_PRESETS = {
     action_panel_view: false,
     action_panel_reminders: false,
     action_panel_client_data: false,
+    client_statement_print: false,
   },
   extra: {
     orders_view_all: false,
@@ -178,6 +183,7 @@ const WORKER_ROLE_PERMISSION_PRESETS = {
     action_panel_view: false,
     action_panel_reminders: false,
     action_panel_client_data: false,
+    client_statement_print: false,
   },
 };
 

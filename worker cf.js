@@ -477,9 +477,12 @@ export default {
           return Response.json({ error: 'name or phone required' }, { status: 400, headers: cors });
         }
 
-        const keyFilter = body.phone
-          ? `phone=eq.${encodeURIComponent(body.phone)}`
-          : `name=eq.${encodeURIComponent(body.name)}`;
+        const id = String(body.id || '').trim();
+        const keyFilter = id
+          ? `id=eq.${encodeURIComponent(id)}`
+          : (body.phone
+            ? `phone=eq.${encodeURIComponent(body.phone)}`
+            : `name=eq.${encodeURIComponent(body.name)}`);
         const existingRes = await fetch(`${sb}/rest/v1/clients?${keyFilter}&limit=1`, { headers: sbHeaders });
         const existingRows = await existingRes.json().catch(() => []);
         const payload = { name: body.name || '', phone: body.phone || null, address: body.address || null };
@@ -2578,6 +2581,7 @@ const WORKER_PERMISSION_PRESETS = {
     special_service_tatu: true,
     special_service_toning: true,
     own_warehouse_view: true,
+    client_statement_print: true,
   },
   manager: {
     orders_view_all: true,
@@ -2605,6 +2609,7 @@ const WORKER_PERMISSION_PRESETS = {
     special_service_tatu: false,
     special_service_toning: false,
     own_warehouse_view: false,
+    client_statement_print: false,
   },
   senior: {
     orders_view_all: false,
@@ -2632,6 +2637,7 @@ const WORKER_PERMISSION_PRESETS = {
     special_service_tatu: false,
     special_service_toning: false,
     own_warehouse_view: false,
+    client_statement_print: false,
   },
   junior: {
     orders_view_all: false,
@@ -2659,6 +2665,7 @@ const WORKER_PERMISSION_PRESETS = {
     special_service_tatu: false,
     special_service_toning: false,
     own_warehouse_view: false,
+    client_statement_print: false,
   },
   extra: {
     orders_view_all: false,
@@ -2686,6 +2693,7 @@ const WORKER_PERMISSION_PRESETS = {
     special_service_tatu: false,
     special_service_toning: false,
     own_warehouse_view: false,
+    client_statement_print: false,
   },
 };
 
