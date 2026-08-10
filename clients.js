@@ -368,7 +368,7 @@ function buildClientStatementPrintHtml(client, period, rows) {
         font-weight: 800;
       }
       .signature-line { border-bottom: 1.5px solid #000; height: 18px; }
-      .signature-stamp { display: block; width: 160px; max-height: 90px; object-fit: contain; margin-top: 4px; }
+      .signature-stamp { display: block; width: 160px; max-height: 90px; object-fit: contain; margin-top: -16px; }
       @media print { body { print-color-adjust: exact; -webkit-print-color-adjust: exact; } }
     </style>
   </head>
@@ -651,7 +651,7 @@ function buildClientOrderInvoicePrintHtml(client, order) {
         font-weight: 800;
       }
       .signature-line { border-bottom: 1.5px solid #000; height: 18px; }
-      .signature-stamp { display: block; width: 160px; max-height: 90px; object-fit: contain; margin-top: 4px; }
+      .signature-stamp { display: block; width: 160px; max-height: 90px; object-fit: contain; margin-top: -16px; }
       @media print { body { print-color-adjust: exact; -webkit-print-color-adjust: exact; } }
     </style>
   </head>
