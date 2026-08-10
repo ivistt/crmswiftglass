@@ -564,7 +564,6 @@ function getClientOrderInvoiceItems(order) {
     const glassParts = ['Скло автомобільне'];
     if (order?.car) glassParts.push(order.car);
     if (order?.licensePlate || order?.license_plate) glassParts.push(`держ. номер ${order.licensePlate || order.license_plate}`);
-    if (order?.code) glassParts.push(order.code);
     items.push({
       title: glassParts.join(' '),
       qty: 1,
