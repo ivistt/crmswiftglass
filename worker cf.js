@@ -1500,30 +1500,17 @@ export default {
         }
       }
 
-      const sendCashPatch = async payload => {
-        const patchRes = await fetch(`${sb}/rest/v1/cash_log?id=eq.${encodeURIComponent(id)}`, {
-          method: 'PATCH',
-          headers: sbHeaders,
-          body: JSON.stringify(payload),
-        });
-        const patchData = await patchRes.json().catch(() => []);
-        return { patchRes, patchData };
-      };
-      let effectivePatch = patch;
-      let { patchRes: res, patchData: data } = await sendCashPatch(effectivePatch);
-      if (!res.ok && Object.prototype.hasOwnProperty.call(patch, 'approval_at')) {
-        const message = String(data?.message || data?.error || '').toLowerCase();
-        if (message.includes('approval_at') || message.includes('schema cache')) {
-          effectivePatch = { ...patch };
-          delete effectivePatch.approval_at;
-          ({ patchRes: res, patchData: data } = await sendCashPatch(effectivePatch));
-        }
-      }
+      const res = await fetch(`${sb}/rest/v1/cash_log?id=eq.${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: sbHeaders,
+        body: JSON.stringify(patch),
+      });
+      const data = await res.json().catch(() => []);
       if (!res.ok) {
         return Response.json({ error: Array.isArray(data) ? 'Failed to update cash entry' : (data?.message || data?.error || 'Failed to update cash entry') }, { status: res.status || 400, headers: cors });
       }
       if (Object.prototype.hasOwnProperty.call(patch, 'fop_confirmed')) {
-        const updatedCashRow = Array.isArray(data) && data[0] ? data[0] : { ...cashRow, ...effectivePatch };
+        const updatedCashRow = Array.isArray(data) && data[0] ? data[0] : { ...cashRow, ...patch };
         try {
           await syncClientPaymentConfirmationFromCashEntry(
             updatedCashRow,

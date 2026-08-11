@@ -3605,14 +3605,26 @@ function renderOwnerCashEntryTags(entry, options = {}) {
 async function confirmOwnerCashEntry(id) {
   if (currentRole !== 'owner' || !id) return;
   try {
+    const confirmationStamp = new Date().toISOString();
     const updated = await sbUpdateCashEntry(id, { fop_confirmed: true });
+    const confirmedEntryPatch = {
+      ...updated,
+      fop_confirmed: true,
+      approval_status: 'confirmed',
+      approval_at: updated?.approval_at || confirmationStamp,
+    };
     try {
       await refreshOwnerCashState();
     } catch (refreshError) {
       console.warn('Failed to refresh cash log after confirmation:', refreshError);
       if (Array.isArray(window.allCashLog)) {
         window.allCashLog = window.allCashLog.map(entry =>
-          entry.id === id ? { ...entry, ...updated, fop_confirmed: true, approval_status: 'confirmed' } : entry
+          entry.id === id ? { ...entry, ...confirmedEntryPatch } : entry
+        );
+      }
+      if (Array.isArray(window.ownerCashRecentLog)) {
+        window.ownerCashRecentLog = window.ownerCashRecentLog.map(entry =>
+          entry.id === id ? { ...entry, ...confirmedEntryPatch } : entry
         );
       }
     }

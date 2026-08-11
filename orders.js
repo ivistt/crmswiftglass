@@ -3061,6 +3061,7 @@ async function confirmOrderPaymentFromModal(paymentType, index, button = null) {
       ...updatedEntry,
       fop_confirmed: true,
       approval_status: 'confirmed',
+      approval_at: updatedEntry?.approval_at || confirmationStamp,
     });
 
     let refreshedOrder = null;
