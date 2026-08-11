@@ -51,6 +51,7 @@ function getClientStatementRows(client, period) {
         date: order.date || '',
         car: formatClientOrderCarLine(order, 'держ. номер'),
         fopTitle: getClientOrderGlassTitle(order),
+        note: getClientOrderPrintNote(order),
         total,
         paid,
         left: Math.max(0, total - paid),
@@ -194,6 +195,22 @@ function buildClientInvoiceBuyerHtml(client, order = null, details = '') {
   `;
 }
 
+function getClientOrderPrintNote(order) {
+  return String(order?.notes || order?.note || '').trim();
+}
+
+function formatClientPrintNoteHtml(note) {
+  const text = String(note || '').trim();
+  if (!text) return '';
+  return text.split('\n').map(line => escapeHtml(line.trim())).filter(Boolean).join('<br>');
+}
+
+function buildClientPrintNoteBlock(note, className = 'invoice-note-block') {
+  const noteHtml = formatClientPrintNoteHtml(note);
+  if (!noteHtml) return '';
+  return `<section class="${className}"><strong>Примітка:</strong><div>${noteHtml}</div></section>`;
+}
+
 function getClientStatementNumber(client, period) {
   const raw = String(client?.phone || client?.name || 'client').replace(/\D/g, '').slice(-4);
   const datePart = String(period?.to || period?.from || '').replace(/\D/g, '').slice(2);
@@ -215,6 +232,8 @@ function openClientStatementModal(key) {
   if (toInput) toInput.value = today;
   const fopInput = document.getElementById('client-statement-fop');
   if (fopInput) fopInput.checked = false;
+  const noteInput = document.getElementById('client-statement-note');
+  if (noteInput) noteInput.checked = false;
   const nameEl = document.getElementById('client-statement-client-name');
   if (nameEl) nameEl.textContent = client.name || 'Клиент';
 
@@ -287,6 +306,7 @@ function renderClientStatementPreview() {
 function buildClientStatementPrintHtml(client, period, rows, options = {}) {
   const totals = getClientStatementTotals(rows);
   const isFop = options?.fop === true;
+  const includeNotes = options?.note === true;
   const address = String(client?.address || '').trim();
   const clientDetails = [
     address ? `адреса: ${address}` : '',
@@ -300,7 +320,10 @@ function buildClientStatementPrintHtml(client, period, rows, options = {}) {
       <td class="col-number">${index + 1}</td>
       <td class="col-id">${escapeHtml(row.id || '—')}</td>
       <td class="col-date">${escapeHtml(formatDate(row.date))}</td>
-      <td>${escapeHtml((isFop ? row.fopTitle : row.car) || '—')}</td>
+      <td>
+        ${escapeHtml((isFop ? row.fopTitle : row.car) || '—')}
+        ${includeNotes && row.note ? `<div class="statement-row-note"><strong>Примітка:</strong> ${formatClientPrintNoteHtml(row.note)}</div>` : ''}
+      </td>
       <td class="money">${escapeHtml(formatClientStatementMoney(row.total))}</td>
       <td class="money">${escapeHtml(formatClientStatementMoney(row.paid))}</td>
       <td class="money">${escapeHtml(formatClientStatementMoney(row.left))}</td>
@@ -358,6 +381,8 @@ function buildClientStatementPrintHtml(client, period, rows, options = {}) {
       .totals-table td:last-child { text-align: right; white-space: nowrap; }
       .amount-text { margin: 18px 4px 0; font-size: 12px; }
       .amount-text strong { display: block; margin-top: 4px; font-size: 14px; }
+      .statement-row-note { margin-top: 4px; font-size: 10px; line-height: 1.2; font-weight: 400; }
+      .statement-row-note strong { font-weight: 800; }
       .footer-line { margin: 14px 4px 0; border-top: 2px solid #000; }
       .signature {
         display: grid;
@@ -561,6 +586,7 @@ function buildClientOrderInvoicePrintHtml(client, order, documentType = 'invoice
   const invoiceNumber = formatClientStatementOrderId(order?.id);
   const invoiceDate = order?.date || getClientStatementDateString();
   const isAct = documentType === 'act';
+  const includeNote = options?.note === true;
   const invoiceTitle = isAct
     ? `Акт виконаних робіт № ${invoiceNumber} від ${formatClientStatementLongDateUa(invoiceDate)}`
     : `Рахунок на оплату № ${invoiceNumber} від ${formatClientStatementLongDateUa(invoiceDate)}`;
@@ -571,6 +597,7 @@ function buildClientOrderInvoicePrintHtml(client, order, documentType = 'invoice
   const items = getClientOrderInvoiceItems(order, options);
   const total = items.reduce((sum, item) => sum + (Number(item.sum) || 0), 0);
   const totalWords = formatClientStatementMoneyWordsUa(total);
+  const noteBlockHtml = includeNote ? buildClientPrintNoteBlock(getClientOrderPrintNote(order)) : '';
   const itemRows = items.map((item, index) => `
     <tr>
       <td class="col-number">${index + 1}</td>
@@ -714,6 +741,14 @@ function buildClientOrderInvoicePrintHtml(client, order, documentType = 'invoice
       .totals-table td:last-child { text-align: right; white-space: nowrap; }
       .amount-text { margin: 18px 4px 0; font-size: 12px; }
       .amount-text strong { display: block; margin-top: 4px; font-size: 14px; }
+      .invoice-note-block {
+        margin: 12px 4px 0;
+        padding: 8px 10px;
+        border: 1.5px solid #000;
+        font-size: 12px;
+        line-height: 1.25;
+      }
+      .invoice-note-block strong { display: block; margin-bottom: 4px; font-size: 13px; }
       .footer-line { margin: 14px 4px 0; border-top: 2px solid #000; }
       .signature {
         display: grid;
@@ -827,6 +862,7 @@ ${paymentHeaderHtml}
         <strong>${escapeHtml(totalWords.charAt(0).toUpperCase() + totalWords.slice(1))}</strong>
       </section>
 
+${noteBlockHtml}
       <div class="footer-line"></div>
 ${signatureHtml}
     </main>
@@ -872,15 +908,17 @@ function printClientStatement() {
   const rows = getClientStatementRows(client, period);
   if (!rows.length) return showToast('За выбранный период нет завершённых заказов', 'error');
   const fop = !!document.getElementById('client-statement-fop')?.checked;
+  const note = !!document.getElementById('client-statement-note')?.checked;
 
-  if (!printClientHtmlDocument(buildClientStatementPrintHtml(client, period, rows, { fop }))) return;
+  if (!printClientHtmlDocument(buildClientStatementPrintHtml(client, period, rows, { fop, note }))) return;
   closeClientStatementModal();
 }
 
 function printClientOrderInvoiceFromButton(button, orderId, documentType = 'invoice') {
   const actions = button?.closest?.('[data-client-print-actions]');
   const fop = !!actions?.querySelector?.('[data-client-print-fop]')?.checked;
-  printClientOrderInvoice(orderId, documentType, { fop });
+  const note = !!actions?.querySelector?.('[data-client-print-note]')?.checked;
+  printClientOrderInvoice(orderId, documentType, { fop, note });
 }
 
 function printClientOrderInvoice(orderId, documentType = 'invoice', options = {}) {
@@ -1069,6 +1107,10 @@ function renderClientOrderHistoryCard(o, compact = false) {
             <label class="client-print-fop-toggle" title="Печатать одной строкой стекло на полную сумму">
               <input type="checkbox" data-client-print-fop>
               <span>фоп</span>
+            </label>
+            <label class="client-print-fop-toggle" title="Добавить заметку из заказа">
+              <input type="checkbox" data-client-print-note>
+              <span>заметка</span>
             </label>
             <button class="btn-secondary" style="padding:7px 10px;min-height:0;" onclick="printClientOrderInvoiceFromButton(this, '${escapeAttr(o.id)}', 'invoice')">
               ${icon('printer')} Счет
