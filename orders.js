@@ -2981,8 +2981,20 @@ function formatOrderPaymentConfirmationDateTime(value) {
 function getOrderPaymentConfirmationMeta(payment) {
   const confirmedAt = formatOrderPaymentConfirmationDateTime(payment?.confirmedAt || payment?.confirmed_at || '');
   const confirmedBy = String(payment?.confirmedBy || payment?.confirmed_by || '').trim();
-  if (!confirmedAt && !confirmedBy) return '';
-  return [confirmedAt, confirmedBy].filter(Boolean).join(' · ');
+  if (!confirmedAt) return '';
+  return ['Подтв. ' + confirmedAt, confirmedBy].filter(Boolean).join(' · ');
+}
+
+function ensureOrderPaymentConfirmationMeta(payments = [], index, confirmedAt, confirmedBy) {
+  return (payments || []).map((item, itemIndex) => {
+    if (itemIndex !== index) return item;
+    return {
+      ...item,
+      confirmed: true,
+      confirmedAt: item?.confirmedAt || item?.confirmed_at || confirmedAt,
+      confirmedBy: item?.confirmedBy || item?.confirmed_by || confirmedBy || '',
+    };
+  });
 }
 
 function renderOrderPaymentConfirmation(order, payment, index, paymentType = 'client') {
@@ -3029,6 +3041,8 @@ async function confirmOrderPaymentFromModal(paymentType, index, button = null) {
 
   const sourceKey = getOrderPaymentSourceKeyByIndex(order, payments, index, normalizedType);
   if (!sourceKey) return showToast('Не удалось определить кассовую запись', 'error');
+  const confirmationStamp = new Date().toISOString();
+  const confirmationWorker = currentWorkerName || '';
   const oldButtonText = button?.textContent || 'Подтвердить';
   if (button) {
     button.disabled = true;
@@ -3059,12 +3073,17 @@ async function confirmOrderPaymentFromModal(paymentType, index, button = null) {
     if (refreshedOrder) {
       currentClientPayments = JSON.parse(JSON.stringify(refreshedOrder.clientPayments || []));
       currentSupplierPayments = JSON.parse(JSON.stringify(refreshedOrder.supplierPayments || []));
+      if (normalizedType === 'client') {
+        currentClientPayments = ensureOrderPaymentConfirmationMeta(currentClientPayments, index, confirmationStamp, confirmationWorker);
+      } else {
+        currentSupplierPayments = ensureOrderPaymentConfirmationMeta(currentSupplierPayments, index, confirmationStamp, confirmationWorker);
+      }
     } else {
       payments[index] = {
         ...payment,
         confirmed: true,
-        confirmedAt: new Date().toISOString(),
-        confirmedBy: currentWorkerName || '',
+        confirmedAt: confirmationStamp,
+        confirmedBy: confirmationWorker,
       };
     }
 
