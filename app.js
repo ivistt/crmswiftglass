@@ -3573,12 +3573,27 @@ function renderOwnerEmployeeCurrencyCashHistory(workerKey, logs) {
   `;
 }
 
+function formatCashEntryApprovalDateTime(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 function renderOwnerCashEntryConfirmBadge(entry) {
   if (!isConfirmableCashEntry(entry)) return '';
   const confirmed = getCashEntryApprovalStatus(entry) === 'confirmed';
   const label = confirmed ? 'подтверждено' : 'ожидает подтверждения';
   const color = confirmed ? 'var(--accent)' : 'var(--yellow)';
-  return `<span style="margin-left:6px;color:${color};font-weight:800;">${label}</span>`;
+  const approvedAt = confirmed ? formatCashEntryApprovalDateTime(entry?.approval_at || entry?.approvalAt || '') : '';
+  const timeLabel = approvedAt ? ` · ${approvedAt}` : '';
+  return `<span style="margin-left:6px;color:${color};font-weight:800;">${label}${escapeHtml(timeLabel)}</span>`;
 }
 
 function renderOwnerCashEntryTags(entry, options = {}) {

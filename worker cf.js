@@ -1467,12 +1467,15 @@ export default {
         if (nextApprovalStatus === 'confirmed') {
           patch.approval_by = String(session.workerName || '').trim() || null;
           patch.approval_by_id = sessionWorker?.id || null;
+          patch.approval_at = cashRow.approval_at || new Date().toISOString();
         } else if (nextApprovalStatus === 'pending') {
           patch.approval_by = String(cashRow.cash_owner || cashRow.worker_name || '').trim() || null;
           patch.approval_by_id = cashRow.cash_owner_id || cashRow.worker_id || null;
+          patch.approval_at = null;
         } else {
           patch.approval_by = null;
           patch.approval_by_id = null;
+          patch.approval_at = null;
         }
       }
       if (authedRole === 'owner') {
@@ -1497,17 +1500,30 @@ export default {
         }
       }
 
-      const res = await fetch(`${sb}/rest/v1/cash_log?id=eq.${encodeURIComponent(id)}`, {
-        method: 'PATCH',
-        headers: sbHeaders,
-        body: JSON.stringify(patch),
-      });
-      const data = await res.json().catch(() => []);
+      const sendCashPatch = async payload => {
+        const patchRes = await fetch(`${sb}/rest/v1/cash_log?id=eq.${encodeURIComponent(id)}`, {
+          method: 'PATCH',
+          headers: sbHeaders,
+          body: JSON.stringify(payload),
+        });
+        const patchData = await patchRes.json().catch(() => []);
+        return { patchRes, patchData };
+      };
+      let effectivePatch = patch;
+      let { patchRes: res, patchData: data } = await sendCashPatch(effectivePatch);
+      if (!res.ok && Object.prototype.hasOwnProperty.call(patch, 'approval_at')) {
+        const message = String(data?.message || data?.error || '').toLowerCase();
+        if (message.includes('approval_at') || message.includes('schema cache')) {
+          effectivePatch = { ...patch };
+          delete effectivePatch.approval_at;
+          ({ patchRes: res, patchData: data } = await sendCashPatch(effectivePatch));
+        }
+      }
       if (!res.ok) {
         return Response.json({ error: Array.isArray(data) ? 'Failed to update cash entry' : (data?.message || data?.error || 'Failed to update cash entry') }, { status: res.status || 400, headers: cors });
       }
       if (Object.prototype.hasOwnProperty.call(patch, 'fop_confirmed')) {
-        const updatedCashRow = Array.isArray(data) && data[0] ? data[0] : { ...cashRow, ...patch };
+        const updatedCashRow = Array.isArray(data) && data[0] ? data[0] : { ...cashRow, ...effectivePatch };
         try {
           await syncClientPaymentConfirmationFromCashEntry(
             updatedCashRow,
@@ -3580,6 +3596,7 @@ function normalizeOrderSaveCashEntry(entry) {
     source_key: getCashLedgerSourceKey(entry) || null,
     ledger_status: 'posted',
   };
+  if (entry.approval_at) normalized.approval_at = entry.approval_at;
   return { ...normalized, ...buildStructuredCashFields(normalized) };
 }
 
@@ -3614,9 +3631,11 @@ async function syncClientPaymentConfirmationFromCashEntry(cashRow, confirmed, se
 
   const keyCounts = new Map();
   let matched = false;
-  const changedAt = new Date().toISOString();
+  const changedAt = confirmed
+    ? (cashRow?.approval_at ? String(cashRow.approval_at) : new Date().toISOString())
+    : null;
   const nextPayments = payments.map(payment => {
-    const baseKey = buildOrderPaymentSourceKey(orderId, payment?.method, 'client', payment);
+    const baseKey = buildOrderPaymentSourceKey(orderId, payment?.method, paymentType, payment);
     const count = (keyCounts.get(baseKey) || 0) + 1;
     keyCounts.set(baseKey, count);
     const paymentSourceKey = count === 1 ? baseKey : `${baseKey}|seq:${count}`;
@@ -3625,7 +3644,7 @@ async function syncClientPaymentConfirmationFromCashEntry(cashRow, confirmed, se
     return {
       ...payment,
       confirmed,
-      confirmedAt: confirmed ? changedAt : null,
+      confirmedAt: changedAt,
       confirmedBy: confirmed ? String(session?.workerName || '').trim() : null,
     };
   });
@@ -3993,6 +4012,9 @@ async function syncOrderFopCashEntries(order, sb, sbHeaders, options = {}) {
       entry.approval_status = 'confirmed';
       entry.approval_by = oldEntry.approval_by || entry.approval_by || null;
       entry.approval_by_id = oldEntry.approval_by_id || entry.approval_by_id || null;
+      if (oldEntry.approval_at || entry.approval_at) {
+        entry.approval_at = oldEntry.approval_at || entry.approval_at;
+      }
     }
   });
   await fetch(`${sb}/rest/v1/cash_log?on_conflict=source_key`, {
