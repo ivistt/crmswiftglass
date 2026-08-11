@@ -1188,10 +1188,20 @@ function escapeJsString(value) {
 async function confirmFopCashEntry(id) {
   if (!id) return;
   try {
+    const confirmationStamp = new Date().toISOString();
     const updated = await sbUpdateCashEntry(id, { fop_confirmed: true });
-    workerCashLog = (workerCashLog || []).map(entry => entry.id === id ? { ...entry, ...updated, fop_confirmed: true, approval_status: 'confirmed' } : entry);
+    const confirmedEntryPatch = {
+      ...updated,
+      fop_confirmed: true,
+      approval_status: 'confirmed',
+      approval_at: updated?.approval_at || confirmationStamp,
+    };
+    workerCashLog = (workerCashLog || []).map(entry => entry.id === id ? { ...entry, ...confirmedEntryPatch } : entry);
     if (Array.isArray(window.allCashLog)) {
-      window.allCashLog = window.allCashLog.map(entry => entry.id === id ? { ...entry, ...updated, fop_confirmed: true, approval_status: 'confirmed' } : entry);
+      window.allCashLog = window.allCashLog.map(entry => entry.id === id ? { ...entry, ...confirmedEntryPatch } : entry);
+    }
+    if (Array.isArray(window.ownerCashRecentLog)) {
+      window.ownerCashRecentLog = window.ownerCashRecentLog.map(entry => entry.id === id ? { ...entry, ...confirmedEntryPatch } : entry);
     }
     try {
       orders = await sbFetchOrders();
@@ -1250,6 +1260,32 @@ function _formatCashAmountWithBalance(amount, balance, currency = '\u20B4') {
   return amountText + ' (' + Number(balance).toLocaleString('ru') + ')';
 }
 
+function _formatCashEntryApprovalDateTime(value) {
+  if (typeof formatCashEntryApprovalDateTime === 'function') {
+    return formatCashEntryApprovalDateTime(value);
+  }
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function _renderCashEntryApprovalBadge(e) {
+  if (!isConfirmableCashEntry(e)) return '';
+  const confirmed = getCashEntryApprovalStatus(e) === 'confirmed';
+  const label = confirmed ? 'подтверждено' : 'ожидает подтверждения';
+  const color = confirmed ? 'var(--accent)' : 'var(--yellow)';
+  const approvedAt = confirmed ? _formatCashEntryApprovalDateTime(e?.approval_at || e?.approvalAt || '') : '';
+  const timeLabel = approvedAt ? ' · ' + approvedAt : '';
+  return '<span style="margin-left:6px;color:' + color + ';font-weight:800;">' + escapeHtml(label + timeLabel) + '</span>';
+}
+
 // Одна строка записи кассы
 function _cashEntryRow(e, balanceMap = null) {
   const amt   = Number(e.amount);
@@ -1269,21 +1305,18 @@ function _cashEntryRow(e, balanceMap = null) {
   const cardTag = isConfirmedCard
     ? '<span style="display:inline-flex;align-items:center;padding:2px 7px;border-radius:999px;background:rgba(29,233,182,.12);border:1px solid rgba(29,233,182,.22);color:var(--accent);font-size:10px;font-weight:800;margin-left:6px;">карта</span>'
     : '';
-  const isPending = isConfirmableCashEntry(e) && getCashEntryApprovalStatus(e) !== 'confirmed';
-  const pendingTag = isPending
-    ? '<span style="display:inline-flex;align-items:center;padding:2px 7px;border-radius:999px;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.25);color:var(--yellow);font-size:10px;font-weight:800;margin-left:6px;">ожидает подтверждения</span>'
-    : '';
+  const approvalBadge = _renderCashEntryApprovalBadge(e);
   const linkedOrderId = typeof getOrderIdFromCashEntry === 'function' ? getOrderIdFromCashEntry(e) : '';
   return '<div style="display:flex;justify-content:space-between;align-items:center;'
     + 'padding:10px 0;border-bottom:1px solid var(--border);' + (linkedOrderId ? 'cursor:pointer;' : '') + '"'
     + (linkedOrderId ? ' onclick="openOrderFromCashEntry(\'' + escapeJsString(e.id) + '\', event)"' : '')
     + '>'
     + '<div>'
-    + '<div style="font-size:13px;color:var(--text2);display:flex;align-items:center;flex-wrap:wrap;">' + escapeHtml(displayComment || '—') + cardTag + pendingTag + '</div>'
+    + '<div style="font-size:13px;color:var(--text2);display:flex;align-items:center;flex-wrap:wrap;">' + escapeHtml(displayComment || '—') + cardTag + '</div>'
     + (tagLabels.length
       ? '<div class="cash-entry-tags">' + tagLabels.map(label => '<span class="cash-entry-tag">' + escapeHtml(label) + '</span>').join('') + '</div>'
       : '')
-    + '<div style="font-size:11px;color:var(--text3);margin-top:2px;">' + time + (displayMeta ? ' · ' + escapeHtml(displayMeta) : '') + '</div>'
+    + '<div style="font-size:11px;color:var(--text3);margin-top:2px;">' + time + (displayMeta ? ' · ' + escapeHtml(displayMeta) : '') + approvalBadge + '</div>'
     + '</div>'
     + '<div style="font-size:15px;font-weight:800;color:' + color + ';white-space:nowrap;margin-left:12px;">'
     + _formatCashAmountWithBalance(amt, balanceMap?.get?.(String(e.id)), '\u20B4') + '</div>'

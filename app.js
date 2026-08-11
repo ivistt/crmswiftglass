@@ -2283,7 +2283,6 @@ function renderOwnerCashSearchResults(logs = [], options = {}) {
         const meta = [
           _ownerCashEntryDate(entry) ? formatDate(_ownerCashEntryDate(entry)) : '',
           getOwnerCashEntryTime(entry),
-          getCashEntryApprovalStatus(entry),
         ].filter(Boolean).join(' · ');
         const linkedOrderId = getOrderIdFromCashEntry(entry);
         return `
@@ -2291,7 +2290,7 @@ function renderOwnerCashSearchResults(logs = [], options = {}) {
             <div class="owner-cash-entry-main">
               <div class="owner-cash-entry-comment">${escapeHtml(owner)} · ${escapeHtml(comment)}</div>
               ${renderOwnerCashEntryTags(entry, { includeOwner: false })}
-              <div class="owner-cash-entry-meta">${escapeHtml(meta || '—')}</div>
+              <div class="owner-cash-entry-meta">${escapeHtml(meta || '—')} ${renderOwnerCashEntryConfirmBadge(entry)}</div>
             </div>
             <div class="owner-cash-entry-actions">
               <div class="owner-cash-entry-amount" style="color:${amount >= 0 ? 'var(--accent)' : '#ef4444'};">${amount >= 0 ? '+' : ''}${amount.toLocaleString('ru')} ${symbol}</div>
@@ -4143,6 +4142,7 @@ function renderOwnerPaymentsScreen() {
                   <div class="order-card-meta">
                     <span class="order-meta-item">${escapeHtml(cashEntry.worker_name || '—')}</span>
                     <span class="order-meta-item">${entry.title}</span>
+                    ${renderOwnerCashEntryConfirmBadge(cashEntry)}
                   </div>
                   ${renderOwnerCashEntryTags(cashEntry, { includeOwner: true })}
                 </div>
@@ -4162,6 +4162,7 @@ function renderOwnerPaymentsScreen() {
                   <div class="order-card-meta">
                     <span class="order-meta-item">${entry.title}</span>
                     <span class="order-meta-item">${escapeHtml(cashEntry.manual_payment_method || entry.method || '—')}</span>
+                    ${renderOwnerCashEntryConfirmBadge(cashEntry)}
                   </div>
                   ${renderOwnerCashEntryTags(cashEntry, { includeOwner: true })}
                 </div>
@@ -4181,6 +4182,7 @@ function renderOwnerPaymentsScreen() {
                   <div class="order-card-meta">
                     <span class="order-meta-item">${escapeHtml(cashEntry.worker_name || '—')}</span>
                     <span class="order-meta-item">${entry.title}</span>
+                    ${renderOwnerCashEntryConfirmBadge(cashEntry)}
                   </div>
                   ${renderOwnerCashEntryTags(cashEntry, { includeOwner: true })}
                 </div>
@@ -4201,6 +4203,7 @@ function renderOwnerPaymentsScreen() {
                 <div class="order-card-meta">
                   <span class="order-meta-item">${entry.title}</span>
                   ${renderOwnerPaymentProgress(entry)}
+                  ${entry.cashEntry ? renderOwnerCashEntryConfirmBadge(entry.cashEntry) : ''}
                   <span class="order-meta-item">${order.client || '—'}</span>
                   <span class="order-meta-item">${order.phone || '—'}</span>
                   ${total ? `<span class="order-meta-item">Общая сумма: ${total.toLocaleString('ru')} ₴</span>` : ''}
