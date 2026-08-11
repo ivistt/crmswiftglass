@@ -310,13 +310,14 @@ function buildClientStatementPrintHtml(client, period, rows) {
   <html lang="uk">
   <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=794, initial-scale=1">
     <title>${escapeHtml(invoiceTitle)}</title>
     <style>
       @page { size: A4; margin: 0; }
       * { box-sizing: border-box; }
-      body { margin: 0; color: #000; background: #fff; font-family: Arial, sans-serif; font-size: 12px; line-height: 1.2; }
-      .sheet { width: 100%; min-height: 297mm; padding: 13mm 12mm; }
+      html, body { width: 210mm; min-width: 210mm; }
+      body { margin: 0; color: #000; background: #fff; font-family: Arial, sans-serif; font-size: 12px; line-height: 1.2; overflow: visible; }
+      .sheet { width: 210mm; max-width: 210mm; min-height: 297mm; margin: 0 auto; padding: 13mm 12mm; }
       .notice {
         margin: 0 auto 10px;
         max-width: 930px;
@@ -395,7 +396,10 @@ function buildClientStatementPrintHtml(client, period, rows) {
       }
       .signature-line { border-bottom: 1.5px solid #000; height: 18px; }
       .signature-stamp { display: block; width: 160px; max-height: 90px; object-fit: contain; margin-top: -16px; }
-      @media print { body { print-color-adjust: exact; -webkit-print-color-adjust: exact; } }
+      @media print {
+        html, body { width: 210mm; min-width: 210mm; }
+        body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+      }
     </style>
   </head>
   <body>
@@ -506,8 +510,26 @@ function buildClientStatementPrintHtml(client, period, rows) {
   </html>`;
 }
 
-function getClientOrderInvoiceItems(order) {
+function getClientOrderGlassTitle(order) {
+  const glassParts = ['Скло автомобільне'];
+  if (order?.car) glassParts.push(order.car);
+  if (order?.licensePlate || order?.license_plate) glassParts.push(`держ. номер ${order.licensePlate || order.license_plate}`);
+  return glassParts.join(' ');
+}
+
+function getClientOrderInvoiceItems(order, options = {}) {
   const items = [];
+  if (options?.fop) {
+    const total = getOrderClientTotalAmount(order);
+    return [{
+      title: getClientOrderGlassTitle(order),
+      qty: 1,
+      unit: 'шт',
+      price: total,
+      sum: total,
+    }];
+  }
+
   const serviceSelections = typeof getOrderServiceSelections === 'function'
     ? getOrderServiceSelections(order?.serviceType)
     : (typeof parseOrderServiceSelections === 'function' ? parseOrderServiceSelections(order?.serviceType) : []);
@@ -561,11 +583,8 @@ function getClientOrderInvoiceItems(order) {
     });
   }
   if (glassAmount > 0) {
-    const glassParts = ['Скло автомобільне'];
-    if (order?.car) glassParts.push(order.car);
-    if (order?.licensePlate || order?.license_plate) glassParts.push(`держ. номер ${order.licensePlate || order.license_plate}`);
     items.push({
-      title: glassParts.join(' '),
+      title: getClientOrderGlassTitle(order),
       qty: 1,
       unit: 'шт',
       price: glassAmount,
@@ -594,7 +613,7 @@ function getClientOrderInvoiceItems(order) {
   return items;
 }
 
-function buildClientOrderInvoicePrintHtml(client, order, documentType = 'invoice') {
+function buildClientOrderInvoicePrintHtml(client, order, documentType = 'invoice', options = {}) {
   const invoiceNumber = formatClientStatementOrderId(order?.id);
   const invoiceDate = order?.date || getClientStatementDateString();
   const isAct = documentType === 'act';
@@ -607,7 +626,7 @@ function buildClientOrderInvoicePrintHtml(client, order, documentType = 'invoice
     phone ? `тел. ${phone}` : '',
     address ? `адреса: ${address}` : '',
   ].filter(Boolean).map(escapeHtml).join(', ');
-  const items = getClientOrderInvoiceItems(order);
+  const items = getClientOrderInvoiceItems(order, options);
   const total = items.reduce((sum, item) => sum + (Number(item.sum) || 0), 0);
   const totalWords = formatClientStatementMoneyWordsUa(total);
   const itemRows = items.map((item, index) => `
@@ -681,13 +700,14 @@ function buildClientOrderInvoicePrintHtml(client, order, documentType = 'invoice
   <html lang="uk">
   <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=794, initial-scale=1">
     <title>${escapeHtml(invoiceTitle)}</title>
     <style>
       @page { size: A4; margin: 0; }
       * { box-sizing: border-box; }
-      body { margin: 0; color: #000; background: #fff; font-family: Arial, sans-serif; font-size: 12px; line-height: 1.2; }
-      .sheet { width: 100%; min-height: 297mm; padding: 13mm 12mm; }
+      html, body { width: 210mm; min-width: 210mm; }
+      body { margin: 0; color: #000; background: #fff; font-family: Arial, sans-serif; font-size: 12px; line-height: 1.2; overflow: visible; }
+      .sheet { width: 210mm; max-width: 210mm; min-height: 297mm; margin: 0 auto; padding: 13mm 12mm; }
       .notice {
         margin: 0 auto 10px;
         max-width: 930px;
@@ -802,7 +822,10 @@ function buildClientOrderInvoicePrintHtml(client, order, documentType = 'invoice
         opacity: 0.96;
         pointer-events: none;
       }
-      @media print { body { print-color-adjust: exact; -webkit-print-color-adjust: exact; } }
+      @media print {
+        html, body { width: 210mm; min-width: 210mm; }
+        body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+      }
     </style>
   </head>
   <body>
@@ -875,7 +898,7 @@ function printClientHtmlDocument(html) {
 
   const printFrame = document.createElement('iframe');
   printFrame.id = 'client-statement-print-frame';
-  printFrame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0;pointer-events:none;';
+  printFrame.style.cssText = 'position:fixed;left:-10000px;top:0;width:210mm;height:297mm;border:0;opacity:0;pointer-events:none;';
   document.body.appendChild(printFrame);
 
   const printDocument = printFrame.contentWindow?.document;
@@ -911,14 +934,20 @@ function printClientStatement() {
   closeClientStatementModal();
 }
 
-function printClientOrderInvoice(orderId, documentType = 'invoice') {
+function printClientOrderInvoiceFromButton(button, orderId, documentType = 'invoice') {
+  const actions = button?.closest?.('[data-client-print-actions]');
+  const fop = !!actions?.querySelector?.('[data-client-print-fop]')?.checked;
+  printClientOrderInvoice(orderId, documentType, { fop });
+}
+
+function printClientOrderInvoice(orderId, documentType = 'invoice', options = {}) {
   if (!canPrintClientStatement()) return;
   const order = (orders || []).find(item => String(item.id) === String(orderId));
   if (!order) return showToast('Заказ не найден', 'error');
   const decoded = decodeURIComponent(currentClientDetailKey || '');
   const client = getClients().find(item => (item.phone || item.name) === decoded)
     || { name: order.client || '', alias: order.client || '', requisites: '', phone: order.phone || '', address: order.address || '', orders: [order] };
-  printClientHtmlDocument(buildClientOrderInvoicePrintHtml(client, order, documentType));
+  printClientHtmlDocument(buildClientOrderInvoicePrintHtml(client, order, documentType, options));
 }
 
 function buildClientDebtCopyText(client) {
@@ -1093,11 +1122,15 @@ function renderClientOrderHistoryCard(o, compact = false) {
           <span class="order-name">${escapeHtml(formatClientOrderCarLine(o))}</span>
         </div>
         ${canPrintClientStatement() ? `
-          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-            <button class="btn-secondary" style="padding:7px 10px;min-height:0;" onclick="event.stopPropagation(); printClientOrderInvoice('${escapeAttr(o.id)}', 'invoice')">
+          <div class="client-print-actions" data-client-print-actions onclick="event.stopPropagation();">
+            <label class="client-print-fop-toggle" title="Печатать одной строкой стекло на полную сумму">
+              <input type="checkbox" data-client-print-fop>
+              <span>фоп</span>
+            </label>
+            <button class="btn-secondary" style="padding:7px 10px;min-height:0;" onclick="printClientOrderInvoiceFromButton(this, '${escapeAttr(o.id)}', 'invoice')">
               ${icon('printer')} Счет
             </button>
-            <button class="btn-secondary" style="padding:7px 10px;min-height:0;" onclick="event.stopPropagation(); printClientOrderInvoice('${escapeAttr(o.id)}', 'act')">
+            <button class="btn-secondary" style="padding:7px 10px;min-height:0;" onclick="printClientOrderInvoiceFromButton(this, '${escapeAttr(o.id)}', 'act')">
               ${icon('file-text')} Акт
             </button>
           </div>

@@ -1358,6 +1358,45 @@ body {
   margin-bottom: 8px;
 }
 
+.client-print-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.client-print-fop-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--text2);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color .16s ease, color .16s ease, background .16s ease;
+}
+
+.client-print-fop-toggle:hover,
+.client-print-fop-toggle:has(input:checked) {
+  border-color: rgba(16, 185, 129, 0.55);
+  background: rgba(16, 185, 129, 0.08);
+  color: var(--accent);
+}
+
+.client-print-fop-toggle input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+}
+
 .order-card-left {
   display: flex;
   flex-direction: column;
@@ -2901,6 +2940,7 @@ input[type="datetime-local"] {
   .order-card-state-selection { padding: 6px; }
   .order-card-top {
     align-items: flex-start;
+    flex-wrap: wrap;
   }
   .order-card-left {
     flex: 1 1 auto;
@@ -2908,6 +2948,10 @@ input[type="datetime-local"] {
   }
   .order-card-actions {
     flex: 0 0 auto;
+  }
+  .client-print-actions {
+    width: 100%;
+    justify-content: flex-start;
   }
   .order-card-title-row {
     flex-direction: column;
