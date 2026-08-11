@@ -3603,12 +3603,13 @@ async function syncClientPaymentConfirmationFromCashEntry(cashRow, confirmed, se
   const orderId = String(cashRow?.order_id || extractOrderIdFromSourceKey(sourceKey) || '').trim();
   if (!sourceKey || !orderId) return null;
 
-  const paymentType = getOrderPaymentTypeFromSourceKey(sourceKey);
-  if (paymentType && paymentType !== 'client') return null;
-  if (!paymentType && Number(cashRow?.amount) <= 0) return null;
+  const sourcePaymentType = getOrderPaymentTypeFromSourceKey(sourceKey);
+  const paymentType = sourcePaymentType || (Number(cashRow?.amount) < 0 ? 'supplier' : 'client');
+  if (!['client', 'supplier'].includes(paymentType)) return null;
 
   const order = await getOrderById(orderId, sb, sbHeaders);
-  const payments = Array.isArray(order?.client_payments) ? order.client_payments : [];
+  const paymentsField = paymentType === 'supplier' ? 'supplier_payments' : 'client_payments';
+  const payments = Array.isArray(order?.[paymentsField]) ? order[paymentsField] : [];
   if (!order || !payments.length) return null;
 
   const keyCounts = new Map();
@@ -3632,10 +3633,15 @@ async function syncClientPaymentConfirmationFromCashEntry(cashRow, confirmed, se
 
   const paid = sumPaymentAmounts(nextPayments);
   const orderPatch = {
-    client_payments: nextPayments,
-    debt: paid,
-    payment_status: calcClientPaymentStatus(paid, getOrderClientTotal(order)),
+    [paymentsField]: nextPayments,
   };
+  if (paymentType === 'supplier') {
+    orderPatch.check_sum = paid;
+    orderPatch.supplier_status = calcSupplierPaymentStatus(paid, Number(order?.purchase) || 0);
+  } else {
+    orderPatch.debt = paid;
+    orderPatch.payment_status = calcClientPaymentStatus(paid, getOrderClientTotal(order));
+  }
   const res = await fetch(`${sb}/rest/v1/orders?id=eq.${encodeURIComponent(orderId)}`, {
     method: 'PATCH',
     headers: sbHeaders,

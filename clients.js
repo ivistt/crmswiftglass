@@ -287,10 +287,8 @@ function renderClientStatementPreview() {
 function buildClientStatementPrintHtml(client, period, rows, options = {}) {
   const totals = getClientStatementTotals(rows);
   const isFop = options?.fop === true;
-  const phone = String(client?.phone || '').trim();
   const address = String(client?.address || '').trim();
   const clientDetails = [
-    phone ? `тел. ${phone}` : '',
     address ? `адреса: ${address}` : '',
   ].filter(Boolean).map(escapeHtml).join(', ');
   const invoiceNumber = formatClientStatementOrderId(rows?.[0]?.id || getClientStatementNumber(client, period));
@@ -566,10 +564,8 @@ function buildClientOrderInvoicePrintHtml(client, order, documentType = 'invoice
   const invoiceTitle = isAct
     ? `Акт виконаних робіт № ${invoiceNumber} від ${formatClientStatementLongDateUa(invoiceDate)}`
     : `Рахунок на оплату № ${invoiceNumber} від ${formatClientStatementLongDateUa(invoiceDate)}`;
-  const phone = String(order?.phone || client?.phone || '').trim();
   const address = String(order?.address || client?.address || '').trim();
   const clientDetails = [
-    phone ? `тел. ${phone}` : '',
     address ? `адреса: ${address}` : '',
   ].filter(Boolean).map(escapeHtml).join(', ');
   const items = getClientOrderInvoiceItems(order, options);

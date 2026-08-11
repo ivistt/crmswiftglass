@@ -2965,12 +2965,38 @@ function canCurrentUserConfirmOrderPayment(order, payment, paymentType = 'client
   return currentUserOwnsOrderPayment(order, payment, paymentType);
 }
 
+function formatOrderPaymentConfirmationDateTime(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function getOrderPaymentConfirmationMeta(payment) {
+  const confirmedAt = formatOrderPaymentConfirmationDateTime(payment?.confirmedAt || payment?.confirmed_at || '');
+  const confirmedBy = String(payment?.confirmedBy || payment?.confirmed_by || '').trim();
+  if (!confirmedAt && !confirmedBy) return '';
+  return [confirmedAt, confirmedBy].filter(Boolean).join(' · ');
+}
+
 function renderOrderPaymentConfirmation(order, payment, index, paymentType = 'client') {
   const method = normalizePaymentMethod(payment?.method || '');
   if (!method || !isConfirmablePaymentMethod(method)) return '';
   const confirmed = isOrderPaymentConfirmed(order, payment, paymentType);
   if (confirmed) {
-    return '<div class="order-payment-confirm-state is-confirmed">Подтверждено</div>';
+    const meta = getOrderPaymentConfirmationMeta(payment);
+    return `
+      <div class="order-payment-confirm-result">
+        <div class="order-payment-confirm-state is-confirmed">Подтверждено</div>
+        ${meta ? `<div class="order-payment-confirm-meta">${escapeHtml(meta)}</div>` : ''}
+      </div>
+    `;
   }
   const button = canCurrentUserConfirmOrderPayment(order, payment, paymentType)
     ? `<button type="button" class="btn-primary order-payment-confirm-btn" onclick="confirmOrderPaymentFromModal('${paymentType}', ${index}, this)">Подтвердить</button>`
@@ -3034,7 +3060,12 @@ async function confirmOrderPaymentFromModal(paymentType, index, button = null) {
       currentClientPayments = JSON.parse(JSON.stringify(refreshedOrder.clientPayments || []));
       currentSupplierPayments = JSON.parse(JSON.stringify(refreshedOrder.supplierPayments || []));
     } else {
-      payments[index] = { ...payment, confirmed: true };
+      payments[index] = {
+        ...payment,
+        confirmed: true,
+        confirmedAt: new Date().toISOString(),
+        confirmedBy: currentWorkerName || '',
+      };
     }
 
     renderClientPayments();
