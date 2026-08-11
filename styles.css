@@ -2706,9 +2706,10 @@ body.modal-scroll-locked {
 
 .order-payment-confirm-result {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .order-payment-confirm-meta {
@@ -2718,7 +2719,7 @@ body.modal-scroll-locked {
   font-weight: 700;
   line-height: 1.25;
   text-align: right;
-  white-space: normal;
+  white-space: nowrap;
 }
 
 .order-payment-confirm-btn {
