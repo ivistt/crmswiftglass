@@ -295,7 +295,7 @@ function buildClientStatementPrintHtml(client, period, rows, options = {}) {
   ].filter(Boolean).map(escapeHtml).join(', ');
   const invoiceNumber = formatClientStatementOrderId(rows?.[0]?.id || getClientStatementNumber(client, period));
   const invoiceDate = rows?.[0]?.date || getClientStatementDateString();
-  const invoiceTitle = `Рахунок на оплату № ${invoiceNumber} від ${formatClientStatementLongDateUa(invoiceDate)}`;
+  const invoiceTitle = `Акт звірки взаєморозрахунків № ${invoiceNumber} від ${formatClientStatementLongDateUa(invoiceDate)}`;
   const titleColumnLabel = isFop ? 'Товари (роботи, послуги)' : 'Автомобіль';
   const bodyRows = rows.map((row, index) => `
     <tr>
