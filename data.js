@@ -2751,21 +2751,29 @@ function isOrderPaymentConfirmed(order, payment, paymentType = 'client') {
   const method = normalizePaymentMethod(payment?.method || '');
   if (!method) return false;
   if (!isConfirmablePaymentMethod(method)) return true;
-  if (payment?.confirmed === true) return true;
-  if (payment?.confirmed === false) return false;
   const sourceKey = buildPaymentSourceKey(order?.id || '', method, paymentType, payment);
   const availableRows = [
     ...(Array.isArray(window.allCashLog) ? window.allCashLog : []),
     ...(Array.isArray(window.ownerCashRecentLog) ? window.ownerCashRecentLog : []),
     ...(typeof workerCashLog !== 'undefined' && Array.isArray(workerCashLog) ? workerCashLog : []),
   ];
-  return availableRows.some(entry => {
+  const matchingEntries = availableRows.filter(entry => {
     if (getCashEntrySourceKey(entry) !== sourceKey) return false;
     if (String(entry?.deleted_at || '').trim()) return false;
     const ledgerStatus = String(entry?.ledger_status || 'posted').trim().toLowerCase();
-    if (ledgerStatus === 'voided' || ledgerStatus === 'reversed' || ledgerStatus === 'corrected') return false;
-    return entry?.fop_confirmed === true || String(entry?.approval_status || '').trim().toLowerCase() === 'confirmed';
+    return !['voided', 'reversed', 'corrected'].includes(ledgerStatus);
   });
+  if (matchingEntries.length) {
+    return matchingEntries.some(entry => {
+      const status = String(entry?.approval_status || '').trim().toLowerCase();
+      if (status === 'pending') return false;
+      if (status === 'not_required') return true;
+      return entry?.fop_confirmed === true || status === 'confirmed';
+    });
+  }
+  if (payment?.confirmed === true) return true;
+  if (payment?.confirmed === false) return false;
+  return false;
 }
 
 function getOrderPaymentCashEntry(order, payment, paymentType = 'client') {
@@ -2786,17 +2794,17 @@ function sumConfirmedOrderPayments(order, payments = [], paymentType = 'client')
 }
 
 function sumRecordedOrderPayments(payments = []) {
-  // Новые подтверждаемые оплаты не уменьшают долг до подтверждения владельцем метода.
-  // У старых платежей поля confirmed нет — считаем их оплаченными для совместимости.
   return (payments || []).reduce((sum, payment) => {
     const amount = Number(payment?.amount) || 0;
-    return amount > 0 && payment?.confirmed !== false ? sum + amount : sum;
+    if (amount <= 0) return sum;
+    if (!isConfirmablePaymentMethod(payment?.method || '')) return sum + amount;
+    return payment?.confirmed === true ? sum + amount : sum;
   }, 0);
 }
 
 function getOrderClientPaidAmount(order) {
   const payments = Array.isArray(order?.clientPayments) ? order.clientPayments : [];
-  if (payments.length) return sumRecordedOrderPayments(payments);
+  if (payments.length) return sumConfirmedOrderPayments(order, payments, 'client');
   return Number(order?.debt) || 0;
 }
 

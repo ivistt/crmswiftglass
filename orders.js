@@ -538,7 +538,7 @@ async function confirmSeniorOrderAmounts(orderId) {
   }
 
   const totalSupplierPaid = sumConfirmedOrderPayments(order, nextSupplierPayments, 'supplier');
-  const totalClientPaid = sumRecordedOrderPayments(nextClientPayments);
+  const totalClientPaid = sumConfirmedOrderPayments({ ...order, clientPayments: nextClientPayments }, nextClientPayments, 'client');
   const totalClientAmount = getOrderClientTotalAmount(order);
   const updatedOrder = {
     ...order,
@@ -3143,7 +3143,10 @@ function renderSupplierPayments() {
 function syncClientPaidFromPayments() {
   const debtEl = document.getElementById('f-debt');
   if (!debtEl) return;
-  const totalPaid = sumRecordedOrderPayments(currentClientPayments);
+  const order = editingOrderId
+    ? (orders.find(item => item.id === editingOrderId) || {})
+    : {};
+  const totalPaid = sumConfirmedOrderPayments({ ...order, clientPayments: currentClientPayments }, currentClientPayments, 'client');
   debtEl.value = String(totalPaid || 0);
   syncClientLeftFromPayments();
 }
@@ -3331,7 +3334,7 @@ async function persistImmediateOrderPaymentsUpdate({
   const data = getOrderDraftFromForm(existingOrder);
   data.clientPayments = JSON.parse(JSON.stringify(clientPayments || []));
   data.supplierPayments = JSON.parse(JSON.stringify(supplierPayments || []));
-  const recordedClientPaid = sumRecordedOrderPayments(data.clientPayments);
+  const recordedClientPaid = sumConfirmedOrderPayments({ ...existingOrder, ...data }, data.clientPayments, 'client');
   const confirmedSupplierPaid = sumConfirmedOrderPayments({ ...existingOrder, ...data }, data.supplierPayments, 'supplier');
 
   data.debt = recordedClientPaid;

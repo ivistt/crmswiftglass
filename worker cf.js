@@ -2518,7 +2518,9 @@ function buildSpecialistOrderPatch(body, existingOrder, session = {}, currentWor
 function sumPaymentAmounts(payments) {
   return (payments || []).reduce((sum, payment) => {
     const amount = Number(payment?.amount) || 0;
-    return amount > 0 && payment?.confirmed !== false ? sum + amount : sum;
+    if (amount <= 0) return sum;
+    if (isCashPaymentMethodForSync(payment?.method)) return sum + amount;
+    return payment?.confirmed === true ? sum + amount : sum;
   }, 0);
 }
 
