@@ -2663,8 +2663,8 @@ function getCashEntryPaymentMethod(entry) {
 }
 
 function getCashEntryApprovalStatus(entry) {
-  if (entry?.approval_status) return String(entry.approval_status).trim().toLowerCase();
   if (entry?.fop_confirmed === true) return 'confirmed';
+  if (entry?.approval_status) return String(entry.approval_status).trim().toLowerCase();
   return isConfirmableCashEntry(entry) ? 'pending' : 'not_required';
 }
 
@@ -2751,6 +2751,7 @@ function isOrderPaymentConfirmed(order, payment, paymentType = 'client') {
   const method = normalizePaymentMethod(payment?.method || '');
   if (!method) return false;
   if (!isConfirmablePaymentMethod(method)) return true;
+  if (payment?.confirmed === true) return true;
   const sourceKey = buildPaymentSourceKey(order?.id || '', method, paymentType, payment);
   const availableRows = [
     ...(Array.isArray(window.allCashLog) ? window.allCashLog : []),
@@ -2765,13 +2766,13 @@ function isOrderPaymentConfirmed(order, payment, paymentType = 'client') {
   });
   if (matchingEntries.length) {
     return matchingEntries.some(entry => {
+      if (entry?.fop_confirmed === true) return true;
       const status = String(entry?.approval_status || '').trim().toLowerCase();
       if (status === 'pending') return false;
       if (status === 'not_required') return true;
       return entry?.fop_confirmed === true || status === 'confirmed';
     });
   }
-  if (payment?.confirmed === true) return true;
   if (payment?.confirmed === false) return false;
   return false;
 }

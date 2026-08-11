@@ -2109,17 +2109,25 @@ async function hydratePendingClientPaymentStates(orders, sb, sbHeaders) {
   const list = Array.isArray(orders) ? orders : [];
   if (!list.length) return list;
 
-  const pendingRows = await fetchSupabasePagedRows(
-    `${sb}/rest/v1/cash_log?select=source_key,fop_source_key,source_id,order_id,ledger_status,deleted_at&source_type=eq.order&approval_status=eq.pending&deleted_at=is.null`,
+  const approvalRows = await fetchSupabasePagedRows(
+    `${sb}/rest/v1/cash_log?select=source_key,fop_source_key,source_id,order_id,ledger_status,deleted_at,approval_status,fop_confirmed&source_type=eq.order&deleted_at=is.null`,
     sbHeaders
   ).catch(() => []);
-  const pendingKeys = new Set(
-    pendingRows
-      .filter(row => !['voided', 'reversed', 'corrected'].includes(String(row?.ledger_status || 'posted').trim().toLowerCase()))
-      .map(row => getCashLedgerSourceKey(row))
-      .filter(Boolean)
-  );
-  if (!pendingKeys.size && !list.some(order => (order?.client_payments || []).some(payment => payment?.confirmed === false))) {
+  const approvalByKey = new Map();
+  approvalRows.forEach(row => {
+    if (['voided', 'reversed', 'corrected'].includes(String(row?.ledger_status || 'posted').trim().toLowerCase())) return;
+    const key = getCashLedgerSourceKey(row);
+    if (!key || getOrderPaymentTypeFromSourceKey(key) !== 'client') return;
+    const status = String(row?.approval_status || '').trim().toLowerCase();
+    const approved = row?.fop_confirmed === true || status === 'confirmed' || status === 'not_required';
+    const pending = status === 'pending';
+    if (approved) {
+      approvalByKey.set(key, true);
+    } else if (pending && !approvalByKey.has(key)) {
+      approvalByKey.set(key, false);
+    }
+  });
+  if (!approvalByKey.size && !list.some(order => (order?.client_payments || []).some(payment => payment?.confirmed === false))) {
     return list;
   }
 
@@ -2133,9 +2141,12 @@ async function hydratePendingClientPaymentStates(orders, sb, sbHeaders) {
       const count = (keyCounts.get(baseKey) || 0) + 1;
       keyCounts.set(baseKey, count);
       const sourceKey = count === 1 ? baseKey : `${baseKey}|seq:${count}`;
-      if (!pendingKeys.has(sourceKey) || payment?.confirmed === false) return payment;
+      if (!approvalByKey.has(sourceKey)) return payment;
+      const confirmed = approvalByKey.get(sourceKey) === true;
+      if (!confirmed && payment?.confirmed === true) return payment;
+      if (payment?.confirmed === confirmed) return payment;
       changed = true;
-      return { ...payment, confirmed: false };
+      return { ...payment, confirmed };
     });
     if (!changed && !nextPayments.some(payment => payment?.confirmed === false)) return order;
     const paid = sumPaymentAmounts(nextPayments);
@@ -3659,9 +3670,10 @@ async function reconcileOrderClientPaymentConfirmations(order, sb, sbHeaders) {
     const count = (keyCounts.get(baseKey) || 0) + 1;
     keyCounts.set(baseKey, count);
     const sourceKey = count === 1 ? baseKey : `${baseKey}|seq:${count}`;
+    const approvalState = approvalByKey.get(sourceKey);
     const confirmed = isCashPaymentMethodForSync(payment?.method)
       ? true
-      : approvalByKey.get(sourceKey) === true;
+      : (payment?.confirmed === true || approvalState === true);
     return payment?.confirmed === confirmed ? payment : { ...payment, confirmed };
   });
   const paid = sumPaymentAmounts(nextPayments);
