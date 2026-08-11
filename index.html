@@ -1396,6 +1396,10 @@
     </div>
     <div class="modal-footer">
       <button type="button" class="btn-secondary" onclick="closeClientStatementModal()">Отмена</button>
+      <label class="client-print-fop-toggle client-statement-fop-toggle" title="Печатать строки как стекло на полную сумму">
+        <input type="checkbox" id="client-statement-fop">
+        <span>фоп</span>
+      </label>
       <button type="button" class="btn-primary" id="client-statement-print-btn" onclick="printClientStatement()">
         <i data-lucide="printer" style="width:15px;height:15px;"></i>
         Печать

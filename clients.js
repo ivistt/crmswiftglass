@@ -50,6 +50,7 @@ function getClientStatementRows(client, period) {
         id: formatClientStatementOrderId(order.id),
         date: order.date || '',
         car: formatClientOrderCarLine(order, 'держ. номер'),
+        fopTitle: getClientOrderGlassTitle(order),
         total,
         paid,
         left: Math.max(0, total - paid),
@@ -212,6 +213,8 @@ function openClientStatementModal(key) {
   if (singleInput) singleInput.value = today;
   if (fromInput) fromInput.value = today;
   if (toInput) toInput.value = today;
+  const fopInput = document.getElementById('client-statement-fop');
+  if (fopInput) fopInput.checked = false;
   const nameEl = document.getElementById('client-statement-client-name');
   if (nameEl) nameEl.textContent = client.name || 'Клиент';
 
@@ -281,8 +284,9 @@ function renderClientStatementPreview() {
   if (printButton) printButton.disabled = false;
 }
 
-function buildClientStatementPrintHtml(client, period, rows) {
+function buildClientStatementPrintHtml(client, period, rows, options = {}) {
   const totals = getClientStatementTotals(rows);
+  const isFop = options?.fop === true;
   const phone = String(client?.phone || '').trim();
   const address = String(client?.address || '').trim();
   const clientDetails = [
@@ -292,12 +296,13 @@ function buildClientStatementPrintHtml(client, period, rows) {
   const invoiceNumber = formatClientStatementOrderId(rows?.[0]?.id || getClientStatementNumber(client, period));
   const invoiceDate = rows?.[0]?.date || getClientStatementDateString();
   const invoiceTitle = `Рахунок на оплату № ${invoiceNumber} від ${formatClientStatementLongDateUa(invoiceDate)}`;
+  const titleColumnLabel = isFop ? 'Товари (роботи, послуги)' : 'Автомобіль';
   const bodyRows = rows.map((row, index) => `
     <tr>
       <td class="col-number">${index + 1}</td>
       <td class="col-id">${escapeHtml(row.id || '—')}</td>
       <td class="col-date">${escapeHtml(formatDate(row.date))}</td>
-      <td>${escapeHtml(row.car || '—')}</td>
+      <td>${escapeHtml((isFop ? row.fopTitle : row.car) || '—')}</td>
       <td class="money">${escapeHtml(formatClientStatementMoney(row.total))}</td>
       <td class="money">${escapeHtml(formatClientStatementMoney(row.paid))}</td>
       <td class="money">${escapeHtml(formatClientStatementMoney(row.left))}</td>
@@ -318,36 +323,6 @@ function buildClientStatementPrintHtml(client, period, rows) {
       html, body { width: 210mm; min-width: 210mm; }
       body { margin: 0; color: #000; background: #fff; font-family: Arial, sans-serif; font-size: 12px; line-height: 1.2; overflow: visible; }
       .sheet { width: 210mm; max-width: 210mm; min-height: 297mm; margin: 0 auto; padding: 13mm 12mm; }
-      .notice {
-        margin: 0 auto 10px;
-        max-width: 930px;
-        border: 1.5px solid #000;
-        padding: 4px 10px;
-        text-align: center;
-        font-size: 10px;
-        line-height: 1.15;
-      }
-      .payment-title {
-        margin: 0 0 3px;
-        text-align: center;
-        font-size: 15px;
-        font-weight: 800;
-      }
-      .payment-box {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 18px;
-        margin: 0 auto 28px;
-        max-width: 930px;
-        border: 1.5px solid #000;
-        padding: 22px 70px 20px;
-      }
-      .payment-line { display: grid; grid-template-columns: 86px 1fr; gap: 10px; align-items: center; margin-bottom: 8px; }
-      .payment-label { font-size: 11px; }
-      .payment-value { min-height: 19px; border-bottom: 1.5px solid #000; padding: 2px 4px 3px; font-weight: 800; }
-      .payment-value.boxed { border: 1.5px solid #000; text-align: center; }
-      .payment-value.plain { border-bottom: 0; }
-      .credit-title { margin: 29px 0 3px; text-align: center; font-size: 11px; }
       h1 {
         margin: 0 0 7px 4px;
         padding-bottom: 5px;
@@ -404,35 +379,6 @@ function buildClientStatementPrintHtml(client, period, rows) {
   </head>
   <body>
     <main class="sheet">
-      <div class="notice">
-        Увага! Оплата цього рахунку означає погодження з умовами поставки товарів. Повідомлення про оплату є обов'язковим, в іншому випадку не гарантується наявність товарів на складі. Товар відпускається за фактом надходження коштів на р/р Постачальника, самовивозом, за наявності довіреності та паспорта.
-      </div>
-
-      <div class="payment-title">Зразок заповнення платіжного доручення</div>
-      <section class="payment-box">
-        <div>
-          <div class="payment-line">
-            <div class="payment-label">Отримувач</div>
-            <div class="payment-value plain">${escapeHtml(CLIENT_STATEMENT_COMPANY.name)}</div>
-          </div>
-          <div class="payment-line">
-            <div class="payment-label">Код</div>
-            <div class="payment-value boxed">${escapeHtml(CLIENT_STATEMENT_COMPANY.taxId)}</div>
-          </div>
-          <div class="payment-line">
-            <div class="payment-label">Банк отримувача</div>
-            <div class="payment-value">${escapeHtml(CLIENT_STATEMENT_COMPANY.bank)}</div>
-          </div>
-        </div>
-        <div>
-          <div class="credit-title">КРЕДИТ рах. №</div>
-          <div class="payment-line">
-            <div class="payment-label">IBAN</div>
-            <div class="payment-value boxed">${escapeHtml(CLIENT_STATEMENT_COMPANY.iban)}</div>
-          </div>
-        </div>
-      </section>
-
       <h1>${escapeHtml(invoiceTitle)}</h1>
 
       <section class="parties">
@@ -464,7 +410,7 @@ function buildClientStatementPrintHtml(client, period, rows) {
             <th class="col-number">№</th>
             <th class="col-id">ID замовлення</th>
             <th>Дата</th>
-            <th class="col-car">Автомобіль</th>
+            <th class="col-car">${escapeHtml(titleColumnLabel)}</th>
             <th class="col-money">Загальна сума до сплати</th>
             <th class="col-money">Сплачена сума</th>
             <th class="col-money">Залишок до сплати</th>
@@ -929,8 +875,9 @@ function printClientStatement() {
   if (period.error) return showToast(period.error, 'error');
   const rows = getClientStatementRows(client, period);
   if (!rows.length) return showToast('За выбранный период нет завершённых заказов', 'error');
+  const fop = !!document.getElementById('client-statement-fop')?.checked;
 
-  if (!printClientHtmlDocument(buildClientStatementPrintHtml(client, period, rows))) return;
+  if (!printClientHtmlDocument(buildClientStatementPrintHtml(client, period, rows, { fop }))) return;
   closeClientStatementModal();
 }
 

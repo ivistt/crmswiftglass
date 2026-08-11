@@ -1397,6 +1397,10 @@ body {
   accent-color: var(--accent);
 }
 
+.client-statement-fop-toggle {
+  min-height: 40px;
+}
+
 .order-card-left {
   display: flex;
   flex-direction: column;
