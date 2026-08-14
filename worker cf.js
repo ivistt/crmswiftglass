@@ -650,7 +650,10 @@ export default {
           const body = await request.json();
           const isOwnAttendance = body.worker_name === session.workerName && body.order_id === 'Выход в работу';
           const isOwnWithdrawal = body.worker_name === session.workerName && String(body.order_id || '').startsWith('Выплата');
-          if (!isOwnAttendance && !isOwnWithdrawal) {
+          const isAllowedAutoOrderSalary = await canManageAutoSalaryEntryForOrder(body.order_id, session, sb, sbHeaders)
+            && !isManualSalaryRow(body)
+            && String(body.entry_type || 'auto') === 'auto';
+          if (!isOwnAttendance && !isOwnWithdrawal && !isAllowedAutoOrderSalary) {
             return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
           }
           if (!body.worker_id && body.worker_name) {
@@ -732,15 +735,6 @@ export default {
         !url.pathname.startsWith('/api/salaries/by-order/') &&
         request.method === 'PATCH'
       ) {
-        if (authedRole === 'manager') {
-          const id = url.pathname.split('/').pop();
-          const salaryRow = await getSalaryById(id, sb, sbHeaders);
-          const isOwnAttendance = salaryRow && salaryRow.worker_name === session.workerName && salaryRow.order_id === 'Выход в работу';
-          if (!isOwnAttendance) {
-            return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
-          }
-        }
-
         const id = url.pathname.split('/').pop();
         const body = await request.json();
         const salaryRowForLock = await getSalaryById(id, sb, sbHeaders);
@@ -748,7 +742,17 @@ export default {
           return Response.json({ error: 'Salary not found' }, { status: 404, headers: cors });
         }
         const isLockedAutoSalary = !isManualSalaryRow(salaryRowForLock) && isLockedOrderSalaryId(salaryRowForLock.order_id);
-        if (isLockedAutoSalary && authedRole !== 'owner') {
+        const canAutoSyncLockedSalary = isLockedAutoSalary
+          && await canManageAutoSalaryEntryForOrder(salaryRowForLock.order_id, session, sb, sbHeaders);
+
+        if (authedRole === 'manager') {
+          const isOwnAttendance = salaryRowForLock.worker_name === session.workerName && salaryRowForLock.order_id === 'Выход в работу';
+          if (!isOwnAttendance && !canAutoSyncLockedSalary) {
+            return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
+          }
+        }
+
+        if (isLockedAutoSalary && authedRole !== 'owner' && !canAutoSyncLockedSalary) {
           return Response.json([salaryRowForLock], { headers: cors });
         }
 
@@ -757,7 +761,7 @@ export default {
         }
 
         if (isManualSalaryRow(salaryRowForLock) || isLockedAutoSalary) {
-          if (authedRole !== 'owner') {
+          if (authedRole !== 'owner' && !canAutoSyncLockedSalary) {
             return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
           }
           if (await isSalaryEntryWithdrawn(salaryRowForLock, sb, sbHeaders)) {
@@ -789,7 +793,8 @@ export default {
 
         if (authedRole !== 'owner') {
           const allowed = await canAccessWorker(salaryRowForLock.worker_name, session, sb, sbHeaders)
-            || await canManageSalaryEntryForOrder(salaryRowForLock.order_id, session, sb, sbHeaders);
+            || await canManageSalaryEntryForOrder(salaryRowForLock.order_id, session, sb, sbHeaders)
+            || canAutoSyncLockedSalary;
           if (!allowed) {
             return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
           }
@@ -4255,6 +4260,20 @@ async function canManageSalaryEntryForOrder(orderId, session, sb, sbHeaders) {
   if (!order) return false;
 
   return (await isOwnOrderForSession(order, session, sb, sbHeaders)) || (order.in_work && !order.is_cancelled);
+}
+
+async function canManageAutoSalaryEntryForOrder(orderId, session, sb, sbHeaders) {
+  const normalizedOrderId = String(orderId || '').trim();
+  if (!normalizedOrderId) return false;
+  const syntheticOrderIds = new Set(['Выход в работу', 'Ставка за день']);
+  if (syntheticOrderIds.has(normalizedOrderId) || normalizedOrderId.startsWith('Выплата')) return false;
+  if (String(session?.role || '') === 'owner') return true;
+  if (session?.role === 'senior' || session?.role === 'extra') {
+    return canManageSalaryEntryForOrder(normalizedOrderId, session, sb, sbHeaders);
+  }
+  if (session?.role !== 'manager') return false;
+  const order = await getOrderById(normalizedOrderId, sb, sbHeaders);
+  return !!order && !order.is_cancelled;
 }
 
 async function getAccessibleAssistantsForLead(workerName, sb, sbHeaders) {
