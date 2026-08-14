@@ -284,6 +284,11 @@ function hasEmptyOrderAmountChanges(order = null) {
   });
 }
 
+function hasFillableEmptyOrderAmount(order = null) {
+  if (!order) return false;
+  return ORDER_WORK_AMOUNT_FIELDS.some(field => canCurrentUserFillEmptyOrderAmount(order, field.key));
+}
+
 function canCurrentUserToggleSpecialServiceStatus(order, type) {
   if (currentRole === 'owner' || currentRole === 'manager') return true;
   if (!order) return false;
@@ -4213,7 +4218,8 @@ function updateOrderModalAccess(order = null) {
   const workCostsSection = document.getElementById('order-work-costs-section');
   if (workCostsSection) {
     const isWorkTabActive = document.querySelector('[data-order-modal-tab].active')?.dataset.orderModalTab === 'work';
-    const shouldShowForSpecialist = !isPrivileged && (canToggleTatuStatus || canToggleToningStatus);
+    const canFillEmptyAmount = hasFillableEmptyOrderAmount(existingOrder);
+    const shouldShowForSpecialist = !isPrivileged && (canToggleTatuStatus || canToggleToningStatus || canFillEmptyAmount);
     workCostsSection.style.display = (isPrivileged || shouldShowForSpecialist)
       ? (isWorkTabActive ? '' : 'none')
       : 'none';
