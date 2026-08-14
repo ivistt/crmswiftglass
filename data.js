@@ -2321,7 +2321,8 @@ function calcReworkSalary(workerName, reworkData) {
 
 // Тату-бонус: начисляется если в конфиге есть tatuBonusPct и в заказе есть tatu
 function _calcTatuBonus(workerName, order) {
-  if (!workerName || getOrderSpecialServiceAssignedWorker(order, 'tatu') !== workerName) return 0;
+  const assignedWorker = getOrderSpecialServiceAssignedWorker(order, 'tatu') || order?.tatuDoneBy || '';
+  if (!workerName || assignedWorker !== workerName) return 0;
   const rule = getSalaryRule(workerName);
   if (!rule.tatuBonusPct) return 0;
   
@@ -2336,7 +2337,8 @@ function _calcTatuBonus(workerName, order) {
 }
 
 function _calcToningBonus(workerName, order) {
-  if (!workerName || getOrderSpecialServiceAssignedWorker(order, 'toning') !== workerName) return 0;
+  const assignedWorker = getOrderSpecialServiceAssignedWorker(order, 'toning') || order?.toningDoneBy || '';
+  if (!workerName || assignedWorker !== workerName) return 0;
   const rule = getSalaryRule(workerName);
   if (!rule.toningBonusPct) return 0;
   if (!order?.toningDone || order?.toningExternal) return 0;

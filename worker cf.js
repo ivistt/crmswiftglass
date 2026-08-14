@@ -2528,6 +2528,9 @@ function buildSpecialistOrderPatch(body, existingOrder, session = {}, currentWor
     patch.tatu_done = !!body.tatu_done;
     patch.tatu_done_by = patch.tatu_done ? session.workerName : null;
     patch.tatu_status = patch.tatu_done;
+    if (patch.tatu_done && !getOrderAssignedSpecialistId(existingOrder, 'tatu') && currentWorker?.id) {
+      patch.tatu_responsible_worker_id = currentWorker.id;
+    }
   } else if (Object.prototype.hasOwnProperty.call(body, 'tatu_status')) {
     if (!workerHasSpecialServiceCapability(currentWorker || { name: session.workerName, note: '' }, 'tatu')) throw new Error('Forbidden');
     if ((getOrderAssignedSpecialist(existingOrder, 'tatu') || getOrderAssignedSpecialistId(existingOrder, 'tatu')) && !isSessionAssignedSpecialist(existingOrder, 'tatu', session, currentWorker)) throw new Error('Forbidden');
@@ -2535,6 +2538,9 @@ function buildSpecialistOrderPatch(body, existingOrder, session = {}, currentWor
     patch.tatu_status = !!body.tatu_status;
     patch.tatu_done = patch.tatu_status;
     patch.tatu_done_by = patch.tatu_status ? session.workerName : null;
+    if (patch.tatu_status && !getOrderAssignedSpecialistId(existingOrder, 'tatu') && currentWorker?.id) {
+      patch.tatu_responsible_worker_id = currentWorker.id;
+    }
   }
   if (Object.prototype.hasOwnProperty.call(body, 'toning_done')) {
     if (!workerHasSpecialServiceCapability(currentWorker || { name: session.workerName, note: '' }, 'toning')) throw new Error('Forbidden');
@@ -2543,6 +2549,9 @@ function buildSpecialistOrderPatch(body, existingOrder, session = {}, currentWor
     patch.toning_done = !!body.toning_done;
     patch.toning_done_by = patch.toning_done ? session.workerName : null;
     patch.toning_status = patch.toning_done;
+    if (patch.toning_done && !getOrderAssignedSpecialistId(existingOrder, 'toning') && currentWorker?.id) {
+      patch.toning_responsible_worker_id = currentWorker.id;
+    }
   } else if (Object.prototype.hasOwnProperty.call(body, 'toning_status')) {
     if (!workerHasSpecialServiceCapability(currentWorker || { name: session.workerName, note: '' }, 'toning')) throw new Error('Forbidden');
     if ((getOrderAssignedSpecialist(existingOrder, 'toning') || getOrderAssignedSpecialistId(existingOrder, 'toning')) && !isSessionAssignedSpecialist(existingOrder, 'toning', session, currentWorker)) throw new Error('Forbidden');
@@ -2550,6 +2559,9 @@ function buildSpecialistOrderPatch(body, existingOrder, session = {}, currentWor
     patch.toning_status = !!body.toning_status;
     patch.toning_done = patch.toning_status;
     patch.toning_done_by = patch.toning_status ? session.workerName : null;
+    if (patch.toning_status && !getOrderAssignedSpecialistId(existingOrder, 'toning') && currentWorker?.id) {
+      patch.toning_responsible_worker_id = currentWorker.id;
+    }
   }
   if (Object.prototype.hasOwnProperty.call(body, 'price_locked') && body.price_locked !== undefined) {
     patch.price_locked = !!body.price_locked;

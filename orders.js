@@ -5362,7 +5362,7 @@ async function _upsertOrderSalaries(order, options = {}) {
 
   }
 
-  const tatuWorkerName = getOrderSpecialServiceAssignedWorker(order, 'tatu');
+  const tatuWorkerName = getOrderSpecialServiceAssignedWorker(order, 'tatu') || order.tatuDoneBy || '';
   const tatuAmount = _calcTatuBonus(tatuWorkerName, order);
   if (tatuAmount > 0) {
     affectedWorkers.add(tatuWorkerName);
