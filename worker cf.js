@@ -332,7 +332,8 @@ export default {
           if (Array.isArray(cashRows) && cashRows[0]) savedCashEntries.push(cashRows[0]);
         }
 
-        await syncOrderFopCashEntries(savedOrder, sb, sbHeaders, { paymentTypes: syncPaymentTypes, debug: financeDebug });
+        const syncedCashEntries = await syncOrderFopCashEntries(savedOrder, sb, sbHeaders, { paymentTypes: syncPaymentTypes, debug: financeDebug });
+        savedCashEntries.push(...syncedCashEntries);
         savedOrder = await reconcileOrderClientPaymentConfirmations(savedOrder, sb, sbHeaders);
         const sashaCashEntries = await syncOrderSashaManagerCashEntries(savedOrder, sb, sbHeaders);
         savedCashEntries.push(...sashaCashEntries);
@@ -983,12 +984,22 @@ export default {
       if (!sourceRes.ok) {
         return Response.json({ error: sourceRows?.message || 'Failed to load cash entry' }, { status: sourceRes.status || 400, headers: cors });
       }
-      const cashRow = chooseCanonicalOrderCashEntry(
+      let cashRow = chooseCanonicalOrderCashEntry(
         (Array.isArray(sourceRows) ? sourceRows : []).filter(row => {
           if (!isActiveCashLedgerRow(row)) return false;
           return String(row?.ledger_status || 'posted').trim().toLowerCase() !== 'corrected';
         })
       );
+      if (!cashRow) {
+        try {
+          cashRow = await ensureOrderCashEntryForSourceKey(sourceKey, session, authedRole, sb, sbHeaders);
+        } catch (e) {
+          if (String(e?.message || '') === 'Forbidden') {
+            return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
+          }
+          return Response.json({ error: e?.message || 'Failed to restore cash entry' }, { status: 400, headers: cors });
+        }
+      }
       if (!cashRow) {
         return Response.json({ error: 'Cash entry not found' }, { status: 404, headers: cors });
       }
@@ -2407,6 +2418,42 @@ function canPatchSpecialServiceOnly(body, order, session = {}, currentWorker = n
   return false;
 }
 
+const SPECIALIST_FILLABLE_ORDER_AMOUNT_FIELDS = [
+  { rowKey: 'mount' },
+  { rowKey: 'molding' },
+  { rowKey: 'extra_work' },
+  { rowKey: 'tatu' },
+  { rowKey: 'toning' },
+];
+
+function applySpecialistEmptyAmountPatch(patch, body, existingOrder, currentWorker = null) {
+  if (!body || !existingOrder) return false;
+  const canEditServices = workerHasPermission(currentWorker, 'order_services_edit');
+  let changed = false;
+  for (const field of SPECIALIST_FILLABLE_ORDER_AMOUNT_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(body, field.rowKey)) continue;
+    const previousAmount = Number(existingOrder?.[field.rowKey]) || 0;
+    const nextAmount = Number(body?.[field.rowKey]) || 0;
+    if (previousAmount <= 0 && nextAmount > 0) {
+      if (!canEditServices) throw new Error('Forbidden');
+      patch[field.rowKey] = nextAmount;
+      changed = true;
+      continue;
+    }
+    if (nextAmount !== previousAmount) {
+      throw new Error('Forbidden amount change');
+    }
+  }
+  if (changed) {
+    const nextOrder = { ...existingOrder, ...patch };
+    patch.total = SPECIALIST_FILLABLE_ORDER_AMOUNT_FIELDS.reduce((sum, field) => {
+      return sum + (Number(nextOrder?.[field.rowKey]) || 0);
+    }, 0);
+    patch.payment_status = calcClientPaymentStatus(Number(existingOrder?.debt) || 0, getOrderClientTotal({ ...existingOrder, total: patch.total }));
+  }
+  return changed;
+}
+
 function normalizeOrderPaymentForAppendCheck(payment) {
   return {
     amount: Number(payment?.amount) || 0,
@@ -2502,6 +2549,7 @@ function buildSpecialistOrderPatch(body, existingOrder, session = {}, currentWor
   if (Object.prototype.hasOwnProperty.call(body, 'price_locked') && body.price_locked !== undefined) {
     patch.price_locked = !!body.price_locked;
   }
+  applySpecialistEmptyAmountPatch(patch, body, existingOrder, currentWorker);
   if (Array.isArray(clientPayments)) {
     const prev = existingOrder?.client_payments || [];
     assertOnlyAppendedPayments(clientPayments, prev, 'client_payments');
@@ -3241,7 +3289,7 @@ function getCashLedgerSourceKey(rowOrBody = {}) {
 
 function cashSourceEqFilter(sourceKey) {
   const key = encodeURIComponent(String(sourceKey || '').trim());
-  return `or=(source_key.eq.${key},fop_source_key.eq.${key})`;
+  return `or=(source_key.eq.${key},fop_source_key.eq.${key},source_id.eq.${key})`;
 }
 
 function cashSourceLikeFilter(sourcePattern) {
@@ -3503,6 +3551,57 @@ function chooseCanonicalOrderCashEntry(rows = []) {
     if (at !== bt) return at - bt;
     return String(a?.id || '').localeCompare(String(b?.id || ''));
   })[0] || null;
+}
+
+async function canSessionAccessCashOwner(cashOwnerLabel, session, authedRole, sb, sbHeaders) {
+  const ownerLabel = String(cashOwnerLabel || '').trim();
+  if (!ownerLabel) return authedRole === 'owner';
+  if (authedRole === 'owner') return true;
+  const [sessionWorker, targetWorker] = await Promise.all([
+    findWorkerByIdentity(session.workerName, sb, sbHeaders),
+    findWorkerByIdentity(ownerLabel, sb, sbHeaders),
+  ]);
+  return ownerLabel === session.workerName
+    || (sessionWorker && targetWorker && normalizeWorkerIdentityText(sessionWorker.name) === normalizeWorkerIdentityText(targetWorker.name));
+}
+
+async function fetchCashEntryBySourceKey(sourceKey, sb, sbHeaders) {
+  const res = await fetch(
+    `${sb}/rest/v1/cash_log?${cashSourceEqFilter(sourceKey)}&deleted_at=is.null&limit=100`,
+    { headers: sbHeaders }
+  );
+  const rows = await res.json().catch(() => []);
+  if (!res.ok) {
+    const message = Array.isArray(rows) ? 'Failed to load cash entry' : (rows?.message || rows?.error || 'Failed to load cash entry');
+    throw new Error(message);
+  }
+  return chooseCanonicalOrderCashEntry(
+    (Array.isArray(rows) ? rows : []).filter(row => {
+      if (!isActiveCashLedgerRow(row)) return false;
+      return String(row?.ledger_status || 'posted').trim().toLowerCase() !== 'corrected';
+    })
+  );
+}
+
+async function ensureOrderCashEntryForSourceKey(sourceKey, session, authedRole, sb, sbHeaders) {
+  const normalizedSourceKey = String(sourceKey || '').trim();
+  const orderId = extractOrderIdFromSourceKey(normalizedSourceKey);
+  if (!normalizedSourceKey || !orderId) return null;
+
+  const order = await getOrderById(orderId, sb, sbHeaders);
+  if (!order) return null;
+  const paymentType = getOrderPaymentTypeFromSourceKey(normalizedSourceKey);
+  const paymentTypes = paymentType ? new Set([paymentType]) : null;
+  const expectedEntries = await buildOrderDerivedCashEntries(order, sb, sbHeaders, { paymentTypes });
+  const expectedEntry = expectedEntries.find(entry => getCashLedgerSourceKey(entry) === normalizedSourceKey) || null;
+  if (!expectedEntry) return null;
+
+  const cashOwnerLabel = String(expectedEntry.cash_owner || expectedEntry.worker_name || '').trim();
+  const allowed = await canSessionAccessCashOwner(cashOwnerLabel, session, authedRole, sb, sbHeaders);
+  if (!allowed) throw new Error('Forbidden');
+
+  await syncOrderFopCashEntries(order, sb, sbHeaders, { paymentTypes });
+  return fetchCashEntryBySourceKey(normalizedSourceKey, sb, sbHeaders);
 }
 
 async function voidCashLedgerRow(id, reason, sb, sbHeaders) {
@@ -4004,16 +4103,28 @@ async function syncOrderFopCashEntries(order, sb, sbHeaders, options = {}) {
       }
     }
   });
-  await fetch(`${sb}/rest/v1/cash_log?on_conflict=source_key`, {
+  const saveRes = await fetch(`${sb}/rest/v1/cash_log?on_conflict=source_key`, {
     method: 'POST',
     headers: {
       ...sbHeaders,
-      Prefer: 'resolution=merge-duplicates,return=minimal',
+      Prefer: 'resolution=merge-duplicates,return=representation',
     },
     body: JSON.stringify(entries),
   });
-  debug?.push?.({ type: 'sync-finish', orderId, upsertedRows: entries.length, sourceKeys: entries.map(entry => getCashLedgerSourceKey(entry)).filter(Boolean) });
-  return [];
+  const savedRows = await saveRes.json().catch(() => []);
+  if (!saveRes.ok) {
+    const message = Array.isArray(savedRows) ? 'Order cash sync failed' : (savedRows?.message || savedRows?.error || 'Order cash sync failed');
+    debug?.push?.({ type: 'sync-error', orderId, message, details: savedRows });
+    throw new Error(message);
+  }
+  const savedList = Array.isArray(savedRows) ? savedRows : [];
+  debug?.push?.({
+    type: 'sync-finish',
+    orderId,
+    upsertedRows: savedList.length || entries.length,
+    sourceKeys: entries.map(entry => getCashLedgerSourceKey(entry)).filter(Boolean),
+  });
+  return savedList;
 }
 
 async function fetchOrderDerivedCashEntries(orderId, sb, sbHeaders) {

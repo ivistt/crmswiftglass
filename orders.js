@@ -254,6 +254,36 @@ function canCurrentUserEditOrderServices(order) {
   return !String(order.serviceType || '').trim();
 }
 
+const ORDER_WORK_AMOUNT_FIELDS = [
+  { id: 'f-mount', key: 'mount', rowKey: 'mount' },
+  { id: 'f-molding', key: 'molding', rowKey: 'molding' },
+  { id: 'f-extra-work', key: 'extraWork', rowKey: 'extra_work' },
+  { id: 'f-tatu', key: 'tatu', rowKey: 'tatu' },
+  { id: 'f-toning', key: 'toning', rowKey: 'toning' },
+];
+
+function canCurrentUserFillEmptyOrderAmount(order, fieldKey = '') {
+  if (currentRole === 'owner' || currentRole === 'manager') return true;
+  if (!order && canCreateOrder()) return true;
+  if (!order || !currentUserCanActAsSenior()) return false;
+  if (order.responsible !== currentWorkerName) return false;
+  if (!currentUserHasPermission('order_services_edit', currentUserCanActAsSenior())) return false;
+  if (!fieldKey) return false;
+  return (Number(order?.[fieldKey]) || 0) <= 0;
+}
+
+function hasEmptyOrderAmountChanges(order = null) {
+  if (!currentUserCanActAsSenior()) return false;
+  const originalOrder = order || (editingOrderId ? orders.find(item => item.id === editingOrderId) : null);
+  if (!originalOrder) return false;
+  return ORDER_WORK_AMOUNT_FIELDS.some(field => {
+    if (!canCurrentUserFillEmptyOrderAmount(originalOrder, field.key)) return false;
+    const originalAmount = Number(originalOrder?.[field.key]) || 0;
+    const currentAmount = _moneyInputValue(document.getElementById(field.id)?.value);
+    return originalAmount <= 0 && currentAmount > 0;
+  });
+}
+
 function canCurrentUserToggleSpecialServiceStatus(order, type) {
   if (currentRole === 'owner' || currentRole === 'manager') return true;
   if (!order) return false;
@@ -300,7 +330,7 @@ function hasSeniorServiceChanges(order) {
   const originalOrder = order || (editingOrderId ? orders.find(item => item.id === editingOrderId) : null);
   const currentServiceType = String(document.getElementById('f-service-type')?.value || '').trim();
   const originalServiceType = String(originalOrder?.serviceType || '').trim();
-  return currentServiceType !== originalServiceType;
+  return currentServiceType !== originalServiceType || hasEmptyOrderAmountChanges(originalOrder);
 }
 
 function _dailyBaseOrderId() {
@@ -975,9 +1005,21 @@ async function confirmSpecialServiceDone(orderId, type) {
       };
       if (idx !== -1) orders[idx] = updated;
     }
+    const updatedOrder = orders.find(item => item.id === order.id) || {
+      ...order,
+      ...saved,
+      tatuStatus: isTatu ? true : (saved?.tatuStatus ?? order.tatuStatus),
+      tatuDone: isTatu ? true : (saved?.tatuDone ?? order.tatuDone),
+      tatuDoneBy: isTatu ? currentWorkerName : (saved?.tatuDoneBy ?? order.tatuDoneBy),
+      toningStatus: !isTatu ? true : (saved?.toningStatus ?? order.toningStatus),
+      toningDone: !isTatu ? true : (saved?.toningDone ?? order.toningDone),
+      toningDoneBy: !isTatu ? currentWorkerName : (saved?.toningDoneBy ?? order.toningDoneBy),
+    };
+    await _upsertOrderSalaries(updatedOrder, { forceRecalculateExisting: true });
     currentMonthFilter ? renderOrdersForMonth(currentMonthFilter) : renderOrders();
     showToast('Услуга выполнена ✓');
     if (document.getElementById('screen-profile')?.classList.contains('active')) {
+      await loadWorkerSalaries();
       renderProfile();
     }
   } catch (e) {
@@ -3629,6 +3671,9 @@ async function openOrderModal(id) {
     el.addEventListener('input', () => {
       if (id === 'f-tatu' || id === 'f-toning') populateSpecialServiceResponsibleSelects();
       recalcFullMargins();
+      if (ORDER_WORK_AMOUNT_FIELDS.some(field => field.id === id)) {
+        updateOrderModalAccess(editingOrderId ? orders.find(item => item.id === editingOrderId) : null);
+      }
       renderOrderSummary(editingOrderId ? orders.find(item => item.id === editingOrderId) : null);
     });
   });
@@ -4185,7 +4230,13 @@ function updateOrderModalAccess(order = null) {
   if (toningStatusWrap) toningStatusWrap.style.display = canToggleToningStatus ? '' : 'none';
   ['f-mount','f-molding','f-extra-work','f-tatu','f-toning','f-total','f-delivery','f-dropshipper','f-purchase','f-income','f-debt-date'].forEach(id => {
     const el = document.getElementById(id);
-    const allow = isPrivileged || (canManagePayments && id === 'f-debt-date');
+    const amountField = ORDER_WORK_AMOUNT_FIELDS.find(field => field.id === id);
+    const allowEmptyAmountFill = amountField
+      ? canCurrentUserFillEmptyOrderAmount(existingOrder, amountField.key)
+      : false;
+    const allow = isPrivileged
+      || allowEmptyAmountFill
+      || (canManagePayments && id === 'f-debt-date');
     setElementDisabledState(el, !allow);
   });
   setElementDisabledState(
@@ -4327,11 +4378,13 @@ async function handleSpecialServiceStatusChange(type) {
       const idx = orders.findIndex(item => item.id === editingOrderId);
       if (idx !== -1) orders[idx] = updatedOrder;
     }
+    await _upsertOrderSalaries(updatedOrder, { forceRecalculateExisting: true });
     updateOrderModalAccess(updatedOrder);
     renderOrderSummary(updatedOrder);
     if (currentMonthFilter) renderOrdersForMonth(currentMonthFilter);
     else renderOrders();
     if (document.getElementById('screen-profile')?.classList.contains('active')) {
+      await loadWorkerSalaries();
       renderProfile();
     }
     showToast((isTatu ? 'Статус тату' : 'Статус тонировки') + ' сохранён ✓');
@@ -4823,6 +4876,10 @@ async function saveOrder() {
     const saved = result.order;
     logFinanceDebug(isNew ? 'order create' : 'order save', result);
 
+    if (saved?.tatuDone || saved?.tatuStatus || saved?.toningDone || saved?.toningStatus) {
+      await _upsertOrderSalaries(saved, { forceRecalculateExisting: true });
+    }
+
     await rememberCarDirectoryFromOrder(saved);
     try {
       await rememberAssistantForResponsible(data.responsible, data.assistant);
@@ -5236,7 +5293,7 @@ async function toggleWorkerDone(orderId) {
       console.warn('Failed to refresh orders after worker done update:', refreshError);
     }
     const refreshedOrder = orders.find(x => x.id === orderId) || { ...o, serviceType: draftOrder.serviceType, workerDone: true };
-    await _upsertOrderSalaries(refreshedOrder);
+    await _upsertOrderSalaries(refreshedOrder, { forceRecalculateExisting: !o.workerDone });
     try {
       orders = await sbFetchOrders();
     } catch (refreshError) {
@@ -5262,7 +5319,8 @@ async function completeOrderFromModal() {
 }
 
 // Начислить / удалить записи ЗП для всех участников заказа
-async function _upsertOrderSalaries(order) {
+async function _upsertOrderSalaries(order, options = {}) {
+  const forceRecalculateExisting = !!options?.forceRecalculateExisting;
   try {
     if (typeof sbFetchWorkers === 'function') {
       workers = await sbFetchWorkers();
@@ -5296,19 +5354,20 @@ async function _upsertOrderSalaries(order) {
       amounts[managerName] = (amounts[managerName] || 0) + _calcManagerSalary(order);
     }
 
-    const tatuWorkerName = getOrderSpecialServiceAssignedWorker(order, 'tatu');
-    const tatuAmount = _calcTatuBonus(tatuWorkerName, order);
-    if (tatuAmount > 0) {
-      affectedWorkers.add(tatuWorkerName);
-      amounts[tatuWorkerName] = (amounts[tatuWorkerName] || 0) + tatuAmount;
-    }
+  }
 
-    const toningWorkerName = getOrderSpecialServiceAssignedWorker(order, 'toning');
-    const toningAmount = _calcToningBonus(toningWorkerName, order);
-    if (toningAmount > 0) {
-      affectedWorkers.add(toningWorkerName);
-      amounts[toningWorkerName] = (amounts[toningWorkerName] || 0) + toningAmount;
-    }
+  const tatuWorkerName = getOrderSpecialServiceAssignedWorker(order, 'tatu');
+  const tatuAmount = _calcTatuBonus(tatuWorkerName, order);
+  if (tatuAmount > 0) {
+    affectedWorkers.add(tatuWorkerName);
+    amounts[tatuWorkerName] = (amounts[tatuWorkerName] || 0) + tatuAmount;
+  }
+
+  const toningWorkerName = getOrderSpecialServiceAssignedWorker(order, 'toning');
+  const toningAmount = _calcToningBonus(toningWorkerName, order);
+  if (toningAmount > 0) {
+    affectedWorkers.add(toningWorkerName);
+    amounts[toningWorkerName] = (amounts[toningWorkerName] || 0) + toningAmount;
   }
 
   // Всегда берём актуальные записи ЗП по этому заказу из БД
@@ -5326,7 +5385,7 @@ async function _upsertOrderSalaries(order) {
 
   // После первого выполнения заказа ЗП по этому order_id считается зафиксированной:
   // последующие правки сумм/полей заказа не должны менять уже начисленные записи.
-  const salaryFrozen = order.workerDone && automaticEntriesInDb.length;
+  const salaryFrozen = order.workerDone && automaticEntriesInDb.length && !forceRecalculateExisting;
   if (salaryFrozen) {
     const missingWorkers = Object.keys(amounts).filter(workerName =>
       Number(amounts[workerName]) > 0 && !automaticEntriesInDb.some(entry => entry.worker_name === workerName)
