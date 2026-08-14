@@ -268,10 +268,17 @@ export default {
       if (!isNew && !previousOrder) {
         return Response.json({ ok: false, error: 'Order not found' }, { status: 404, headers: cors });
       }
+      if (!isNew) {
+        try {
+          assertSpecialServiceStateUnchanged(orderBody, previousOrder);
+        } catch (e) {
+          return Response.json({ ok: false, error: e.message }, { status: 400, headers: cors });
+        }
+      }
 
       if (!isNew && (authedRole === 'senior' || authedRole === 'extra')) {
         const currentWorker = await getWorkerByName(session.workerName, sb, sbHeaders);
-        if (!(await isOwnOrderForSession(previousOrder, session, sb, sbHeaders)) && !canPatchSpecialServiceOnly(orderBody, previousOrder, session, currentWorker)) {
+        if (!(await isOwnOrderForSession(previousOrder, session, sb, sbHeaders))) {
           return Response.json({ ok: false, error: 'Forbidden' }, { status: 403, headers: cors });
         }
           try {
@@ -352,6 +359,100 @@ export default {
       }
     }
 
+    const servicePriceMatch = url.pathname.match(/^\/api\/orders\/([^/]+)\/service-prices\/(mount|molding|extra_work|tatu|toning)$/);
+    if (servicePriceMatch && request.method === 'PATCH') {
+      const orderId = decodeURIComponent(servicePriceMatch[1]);
+      const serviceCode = servicePriceMatch[2];
+      const body = await request.json().catch(() => ({}));
+      const amount = Number(body?.amount);
+      const order = await getOrderById(orderId, sb, sbHeaders);
+      if (!order) {
+        return Response.json({ ok: false, error: 'Order not found' }, { status: 404, headers: cors });
+      }
+      const currentWorker = liveWorker || await findWorkerByIdentity(session.workerName, sb, sbHeaders);
+      const isPrivileged = authedRole === 'owner' || authedRole === 'manager';
+      const canFillPrice = isPrivileged || (
+        workerHasPermission(currentWorker, 'fill_missing_service_prices')
+        && await isOwnOrderForSession(order, session, sb, sbHeaders)
+      );
+      if (!canFillPrice) {
+        return Response.json({ ok: false, error: 'Forbidden' }, { status: 403, headers: cors });
+      }
+      if (!isOrderServicePriceFieldRelevant(order, serviceCode)) {
+        return Response.json({ ok: false, error: 'Service is not selected' }, { status: 400, headers: cors });
+      }
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return Response.json({ ok: false, error: 'Invalid service price' }, { status: 400, headers: cors });
+      }
+
+      try {
+        const savedOrder = await callSupabaseRpc('crm_set_missing_order_service_price', {
+          p_order_id: orderId,
+          p_service_code: serviceCode,
+          p_amount: amount,
+          p_actor_worker_id: currentWorker?.id || null,
+          p_actor_name: currentWorker?.name || session.workerName || '',
+        }, sb, sbHeaders);
+        return Response.json({ ok: true, order: savedOrder }, { headers: cors });
+      } catch (e) {
+        return Response.json({ ok: false, error: e?.message || 'Service price update failed' }, { status: 400, headers: cors });
+      }
+    }
+
+    const completeServiceMatch = url.pathname.match(/^\/api\/orders\/([^/]+)\/services\/(tatu|toning)\/complete$/);
+    if (completeServiceMatch && request.method === 'POST') {
+      const orderId = decodeURIComponent(completeServiceMatch[1]);
+      const serviceCode = completeServiceMatch[2];
+      const body = await request.json().catch(() => ({}));
+      const order = await getOrderById(orderId, sb, sbHeaders);
+      if (!order) {
+        return Response.json({ ok: false, error: 'Order not found' }, { status: 404, headers: cors });
+      }
+      const currentWorker = liveWorker || await findWorkerByIdentity(session.workerName, sb, sbHeaders);
+      const isPrivileged = authedRole === 'owner' || authedRole === 'manager';
+      const requestedWorkerName = String(body?.target_worker_name || '').trim();
+      const requestedWorker = isPrivileged && requestedWorkerName
+        ? await findWorkerByIdentity(requestedWorkerName, sb, sbHeaders)
+        : null;
+      const assignedWorker = requestedWorker
+        || await resolveOrderSpecialServiceWorker(order, serviceCode, currentWorker, sb, sbHeaders);
+      const currentWorkerCanComplete = !!currentWorker
+        && workerHasSpecialServiceCapability(currentWorker, serviceCode)
+        && (!getOrderAssignedSpecialist(order, serviceCode) && !getOrderAssignedSpecialistId(order, serviceCode)
+          || isSessionAssignedSpecialist(order, serviceCode, session, currentWorker));
+      if (!isPrivileged && !currentWorkerCanComplete) {
+        return Response.json({ ok: false, error: 'Forbidden' }, { status: 403, headers: cors });
+      }
+      if (!orderHasSpecialService(order, serviceCode)) {
+        return Response.json({ ok: false, error: 'Invalid special service' }, { status: 400, headers: cors });
+      }
+      if (!assignedWorker) {
+        return Response.json({ ok: false, error: 'Special service worker required' }, { status: 400, headers: cors });
+      }
+      if (!workerHasSpecialServiceCapability(assignedWorker, serviceCode)) {
+        return Response.json({ ok: false, error: 'Special service worker has no permission' }, { status: 400, headers: cors });
+      }
+      const rate = getWorkerSpecialServiceSalaryRate(assignedWorker, serviceCode);
+      if (rate <= 0) {
+        return Response.json({ ok: false, error: 'Special service salary rate required' }, { status: 400, headers: cors });
+      }
+
+      try {
+        const result = await callSupabaseRpc('crm_complete_order_special_service', {
+          p_order_id: orderId,
+          p_service_code: serviceCode,
+          p_actor_worker_id: currentWorker?.id || null,
+          p_actor_name: currentWorker?.name || session.workerName || '',
+          p_target_worker_id: assignedWorker.id,
+          p_target_worker_name: assignedWorker.name,
+          p_rate: rate,
+        }, sb, sbHeaders);
+        return Response.json({ ok: true, ...result }, { headers: cors });
+      } catch (e) {
+        return Response.json({ ok: false, error: e?.message || 'Special service completion failed' }, { status: 400, headers: cors });
+      }
+    }
+
     if (url.pathname.startsWith('/api/orders/')) {
       const id = decodeURIComponent(url.pathname.split('/').pop());
 
@@ -367,10 +468,15 @@ export default {
           if (!previousOrder) {
             return Response.json({ ok: false, error: 'Order not found' }, { status: 404, headers: cors });
           }
+          try {
+            assertSpecialServiceStateUnchanged(body, previousOrder);
+          } catch (e) {
+            return Response.json({ ok: false, error: e.message }, { status: 400, headers: cors });
+          }
 
           if (authedRole === 'senior' || authedRole === 'extra') {
             const currentWorker = await findWorkerByIdentity(session.workerName, sb, sbHeaders);
-            if (!(await isOwnOrderForSession(previousOrder, session, sb, sbHeaders)) && !canPatchSpecialServiceOnly(body, previousOrder, session, currentWorker)) {
+            if (!(await isOwnOrderForSession(previousOrder, session, sb, sbHeaders))) {
               return Response.json({ ok: false, error: 'Forbidden' }, { status: 403, headers: cors });
             }
 
@@ -650,10 +756,7 @@ export default {
           const body = await request.json();
           const isOwnAttendance = body.worker_name === session.workerName && body.order_id === 'Выход в работу';
           const isOwnWithdrawal = body.worker_name === session.workerName && String(body.order_id || '').startsWith('Выплата');
-          const isAllowedAutoOrderSalary = await canManageAutoSalaryEntryForOrder(body.order_id, session, sb, sbHeaders)
-            && !isManualSalaryRow(body)
-            && String(body.entry_type || 'auto') === 'auto';
-          if (!isOwnAttendance && !isOwnWithdrawal && !isAllowedAutoOrderSalary) {
+          if (!isOwnAttendance && !isOwnWithdrawal) {
             return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
           }
           if (!body.worker_id && body.worker_name) {
@@ -735,6 +838,15 @@ export default {
         !url.pathname.startsWith('/api/salaries/by-order/') &&
         request.method === 'PATCH'
       ) {
+        if (authedRole === 'manager') {
+          const id = url.pathname.split('/').pop();
+          const salaryRow = await getSalaryById(id, sb, sbHeaders);
+          const isOwnAttendance = salaryRow && salaryRow.worker_name === session.workerName && salaryRow.order_id === 'Выход в работу';
+          if (!isOwnAttendance) {
+            return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
+          }
+        }
+
         const id = url.pathname.split('/').pop();
         const body = await request.json();
         const salaryRowForLock = await getSalaryById(id, sb, sbHeaders);
@@ -742,17 +854,7 @@ export default {
           return Response.json({ error: 'Salary not found' }, { status: 404, headers: cors });
         }
         const isLockedAutoSalary = !isManualSalaryRow(salaryRowForLock) && isLockedOrderSalaryId(salaryRowForLock.order_id);
-        const canAutoSyncLockedSalary = isLockedAutoSalary
-          && await canManageAutoSalaryEntryForOrder(salaryRowForLock.order_id, session, sb, sbHeaders);
-
-        if (authedRole === 'manager') {
-          const isOwnAttendance = salaryRowForLock.worker_name === session.workerName && salaryRowForLock.order_id === 'Выход в работу';
-          if (!isOwnAttendance && !canAutoSyncLockedSalary) {
-            return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
-          }
-        }
-
-        if (isLockedAutoSalary && authedRole !== 'owner' && !canAutoSyncLockedSalary) {
+        if (isLockedAutoSalary && authedRole !== 'owner') {
           return Response.json([salaryRowForLock], { headers: cors });
         }
 
@@ -761,7 +863,7 @@ export default {
         }
 
         if (isManualSalaryRow(salaryRowForLock) || isLockedAutoSalary) {
-          if (authedRole !== 'owner' && !canAutoSyncLockedSalary) {
+          if (authedRole !== 'owner') {
             return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
           }
           if (await isSalaryEntryWithdrawn(salaryRowForLock, sb, sbHeaders)) {
@@ -793,8 +895,7 @@ export default {
 
         if (authedRole !== 'owner') {
           const allowed = await canAccessWorker(salaryRowForLock.worker_name, session, sb, sbHeaders)
-            || await canManageSalaryEntryForOrder(salaryRowForLock.order_id, session, sb, sbHeaders)
-            || canAutoSyncLockedSalary;
+            || await canManageSalaryEntryForOrder(salaryRowForLock.order_id, session, sb, sbHeaders);
           if (!allowed) {
             return Response.json({ error: 'Forbidden' }, { status: 403, headers: cors });
           }
@@ -2402,63 +2503,6 @@ function isOwnOrder(order, workerName) {
   return !!order && !!workerName && (order.responsible === workerName || order.assistant === workerName || order.extra_assistant === workerName);
 }
 
-function canPatchSpecialServiceOnly(body, order, session = {}, currentWorker = null) {
-  if (!body || !order || order.is_cancelled || !order.in_work) return false;
-  const keys = Object.keys(body);
-  if (!keys.length) return false;
-  const tatuKeys = ['tatu_done', 'tatu_status', 'tatu_done_by'];
-  const toningKeys = ['toning_done', 'toning_status', 'toning_done_by'];
-  const onlyTatuKeys = keys.every(key => tatuKeys.includes(key));
-  const onlyToningKeys = keys.every(key => toningKeys.includes(key));
-  const tatuAssigned = getOrderAssignedSpecialist(order, 'tatu');
-  const toningAssigned = getOrderAssignedSpecialist(order, 'toning');
-  if (workerHasSpecialServiceCapability(currentWorker || { name: session.workerName, note: '' }, 'tatu') && onlyTatuKeys) {
-    if ((tatuAssigned || getOrderAssignedSpecialistId(order, 'tatu')) && !isSessionAssignedSpecialist(order, 'tatu', session, currentWorker)) return false;
-    return orderHasSpecialService(order, 'tatu');
-  }
-  if (workerHasSpecialServiceCapability(currentWorker || { name: session.workerName, note: '' }, 'toning') && onlyToningKeys) {
-    if ((toningAssigned || getOrderAssignedSpecialistId(order, 'toning')) && !isSessionAssignedSpecialist(order, 'toning', session, currentWorker)) return false;
-    return orderHasSpecialService(order, 'toning');
-  }
-  return false;
-}
-
-const SPECIALIST_FILLABLE_ORDER_AMOUNT_FIELDS = [
-  { rowKey: 'mount' },
-  { rowKey: 'molding' },
-  { rowKey: 'extra_work' },
-  { rowKey: 'tatu' },
-  { rowKey: 'toning' },
-];
-
-function applySpecialistEmptyAmountPatch(patch, body, existingOrder, currentWorker = null) {
-  if (!body || !existingOrder) return false;
-  const canEditServices = workerHasPermission(currentWorker, 'order_services_edit');
-  let changed = false;
-  for (const field of SPECIALIST_FILLABLE_ORDER_AMOUNT_FIELDS) {
-    if (!Object.prototype.hasOwnProperty.call(body, field.rowKey)) continue;
-    const previousAmount = Number(existingOrder?.[field.rowKey]) || 0;
-    const nextAmount = Number(body?.[field.rowKey]) || 0;
-    if (previousAmount <= 0 && nextAmount > 0) {
-      if (!canEditServices) throw new Error('Forbidden');
-      patch[field.rowKey] = nextAmount;
-      changed = true;
-      continue;
-    }
-    if (nextAmount !== previousAmount) {
-      throw new Error('Forbidden amount change');
-    }
-  }
-  if (changed) {
-    const nextOrder = { ...existingOrder, ...patch };
-    patch.total = SPECIALIST_FILLABLE_ORDER_AMOUNT_FIELDS.reduce((sum, field) => {
-      return sum + (Number(nextOrder?.[field.rowKey]) || 0);
-    }, 0);
-    patch.payment_status = calcClientPaymentStatus(Number(existingOrder?.debt) || 0, getOrderClientTotal({ ...existingOrder, total: patch.total }));
-  }
-  return changed;
-}
-
 function normalizeOrderPaymentForAppendCheck(payment) {
   return {
     amount: Number(payment?.amount) || 0,
@@ -2488,6 +2532,22 @@ function sumAppendedCashPayments(nextPayments, prevPayments) {
     const method = normalizeCashPaymentMethod(payment?.method || '');
     return sum + (isCashPaymentMethodForSync(method) ? (Number(payment?.amount) || 0) : 0);
   }, 0);
+}
+
+function assertSpecialServiceStateUnchanged(body, existingOrder) {
+  const checks = [
+    { doneKey: 'tatu_done', statusKey: 'tatu_status' },
+    { doneKey: 'toning_done', statusKey: 'toning_status' },
+  ];
+  for (const check of checks) {
+    const previous = !!existingOrder?.[check.doneKey] || !!existingOrder?.[check.statusKey];
+    if (Object.prototype.hasOwnProperty.call(body || {}, check.doneKey) && !!body[check.doneKey] !== !!previous) {
+      throw new Error('Use special service completion endpoint');
+    }
+    if (Object.prototype.hasOwnProperty.call(body || {}, check.statusKey) && !!body[check.statusKey] !== !!previous) {
+      throw new Error('Use special service completion endpoint');
+    }
+  }
 }
 
 function buildSpecialistOrderPatch(body, existingOrder, session = {}, currentWorker = null) {
@@ -2521,52 +2581,10 @@ function buildSpecialistOrderPatch(body, existingOrder, session = {}, currentWor
   if (Object.prototype.hasOwnProperty.call(body, 'service_type')) {
     patch.service_type = String(body.service_type || '').trim() || null;
   }
-  if (Object.prototype.hasOwnProperty.call(body, 'tatu_done')) {
-    if (!workerHasSpecialServiceCapability(currentWorker || { name: session.workerName, note: '' }, 'tatu')) throw new Error('Forbidden');
-    if ((getOrderAssignedSpecialist(existingOrder, 'tatu') || getOrderAssignedSpecialistId(existingOrder, 'tatu')) && !isSessionAssignedSpecialist(existingOrder, 'tatu', session, currentWorker)) throw new Error('Forbidden');
-    if (!orderHasSpecialService(existingOrder, 'tatu')) throw new Error('Invalid special service');
-    patch.tatu_done = !!body.tatu_done;
-    patch.tatu_done_by = patch.tatu_done ? session.workerName : null;
-    patch.tatu_status = patch.tatu_done;
-    if (patch.tatu_done && !getOrderAssignedSpecialistId(existingOrder, 'tatu') && currentWorker?.id) {
-      patch.tatu_responsible_worker_id = currentWorker.id;
-    }
-  } else if (Object.prototype.hasOwnProperty.call(body, 'tatu_status')) {
-    if (!workerHasSpecialServiceCapability(currentWorker || { name: session.workerName, note: '' }, 'tatu')) throw new Error('Forbidden');
-    if ((getOrderAssignedSpecialist(existingOrder, 'tatu') || getOrderAssignedSpecialistId(existingOrder, 'tatu')) && !isSessionAssignedSpecialist(existingOrder, 'tatu', session, currentWorker)) throw new Error('Forbidden');
-    if (!orderHasSpecialService(existingOrder, 'tatu')) throw new Error('Invalid special service');
-    patch.tatu_status = !!body.tatu_status;
-    patch.tatu_done = patch.tatu_status;
-    patch.tatu_done_by = patch.tatu_status ? session.workerName : null;
-    if (patch.tatu_status && !getOrderAssignedSpecialistId(existingOrder, 'tatu') && currentWorker?.id) {
-      patch.tatu_responsible_worker_id = currentWorker.id;
-    }
-  }
-  if (Object.prototype.hasOwnProperty.call(body, 'toning_done')) {
-    if (!workerHasSpecialServiceCapability(currentWorker || { name: session.workerName, note: '' }, 'toning')) throw new Error('Forbidden');
-    if ((getOrderAssignedSpecialist(existingOrder, 'toning') || getOrderAssignedSpecialistId(existingOrder, 'toning')) && !isSessionAssignedSpecialist(existingOrder, 'toning', session, currentWorker)) throw new Error('Forbidden');
-    if (!orderHasSpecialService(existingOrder, 'toning')) throw new Error('Invalid special service');
-    patch.toning_done = !!body.toning_done;
-    patch.toning_done_by = patch.toning_done ? session.workerName : null;
-    patch.toning_status = patch.toning_done;
-    if (patch.toning_done && !getOrderAssignedSpecialistId(existingOrder, 'toning') && currentWorker?.id) {
-      patch.toning_responsible_worker_id = currentWorker.id;
-    }
-  } else if (Object.prototype.hasOwnProperty.call(body, 'toning_status')) {
-    if (!workerHasSpecialServiceCapability(currentWorker || { name: session.workerName, note: '' }, 'toning')) throw new Error('Forbidden');
-    if ((getOrderAssignedSpecialist(existingOrder, 'toning') || getOrderAssignedSpecialistId(existingOrder, 'toning')) && !isSessionAssignedSpecialist(existingOrder, 'toning', session, currentWorker)) throw new Error('Forbidden');
-    if (!orderHasSpecialService(existingOrder, 'toning')) throw new Error('Invalid special service');
-    patch.toning_status = !!body.toning_status;
-    patch.toning_done = patch.toning_status;
-    patch.toning_done_by = patch.toning_status ? session.workerName : null;
-    if (patch.toning_status && !getOrderAssignedSpecialistId(existingOrder, 'toning') && currentWorker?.id) {
-      patch.toning_responsible_worker_id = currentWorker.id;
-    }
-  }
+  assertSpecialServiceStateUnchanged(body, existingOrder);
   if (Object.prototype.hasOwnProperty.call(body, 'price_locked') && body.price_locked !== undefined) {
     patch.price_locked = !!body.price_locked;
   }
-  applySpecialistEmptyAmountPatch(patch, body, existingOrder, currentWorker);
   if (Array.isArray(clientPayments)) {
     const prev = existingOrder?.client_payments || [];
     assertOnlyAppendedPayments(clientPayments, prev, 'client_payments');
@@ -2670,6 +2688,7 @@ const WORKER_PERMISSION_PRESETS = {
     owner_payments_view: true,
     order_payments_manage: true,
     order_services_edit: true,
+    fill_missing_service_prices: true,
     order_complete: true,
     special_service_status: true,
     special_service_tatu: true,
@@ -2698,6 +2717,7 @@ const WORKER_PERMISSION_PRESETS = {
     owner_payments_view: false,
     order_payments_manage: true,
     order_services_edit: true,
+    fill_missing_service_prices: true,
     order_complete: false,
     special_service_status: false,
     special_service_tatu: false,
@@ -2726,6 +2746,7 @@ const WORKER_PERMISSION_PRESETS = {
     owner_payments_view: false,
     order_payments_manage: true,
     order_services_edit: true,
+    fill_missing_service_prices: true,
     order_complete: true,
     special_service_status: false,
     special_service_tatu: false,
@@ -2754,6 +2775,7 @@ const WORKER_PERMISSION_PRESETS = {
     owner_payments_view: false,
     order_payments_manage: false,
     order_services_edit: false,
+    fill_missing_service_prices: false,
     order_complete: false,
     special_service_status: false,
     special_service_tatu: false,
@@ -2782,6 +2804,7 @@ const WORKER_PERMISSION_PRESETS = {
     owner_payments_view: false,
     order_payments_manage: true,
     order_services_edit: true,
+    fill_missing_service_prices: true,
     order_complete: true,
     special_service_status: false,
     special_service_tatu: false,
@@ -3081,6 +3104,63 @@ function workerHasSpecialServiceCapability(workerRow, type) {
   return false;
 }
 
+function getWorkerSpecialServiceSalaryRate(workerRow, type) {
+  const raw = String(workerRow?.salary_formula || '').trim();
+  if (!raw) return 0;
+  try {
+    const formula = JSON.parse(raw);
+    const rate = Number(type === 'tatu' ? formula?.tatuBonusPct : formula?.toningBonusPct);
+    return Number.isFinite(rate) && rate > 0 ? rate : 0;
+  } catch (e) {
+    return 0;
+  }
+}
+
+async function resolveOrderSpecialServiceWorker(order, type, currentWorker, sb, sbHeaders) {
+  const assignedId = getOrderAssignedSpecialistId(order, type);
+  if (assignedId) {
+    const byId = await getWorkerById(assignedId, sb, sbHeaders);
+    if (byId) return byId;
+  }
+  const assignedName = getOrderAssignedSpecialist(order, type);
+  if (assignedName) {
+    const byName = await findWorkerByIdentity(assignedName, sb, sbHeaders);
+    if (byName) return byName;
+  }
+  return workerHasSpecialServiceCapability(currentWorker, type) ? currentWorker : null;
+}
+
+function isOrderServicePriceFieldRelevant(order, serviceCode) {
+  if (!order || !serviceCode) return false;
+  const amount = Number(order?.[serviceCode]) || 0;
+  if (amount > 0) return true;
+  if (serviceCode === 'tatu' || serviceCode === 'toning') {
+    return orderHasSpecialService(order, serviceCode);
+  }
+  const names = parseOrderServiceTypeNames(order.service_type)
+    .map(name => String(name || '').trim().toLowerCase());
+  if (serviceCode === 'molding') return names.some(name => name.includes('молдинг') || name.includes('резин'));
+  if (serviceCode === 'extra_work') return names.some(name => name.includes('доп') || name.includes('нестандарт'));
+  if (serviceCode === 'mount') {
+    return names.length > 0 && !order.only_sale;
+  }
+  return false;
+}
+
+async function callSupabaseRpc(functionName, payload, sb, sbHeaders) {
+  const res = await fetch(`${sb}/rest/v1/rpc/${encodeURIComponent(functionName)}`, {
+    method: 'POST',
+    headers: sbHeaders,
+    body: JSON.stringify(payload || {}),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    const message = data?.message || data?.error || data?.details || 'Supabase RPC failed';
+    throw new Error(message);
+  }
+  return data;
+}
+
 const ORDER_META_TATU_RESP_PREFIX = '__tatu_resp__:';
 const ORDER_META_TONING_RESP_PREFIX = '__toning_resp__:';
 
@@ -3112,7 +3192,7 @@ function isSessionAssignedSpecialist(order, type, session = {}, currentWorker = 
 
 async function getWorkersIdentityRows(sb, sbHeaders) {
   const res = await fetch(
-    `${sb}/rest/v1/workers?select=id,name,alias,assistant,note,role,system_role&limit=1000`,
+    `${sb}/rest/v1/workers?select=id,name,alias,assistant,note,role,system_role,salary_formula&limit=1000`,
     { headers: sbHeaders }
   );
   const rows = await res.json().catch(() => []);
@@ -4272,20 +4352,6 @@ async function canManageSalaryEntryForOrder(orderId, session, sb, sbHeaders) {
   if (!order) return false;
 
   return (await isOwnOrderForSession(order, session, sb, sbHeaders)) || (order.in_work && !order.is_cancelled);
-}
-
-async function canManageAutoSalaryEntryForOrder(orderId, session, sb, sbHeaders) {
-  const normalizedOrderId = String(orderId || '').trim();
-  if (!normalizedOrderId) return false;
-  const syntheticOrderIds = new Set(['Выход в работу', 'Ставка за день']);
-  if (syntheticOrderIds.has(normalizedOrderId) || normalizedOrderId.startsWith('Выплата')) return false;
-  if (String(session?.role || '') === 'owner') return true;
-  if (session?.role === 'senior' || session?.role === 'extra') {
-    return canManageSalaryEntryForOrder(normalizedOrderId, session, sb, sbHeaders);
-  }
-  if (session?.role !== 'manager') return false;
-  const order = await getOrderById(normalizedOrderId, sb, sbHeaders);
-  return !!order && !order.is_cancelled;
 }
 
 async function getAccessibleAssistantsForLead(workerName, sb, sbHeaders) {

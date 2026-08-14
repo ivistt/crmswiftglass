@@ -262,14 +262,35 @@ const ORDER_WORK_AMOUNT_FIELDS = [
   { id: 'f-toning', key: 'toning', rowKey: 'toning' },
 ];
 
+function isOrderWorkAmountRelevant(order, fieldKey) {
+  if (!order || !fieldKey) return false;
+  if ((Number(order?.[fieldKey]) || 0) > 0) return true;
+  const formServiceType = editingOrderId === order.id
+    ? String(document.getElementById('f-service-type')?.value || order.serviceType || '')
+    : String(order.serviceType || '');
+  const names = getOrderServiceSelections(formServiceType)
+    .map(item => String(item?.name || '').trim().toLowerCase());
+  if (fieldKey === 'tatu') return names.some(name => name === 'тату' || name.startsWith('тату '));
+  if (fieldKey === 'toning') {
+    return !order.toningExternal && names.some(name => name === 'тонировка' || name.startsWith('тонировка '));
+  }
+  if (fieldKey === 'molding') return names.some(name => name.includes('молдинг') || name.includes('резин'));
+  if (fieldKey === 'extraWork') return names.some(name => name.includes('доп') || name.includes('нестандарт'));
+  if (fieldKey === 'mount') return names.length > 0 && !order.onlySale;
+  return false;
+}
+
 function canCurrentUserFillEmptyOrderAmount(order, fieldKey = '') {
   if (currentRole === 'owner' || currentRole === 'manager') return true;
   if (!order && canCreateOrder()) return true;
   if (!order || !currentUserCanActAsSenior()) return false;
-  if (order.responsible !== currentWorkerName) return false;
-  if (!currentUserHasPermission('order_services_edit', currentUserCanActAsSenior())) return false;
+  const relatedToOrder = _isCurrentWorkerOrder(order)
+    || isCurrentWorkerAssignedSpecialService(order, 'tatu')
+    || isCurrentWorkerAssignedSpecialService(order, 'toning');
+  if (!relatedToOrder) return false;
+  if (!currentUserHasPermission('fill_missing_service_prices', currentUserCanActAsSenior())) return false;
   if (!fieldKey) return false;
-  return (Number(order?.[fieldKey]) || 0) <= 0;
+  return (Number(order?.[fieldKey]) || 0) <= 0 && isOrderWorkAmountRelevant(order, fieldKey);
 }
 
 function hasEmptyOrderAmountChanges(order = null) {
@@ -287,6 +308,37 @@ function hasEmptyOrderAmountChanges(order = null) {
 function hasFillableEmptyOrderAmount(order = null) {
   if (!order) return false;
   return ORDER_WORK_AMOUNT_FIELDS.some(field => canCurrentUserFillEmptyOrderAmount(order, field.key));
+}
+
+function getPendingMissingOrderPrices(order) {
+  if (!order) return [];
+  return ORDER_WORK_AMOUNT_FIELDS.flatMap(field => {
+    if (!canCurrentUserFillEmptyOrderAmount(order, field.key)) return [];
+    const amount = _moneyInputValue(document.getElementById(field.id)?.value);
+    return amount > 0 ? [{ ...field, amount }] : [];
+  });
+}
+
+async function persistMissingOrderPrices(order, onlyServiceCode = '') {
+  if (!order) return order;
+  let updatedOrder = order;
+  const pending = getPendingMissingOrderPrices(order)
+    .filter(field => !onlyServiceCode || field.rowKey === onlyServiceCode);
+  for (const field of pending) {
+    const saved = await sbSetMissingOrderServicePrice(order.id, field.rowKey, field.amount);
+    if (saved) updatedOrder = saved;
+  }
+  if (updatedOrder !== order) {
+    const index = orders.findIndex(item => item.id === order.id);
+    if (index !== -1) orders[index] = updatedOrder;
+    ORDER_WORK_AMOUNT_FIELDS.forEach(field => {
+      const input = document.getElementById(field.id);
+      if (input) input.value = Number(updatedOrder?.[field.key]) || 0;
+    });
+    const totalInput = document.getElementById('f-total');
+    if (totalInput) totalInput.value = Number(updatedOrder.total) || 0;
+  }
+  return updatedOrder;
 }
 
 function canCurrentUserToggleSpecialServiceStatus(order, type) {
@@ -989,43 +1041,25 @@ async function confirmSpecialServiceDone(orderId, type) {
   if (!confirm(`Отметить ${label} выполненной по заказу ${order.id}?`)) return;
 
   try {
-    const patch = isTatu
-      ? { tatu_status: true, tatu_done: true, tatu_done_by: currentWorkerName }
-      : { toning_status: true, toning_done: true, toning_done_by: currentWorkerName };
-    const saved = await sbPatchOrderFields(order.id, patch);
+    const result = await sbCompleteOrderSpecialService(order.id, type);
+    const saved = result.order;
     try {
       orders = await sbFetchOrders();
     } catch (refreshError) {
       console.warn('Failed to refresh orders after special service status update:', refreshError);
       const idx = orders.findIndex(item => item.id === order.id);
-      const updated = {
-        ...order,
-        ...saved,
-        tatuStatus: isTatu ? true : (saved?.tatuStatus ?? order.tatuStatus),
-        tatuDone: isTatu ? true : (saved?.tatuDone ?? order.tatuDone),
-        tatuDoneBy: isTatu ? currentWorkerName : (saved?.tatuDoneBy ?? order.tatuDoneBy),
-        toningStatus: !isTatu ? true : (saved?.toningStatus ?? order.toningStatus),
-        toningDone: !isTatu ? true : (saved?.toningDone ?? order.toningDone),
-        toningDoneBy: !isTatu ? currentWorkerName : (saved?.toningDoneBy ?? order.toningDoneBy),
-      };
+      const updated = saved || order;
       if (idx !== -1) orders[idx] = updated;
     }
-    const updatedOrder = orders.find(item => item.id === order.id) || {
-      ...order,
-      ...saved,
-      tatuStatus: isTatu ? true : (saved?.tatuStatus ?? order.tatuStatus),
-      tatuDone: isTatu ? true : (saved?.tatuDone ?? order.tatuDone),
-      tatuDoneBy: isTatu ? currentWorkerName : (saved?.tatuDoneBy ?? order.tatuDoneBy),
-      toningStatus: !isTatu ? true : (saved?.toningStatus ?? order.toningStatus),
-      toningDone: !isTatu ? true : (saved?.toningDone ?? order.toningDone),
-      toningDoneBy: !isTatu ? currentWorkerName : (saved?.toningDoneBy ?? order.toningDoneBy),
-    };
-    await _upsertOrderSalaries(updatedOrder, { forceRecalculateExisting: true });
     currentMonthFilter ? renderOrdersForMonth(currentMonthFilter) : renderOrders();
-    showToast('Услуга выполнена ✓');
+    showToast(result.alreadyCompleted ? 'Услуга уже была выполнена' : 'Услуга выполнена, деньги начислены ✓');
     if (document.getElementById('screen-profile')?.classList.contains('active')) {
-      await loadWorkerSalaries();
-      renderProfile();
+      try {
+        await loadWorkerSalaries();
+        renderProfile();
+      } catch (refreshError) {
+        console.warn('Failed to refresh salary profile after service completion:', refreshError);
+      }
     }
   } catch (e) {
     showToast('Ошибка: ' + e.message, 'error');
@@ -4187,7 +4221,10 @@ function updateOrderModalAccess(order = null) {
   const canComplete = canCurrentUserCompleteOrder(existingOrder);
   const canEditReminder = canCurrentUserUseOrderReminder();
   const reminderComment = getOrderReminderComment(existingOrder);
-  const canSave = isPrivileged || (canEditServices && hasSeniorServiceChanges(existingOrder)) || hasOrderReminderChanges(existingOrder);
+  const canSave = isPrivileged
+    || (canEditServices && hasSeniorServiceChanges(existingOrder))
+    || hasEmptyOrderAmountChanges(existingOrder)
+    || hasOrderReminderChanges(existingOrder);
   const headerActions = document.getElementById('order-modal-owner-actions');
   if (headerActions) {
     headerActions.style.display = (isPrivileged && !!editingOrderId && !!existingOrder) ? 'inline-flex' : 'none';
@@ -4224,6 +4261,18 @@ function updateOrderModalAccess(order = null) {
       ? (isWorkTabActive ? '' : 'none')
       : 'none';
   }
+  document.querySelectorAll('[data-order-work-price]').forEach(wrapper => {
+    if (isPrivileged) {
+      wrapper.style.display = '';
+      return;
+    }
+    const fieldKey = wrapper.getAttribute('data-order-work-price') || '';
+    wrapper.style.display = isOrderWorkAmountRelevant(draftOrder, fieldKey) ? '' : 'none';
+  });
+  ['f-total', 'f-tatu-responsible', 'f-toning-responsible'].forEach(id => {
+    const wrapper = document.getElementById(id)?.closest('.form-group');
+    if (wrapper) wrapper.style.display = isPrivileged ? '' : 'none';
+  });
   const specialStatusSection = document.getElementById('order-special-status-section');
   if (specialStatusSection) {
     specialStatusSection.style.display = (canToggleTatuStatus || canToggleToningStatus)
@@ -4247,11 +4296,11 @@ function updateOrderModalAccess(order = null) {
   });
   setElementDisabledState(
     document.getElementById('f-tatu-status'),
-    !canToggleTatuStatus
+    !canToggleTatuStatus || !!existingOrder?.tatuDone || !!existingOrder?.tatuStatus
   );
   setElementDisabledState(
     document.getElementById('f-toning-status'),
-    !canToggleToningStatus
+    !canToggleToningStatus || !!existingOrder?.toningDone || !!existingOrder?.toningStatus
   );
 
   ['f-new-payment-amount','f-new-payment-date','f-payment-method','f-new-supplier-payment-amount','f-new-supplier-payment-date','f-new-supplier-payment-method'].forEach(id => {
@@ -4326,8 +4375,10 @@ function syncSpecialServiceStatusPreview() {
 }
 
 function shouldAutoPersistSpecialServiceStatus(type, order) {
-  if (currentRole === 'owner' || currentRole === 'manager') return false;
   if (!order) return false;
+  if (currentRole === 'owner' || currentRole === 'manager') {
+    return canCurrentUserToggleSpecialServiceStatus(order, type);
+  }
   const currentWorker = typeof getCurrentWorkerRecord === 'function' ? getCurrentWorkerRecord() : null;
   const currentName = currentWorker?.name || currentWorkerName;
   if (type === 'tatu') {
@@ -4350,54 +4401,52 @@ async function handleSpecialServiceStatusChange(type) {
   if (!input) return;
   const previousValue = isTatu ? !!existingOrder.tatuStatus : !!existingOrder.toningStatus;
   const nextValue = !!input.checked;
+  let completionSaved = false;
+
+  if (!nextValue) {
+    input.checked = previousValue;
+    showToast('Выполненную услугу нельзя отменить этой галочкой', 'error');
+    return;
+  }
 
   try {
     input.disabled = true;
-    const patch = isTatu
-      ? {
-          tatu_status: nextValue,
-          tatu_done: nextValue,
-          tatu_done_by: nextValue ? currentWorkerName : null,
-        }
-      : {
-          toning_status: nextValue,
-          toning_done: nextValue,
-          toning_done_by: nextValue ? currentWorkerName : null,
-        };
-    const saved = await sbPatchOrderFields(editingOrderId, patch);
+    const pricedOrder = await persistMissingOrderPrices(existingOrder, type);
+    const targetWorkerName = document.getElementById(isTatu ? 'f-tatu-responsible' : 'f-toning-responsible')?.value || '';
+    const result = await sbCompleteOrderSpecialService(editingOrderId, type, { targetWorkerName });
+    completionSaved = true;
+    const saved = result.order || pricedOrder;
     let updatedOrder = null;
     try {
       orders = await sbFetchOrders();
       updatedOrder = orders.find(item => item.id === editingOrderId) || null;
     } catch (refreshError) {
       console.warn('Failed to refresh orders after service status toggle:', refreshError);
-      updatedOrder = {
-        ...existingOrder,
-        ...saved,
-        tatuStatus: isTatu ? nextValue : existingOrder.tatuStatus,
-        tatuDone: isTatu ? nextValue : existingOrder.tatuDone,
-        tatuDoneBy: isTatu ? (nextValue ? currentWorkerName : '') : existingOrder.tatuDoneBy,
-        toningStatus: !isTatu ? nextValue : existingOrder.toningStatus,
-        toningDone: !isTatu ? nextValue : existingOrder.toningDone,
-        toningDoneBy: !isTatu ? (nextValue ? currentWorkerName : '') : existingOrder.toningDoneBy,
-      };
+      updatedOrder = saved || existingOrder;
       const idx = orders.findIndex(item => item.id === editingOrderId);
       if (idx !== -1) orders[idx] = updatedOrder;
     }
-    await _upsertOrderSalaries(updatedOrder, { forceRecalculateExisting: true });
     updateOrderModalAccess(updatedOrder);
     renderOrderSummary(updatedOrder);
     if (currentMonthFilter) renderOrdersForMonth(currentMonthFilter);
     else renderOrders();
     if (document.getElementById('screen-profile')?.classList.contains('active')) {
-      await loadWorkerSalaries();
-      renderProfile();
+      try {
+        await loadWorkerSalaries();
+        renderProfile();
+      } catch (refreshError) {
+        console.warn('Failed to refresh salary profile after service completion:', refreshError);
+      }
     }
-    showToast((isTatu ? 'Статус тату' : 'Статус тонировки') + ' сохранён ✓');
+    showToast(result.alreadyCompleted
+      ? 'Услуга уже была выполнена'
+      : (isTatu ? 'Тату выполнено, деньги начислены ✓' : 'Тонировка выполнена, деньги начислены ✓'));
   } catch (e) {
-    input.checked = previousValue;
+    input.checked = completionSaved ? true : previousValue;
     syncSpecialServiceStatusPreview();
-    showToast('Ошибка сохранения: ' + e.message, 'error');
+    showToast(completionSaved
+      ? 'Услуга выполнена, но экран не обновился. Перезагрузите страницу.'
+      : 'Ошибка сохранения: ' + e.message, 'error');
   } finally {
     updateOrderModalAccess(orders.find(item => item.id === editingOrderId) || existingOrder);
   }
@@ -4862,6 +4911,18 @@ async function saveOrder() {
   const cashEntries = [];
 
   try {
+    let rollbackOrderSnapshot = existingOrder;
+    if (!isNew && !canUseFullSave && hasEmptyOrderAmountChanges(existingOrder)) {
+      const pricedOrder = await persistMissingOrderPrices(existingOrder);
+      rollbackOrderSnapshot = pricedOrder || existingOrder;
+      if (pricedOrder) {
+        ORDER_WORK_AMOUNT_FIELDS.forEach(field => {
+          data[field.key] = Number(pricedOrder?.[field.key]) || 0;
+        });
+        data.total = Number(pricedOrder.total) || 0;
+        data.paymentStatus = pricedOrder.paymentStatus || data.paymentStatus;
+      }
+    }
     const result = isNew
       ? await saveNewOrderWithNextIdOnConflict(
           data,
@@ -4869,7 +4930,7 @@ async function saveOrder() {
             return await sbSaveOrderWithCash(data, {
               isNew: true,
               cashEntries: currentCashEntries,
-              rollbackOrder: existingOrder,
+              rollbackOrder: rollbackOrderSnapshot,
             });
           },
           { cashEntries }
@@ -4877,14 +4938,10 @@ async function saveOrder() {
       : await sbSaveOrderWithCash(data, {
             isNew: false,
             cashEntries,
-            rollbackOrder: existingOrder,
+            rollbackOrder: rollbackOrderSnapshot,
           });
     const saved = result.order;
     logFinanceDebug(isNew ? 'order create' : 'order save', result);
-
-    if (saved?.tatuDone || saved?.tatuStatus || saved?.toningDone || saved?.toningStatus) {
-      await _upsertOrderSalaries(saved, { forceRecalculateExisting: true });
-    }
 
     await rememberCarDirectoryFromOrder(saved);
     try {

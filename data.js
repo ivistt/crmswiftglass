@@ -27,6 +27,7 @@ const WORKER_PERMISSION_PRESETS = {
     owner_payments_view: true,
     order_payments_manage: true,
     order_services_edit: true,
+    fill_missing_service_prices: true,
     order_complete: true,
     special_service_status: true,
     special_service_tatu: true,
@@ -58,6 +59,7 @@ const WORKER_PERMISSION_PRESETS = {
     owner_payments_view: false,
     order_payments_manage: true,
     order_services_edit: true,
+    fill_missing_service_prices: true,
     order_complete: false,
     special_service_status: false,
     special_service_tatu: false,
@@ -89,6 +91,7 @@ const WORKER_PERMISSION_PRESETS = {
     owner_payments_view: false,
     order_payments_manage: true,
     order_services_edit: true,
+    fill_missing_service_prices: true,
     order_complete: true,
     special_service_status: false,
     special_service_tatu: false,
@@ -120,6 +123,7 @@ const WORKER_PERMISSION_PRESETS = {
     owner_payments_view: false,
     order_payments_manage: false,
     order_services_edit: false,
+    fill_missing_service_prices: false,
     order_complete: false,
     special_service_status: false,
     special_service_tatu: false,
@@ -151,6 +155,7 @@ const WORKER_PERMISSION_PRESETS = {
     owner_payments_view: false,
     order_payments_manage: true,
     order_services_edit: true,
+    fill_missing_service_prices: true,
     order_complete: true,
     special_service_status: false,
     special_service_tatu: false,
@@ -213,6 +218,11 @@ function getFriendlyApiErrorMessage(raw, status = 0) {
   if (normalized === 'Salary already withdrawn') return 'Эта зарплата уже снята, редактировать нельзя';
   if (normalized === 'Service type required') return 'Выберите услуги перед выполнением заказа';
   if (normalized === 'Invalid special service') return 'Эту услугу нельзя подтвердить по этому заказу';
+  if (normalized === 'Service is not selected') return 'Эта услуга не выбрана в заказе';
+  if (normalized === 'Invalid service price') return 'Укажите цену больше нуля';
+  if (normalized === 'Special service worker required') return 'Сначала назначьте ответственного за услугу';
+  if (normalized === 'Special service worker has no permission') return 'У ответственного нет права выполнять эту услугу';
+  if (normalized === 'Special service salary rate required') return 'У ответственного не настроен процент за услугу';
   if (normalized === 'Forbidden cash entry') return 'Нет доступа к этой кассовой записи';
   if (normalized === 'Forbidden cash worker') return 'Нет доступа к кассе этого сотрудника';
   if (normalized === 'Order is not active') return 'Заказ не в работе или отменён';
@@ -338,6 +348,7 @@ function applyLegacyWorkerPermissionFallback(state, workerLike) {
     next.cash_add_entries = true;
     next.order_payments_manage = true;
     next.order_services_edit = true;
+    next.fill_missing_service_prices = true;
     next.order_complete = true;
   }
   if (role === 'manager') {
@@ -625,6 +636,38 @@ async function sbPatchOrderFields(id, fields) {
   if (!res.ok) await throwApiError(res);
   const rows = await res.json();
   return rows[0] ? rowToOrder(rows[0]) : null;
+}
+
+async function sbSetMissingOrderServicePrice(id, serviceCode, amount) {
+  const res = await fetch(
+    `${WORKER_URL}/api/orders/${encodeURIComponent(id)}/service-prices/${encodeURIComponent(serviceCode)}`,
+    {
+      method: 'PATCH',
+      headers: getHeaders(),
+      body: JSON.stringify({ amount: Number(amount) }),
+    }
+  );
+  if (!res.ok) await throwApiError(res);
+  const body = await res.json();
+  return body?.order ? rowToOrder(body.order) : null;
+}
+
+async function sbCompleteOrderSpecialService(id, serviceCode, options = {}) {
+  const res = await fetch(
+    `${WORKER_URL}/api/orders/${encodeURIComponent(id)}/services/${encodeURIComponent(serviceCode)}/complete`,
+    {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ target_worker_name: String(options?.targetWorkerName || '').trim() || null }),
+    }
+  );
+  if (!res.ok) await throwApiError(res);
+  const body = await res.json();
+  return {
+    order: body?.order ? rowToOrder(body.order) : null,
+    salary: body?.salary || null,
+    alreadyCompleted: body?.already_completed === true,
+  };
 }
 
 async function sbDeleteOrder(id) {
