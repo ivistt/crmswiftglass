@@ -744,21 +744,33 @@ function renderAssistantSalarySection(assistantWorkers, assistantWorker, todayRe
 function getSeniorWorkedAssistants() {
   if (!canManageAssistantSalary()) return [];
   const names = new Set();
+  const currentWorker = typeof getWorkerRecordByName === 'function' ? getWorkerRecordByName(currentWorkerName) : null;
+  const isCurrentWorkerLabel = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return false;
+    if (raw === currentWorkerName) return true;
+    return !!currentWorker && (raw === currentWorker.name || raw === currentWorker.alias);
+  };
+  const addAssistant = (value) => {
+    const assistant = typeof getWorkerRecordByName === 'function' ? getWorkerRecordByName(value) : null;
+    names.add(assistant?.name || String(value || '').trim());
+  };
   (orders || []).forEach(order => {
     if (!order || order.isCancelled) return;
-    if (order.responsible === currentWorkerName && order.assistant) {
-      names.add(order.assistant);
+    if (isCurrentWorkerLabel(order.responsible) && order.assistant) {
+      addAssistant(order.assistant);
     }
-    if (order.responsible === currentWorkerName && order.extraAssistant) {
-      names.add(order.extraAssistant);
+    if (isCurrentWorkerLabel(order.responsible) && order.extraAssistant) {
+      addAssistant(order.extraAssistant);
     }
-    if (order.reworkData?.responsible === currentWorkerName && order.reworkData?.assistant) {
-      names.add(order.reworkData.assistant);
+    if (isCurrentWorkerLabel(order.reworkData?.responsible) && order.reworkData?.assistant) {
+      addAssistant(order.reworkData.assistant);
     }
   });
 
   return [...names]
-    .map(name => (workers || []).find(w => w.name === name) || { name })
+    .filter(Boolean)
+    .map(name => (typeof getWorkerRecordByName === 'function' ? getWorkerRecordByName(name) : null) || { name })
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ru'));
 }
 

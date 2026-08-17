@@ -4335,7 +4335,7 @@ async function canAccessWorker(targetWorkerName, session, sb, sbHeaders) {
   if (workerRow?.assistant === targetWorkerName) return true;
   if (targetWorker && workerRow?.assistant && workerIdentityMatchesLabel(targetWorker, workerRow.assistant)) return true;
 
-  const relatedAssistants = await getAccessibleAssistantsForLead(session.workerName, sb, sbHeaders);
+  const relatedAssistants = await getAccessibleAssistantsForLead(session.workerName, sb, sbHeaders, workerRow);
   if (relatedAssistants.has(targetWorkerName)) return true;
   if (targetWorker) {
     return [...relatedAssistants].some(name => workerIdentityMatchesLabel(targetWorker, name));
@@ -4354,24 +4354,30 @@ async function canManageSalaryEntryForOrder(orderId, session, sb, sbHeaders) {
   return (await isOwnOrderForSession(order, session, sb, sbHeaders)) || (order.in_work && !order.is_cancelled);
 }
 
-async function getAccessibleAssistantsForLead(workerName, sb, sbHeaders) {
+async function getAccessibleAssistantsForLead(workerName, sb, sbHeaders, leadWorker = null) {
   if (!workerName) return new Set();
 
   const url = `${sb}/rest/v1/orders?select=responsible,assistant,extra_assistant,rework_data,is_cancelled&limit=10000`;
   const res = await fetch(url, { headers: sbHeaders });
   const rows = await res.json().catch(() => []);
   const assistants = new Set();
+  const lead = leadWorker || await findWorkerByIdentity(workerName, sb, sbHeaders);
+  const isLeadLabel = (value) => {
+    if (!value) return false;
+    if (normalizeWorkerIdentityText(value) === normalizeWorkerIdentityText(workerName)) return true;
+    return workerIdentityMatchesLabel(lead, value);
+  };
 
   for (const row of Array.isArray(rows) ? rows : []) {
     if (row?.is_cancelled) continue;
-    if (row?.responsible === workerName && row?.assistant) {
+    if (isLeadLabel(row?.responsible) && row?.assistant) {
       assistants.add(row.assistant);
     }
-    if (row?.responsible === workerName && row?.extra_assistant) {
+    if (isLeadLabel(row?.responsible) && row?.extra_assistant) {
       assistants.add(row.extra_assistant);
     }
     const reworkAssistant = row?.rework_data?.assistant;
-    if (row?.rework_data?.responsible === workerName && reworkAssistant) {
+    if (isLeadLabel(row?.rework_data?.responsible) && reworkAssistant) {
       assistants.add(reworkAssistant);
     }
   }
