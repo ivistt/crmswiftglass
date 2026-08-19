@@ -414,35 +414,35 @@ const ORDER_CARD_LAYOUT_ROLE_DEFAULTS = {
     groups: [
       { id: 'owner-main', title: 'Основное', fields: ['client_total', 'car', 'phone'] },
       { id: 'owner-meta', title: 'Организация', fields: ['date', 'time', 'workers', 'manager', 'warehouse'] },
-      { id: 'owner-services', title: 'Работы', fields: ['services'] },
+      { id: 'owner-services', title: 'Работы', fields: ['services', 'extra_note', 'notes'] },
     ],
   },
   manager: {
     groups: [
       { id: 'manager-main', title: 'Основное', fields: ['client_total', 'car', 'phone'] },
       { id: 'manager-meta', title: 'Организация', fields: ['date', 'time', 'workers', 'manager', 'warehouse'] },
-      { id: 'manager-services', title: 'Работы', fields: ['services'] },
+      { id: 'manager-services', title: 'Работы', fields: ['services', 'extra_note', 'notes'] },
     ],
   },
   senior: {
     groups: [
       { id: 'senior-main', title: 'Основное', fields: ['client_total', 'car', 'phone'] },
       { id: 'senior-meta', title: 'Организация', fields: ['date', 'time', 'workers', 'manager', 'warehouse'] },
-      { id: 'senior-services', title: 'Работы', fields: ['services'] },
+      { id: 'senior-services', title: 'Работы', fields: ['services', 'extra_note', 'notes'] },
     ],
   },
   junior: {
     groups: [
       { id: 'junior-main', title: 'Основное', fields: ['client_total', 'car', 'phone'] },
       { id: 'junior-meta', title: 'Организация', fields: ['date', 'time', 'workers', 'manager', 'warehouse'] },
-      { id: 'junior-services', title: 'Работы', fields: ['services'] },
+      { id: 'junior-services', title: 'Работы', fields: ['services', 'extra_note', 'notes'] },
     ],
   },
   extra: {
     groups: [
       { id: 'extra-main', title: 'Основное', fields: ['client_total', 'car', 'phone'] },
       { id: 'extra-meta', title: 'Организация', fields: ['date', 'time', 'workers', 'manager', 'warehouse'] },
-      { id: 'extra-services', title: 'Работы', fields: ['services'] },
+      { id: 'extra-services', title: 'Работы', fields: ['services', 'extra_note', 'notes'] },
     ],
   },
 };
