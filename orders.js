@@ -208,6 +208,10 @@ function canCurrentUserOpenOrderModal(order) {
   return hasOrderAccess && _isCurrentWorkerOrder(order);
 }
 
+function canCurrentUserViewOrderCardNote() {
+  return currentRole === 'owner' || currentUserHasPermission('orders_note_view', true);
+}
+
 function canCurrentUserViewOrderComment() {
   return currentRole === 'owner' || currentUserHasPermission('orders_comment_view', true);
 }
@@ -833,7 +837,7 @@ function getOrderCardFieldValue(order, fieldKey, context = {}) {
     services: renderOrderCardServices(order) ? { blockHtml: renderOrderCardServices(order) } : null,
     notes: canCurrentUserViewOrderComment() && order.notes ? { blockHtml: `<div class="order-card-note">${escapeHtml(order.notes)}</div>` } : null,
     code: order.code ? { html: `<span class="order-meta-item order-meta-pill">${icon('hash')} ${escapeHtml(order.code)}</span>` } : null,
-    extra_note: order.extraNote ? { html: `<span class="order-meta-item order-meta-pill">${icon('file-text')} ${escapeHtml(order.extraNote)}</span>` } : null,
+    extra_note: canCurrentUserViewOrderCardNote() && order.extraNote ? { html: `<span class="order-meta-item order-meta-pill">${icon('file-text')} ${escapeHtml(order.extraNote)}</span>` } : null,
     vin: order.vin ? { html: `<span class="order-meta-item order-meta-pill">VIN ${escapeHtml(order.vin)}</span>` } : null,
   };
   return values[fieldKey] || null;
@@ -880,6 +884,7 @@ function orderHasCompletedClientDebt(order) {
 
 function renderManagerOrderCardMeta(order) {
   if (currentRole !== 'manager' || !order) return '';
+  const canShowOrderCardNote = canCurrentUserViewOrderCardNote();
   const canShowOrderComment = canCurrentUserViewOrderComment();
   const clientTotal = getOrderClientTotal(order);
   const clientPaidAmount = getOrderClientPaidAmount(order);
@@ -902,7 +907,7 @@ function renderManagerOrderCardMeta(order) {
     ],
     [
       { value: order.code || '—' },
-      { value: order.extraNote || '—' },
+      ...(canShowOrderCardNote ? [{ value: order.extraNote || '—' }] : []),
       { value: order.vin || '—' },
     ],
     [
