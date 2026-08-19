@@ -69,7 +69,7 @@ begin
     raise exception 'Цена должна быть больше нуля';
   end if;
 
-  if v_code not in ('mount', 'molding', 'extra_work', 'tatu', 'toning') then
+  if v_code not in ('total', 'mount', 'molding', 'extra_work', 'tatu', 'toning') then
     raise exception 'Неизвестная услуга';
   end if;
 
@@ -83,6 +83,7 @@ begin
   end if;
 
   v_current := case v_code
+    when 'total' then coalesce(v_order.total, 0)
     when 'mount' then coalesce(v_order.mount, 0)
     when 'molding' then coalesce(v_order.molding, 0)
     when 'extra_work' then coalesce(v_order.extra_work, 0)
@@ -96,6 +97,32 @@ begin
       return to_jsonb(v_order);
     end if;
     raise exception 'Цена уже установлена';
+  end if;
+
+  if v_code = 'total' then
+    update public.orders
+    set
+      total = p_amount,
+      payment_status = case
+        when coalesce(debt, 0) <= 0 then 'Не оплачено'
+        when p_amount + coalesce(income, 0) + coalesce(delivery, 0) > 0
+          and coalesce(debt, 0) >= p_amount + coalesce(income, 0) + coalesce(delivery, 0)
+          then 'Оплачено'
+        else 'Частично'
+      end,
+      service_price_audit = coalesce(service_price_audit, '{}'::jsonb) || jsonb_build_object(
+        v_code,
+        jsonb_build_object(
+          'amount', p_amount,
+          'set_at', now(),
+          'set_by_worker_id', p_actor_worker_id,
+          'set_by', coalesce(p_actor_name, '')
+        )
+      )
+    where id = p_order_id
+    returning * into v_order;
+
+    return to_jsonb(v_order);
   end if;
 
   update public.orders
@@ -162,6 +189,7 @@ declare
   v_price numeric;
   v_bonus numeric;
   v_already_completed boolean;
+  v_salary_date date;
   v_salary_json jsonb := null;
 begin
   if v_code not in ('tatu', 'toning') then
@@ -196,6 +224,10 @@ begin
   if v_code = 'toning' and coalesce(v_order.toning_external, false) then
     raise exception 'Внешняя тонировка не начисляется сотруднику';
   end if;
+  v_salary_date := case
+    when nullif(trim(v_order.date::text), '') ~ '^\d{4}-\d{2}-\d{2}' then left(trim(v_order.date::text), 10)::date
+    else current_date
+  end;
 
   v_already_completed := case v_code
     when 'tatu' then v_order.tatu_completed_at is not null
@@ -325,7 +357,7 @@ begin
     ) values (
       p_target_worker_name,
       p_target_worker_id,
-      v_order.date,
+      v_salary_date,
       v_bonus,
       p_order_id,
       'auto'

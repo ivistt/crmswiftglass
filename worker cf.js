@@ -359,7 +359,7 @@ export default {
       }
     }
 
-    const servicePriceMatch = url.pathname.match(/^\/api\/orders\/([^/]+)\/service-prices\/(mount|molding|extra_work|tatu|toning)$/);
+    const servicePriceMatch = url.pathname.match(/^\/api\/orders\/([^/]+)\/service-prices\/(total|mount|molding|extra_work|tatu|toning)$/);
     if (servicePriceMatch && request.method === 'PATCH') {
       const orderId = decodeURIComponent(servicePriceMatch[1]);
       const serviceCode = servicePriceMatch[2];
@@ -2042,13 +2042,14 @@ export default {
         return Response.json({ ok: true, candidates: 0 }, { headers: cors });
       }
 
+      const payloadEntries = normalizePostgrestBulkRows(entries);
       const saveRes = await fetch(`${sb}/rest/v1/cash_log?on_conflict=source_key`, {
         method: 'POST',
         headers: {
           ...sbHeaders,
           Prefer: 'resolution=merge-duplicates,return=representation',
         },
-        body: JSON.stringify(entries),
+        body: JSON.stringify(payloadEntries),
       });
       const saved = await saveRes.json().catch(() => []);
       if (!saveRes.ok) {
@@ -2672,6 +2673,7 @@ const WORKER_PERMISSION_PRESETS = {
     orders_create: true,
     orders_edit: true,
     orders_delete: true,
+    orders_comment_view: true,
     clients_view: true,
     workers_view: true,
     car_directory_view: true,
@@ -2701,6 +2703,7 @@ const WORKER_PERMISSION_PRESETS = {
     orders_create: true,
     orders_edit: true,
     orders_delete: false,
+    orders_comment_view: true,
     clients_view: true,
     workers_view: false,
     car_directory_view: false,
@@ -2730,6 +2733,7 @@ const WORKER_PERMISSION_PRESETS = {
     orders_create: false,
     orders_edit: true,
     orders_delete: false,
+    orders_comment_view: true,
     clients_view: false,
     workers_view: false,
     car_directory_view: false,
@@ -2759,6 +2763,7 @@ const WORKER_PERMISSION_PRESETS = {
     orders_create: false,
     orders_edit: false,
     orders_delete: false,
+    orders_comment_view: true,
     clients_view: false,
     workers_view: false,
     car_directory_view: false,
@@ -2788,6 +2793,7 @@ const WORKER_PERMISSION_PRESETS = {
     orders_create: false,
     orders_edit: true,
     orders_delete: false,
+    orders_comment_view: true,
     clients_view: false,
     workers_view: false,
     car_directory_view: false,
@@ -4200,13 +4206,14 @@ async function syncOrderFopCashEntries(order, sb, sbHeaders, options = {}) {
       }
     }
   });
+  const payloadEntries = normalizePostgrestBulkRows(entries);
   const saveRes = await fetch(`${sb}/rest/v1/cash_log?on_conflict=source_key`, {
     method: 'POST',
     headers: {
       ...sbHeaders,
       Prefer: 'resolution=merge-duplicates,return=representation',
     },
-    body: JSON.stringify(entries),
+    body: JSON.stringify(payloadEntries),
   });
   const savedRows = await saveRes.json().catch(() => []);
   if (!saveRes.ok) {
@@ -4222,6 +4229,21 @@ async function syncOrderFopCashEntries(order, sb, sbHeaders, options = {}) {
     sourceKeys: entries.map(entry => getCashLedgerSourceKey(entry)).filter(Boolean),
   });
   return savedList;
+}
+
+function normalizePostgrestBulkRows(rows = []) {
+  const list = Array.isArray(rows) ? rows.filter(row => row && typeof row === 'object') : [];
+  const keys = [...list.reduce((set, row) => {
+    Object.keys(row).forEach(key => set.add(key));
+    return set;
+  }, new Set())];
+  return list.map(row => {
+    const normalized = {};
+    keys.forEach(key => {
+      normalized[key] = row[key] === undefined ? null : row[key];
+    });
+    return normalized;
+  });
 }
 
 async function fetchOrderDerivedCashEntries(orderId, sb, sbHeaders) {

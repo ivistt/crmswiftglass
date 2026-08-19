@@ -208,6 +208,10 @@ function canCurrentUserOpenOrderModal(order) {
   return hasOrderAccess && _isCurrentWorkerOrder(order);
 }
 
+function canCurrentUserViewOrderComment() {
+  return currentRole === 'owner' || currentUserHasPermission('orders_comment_view', true);
+}
+
 function resolveSalaryEntryOrderId(rawOrderId) {
   const raw = String(rawOrderId || '').trim();
   if (!raw) return '';
@@ -255,6 +259,7 @@ function canCurrentUserEditOrderServices(order) {
 }
 
 const ORDER_WORK_AMOUNT_FIELDS = [
+  { id: 'f-total', key: 'total', rowKey: 'total', total: true },
   { id: 'f-mount', key: 'mount', rowKey: 'mount' },
   { id: 'f-molding', key: 'molding', rowKey: 'molding' },
   { id: 'f-extra-work', key: 'extraWork', rowKey: 'extra_work' },
@@ -277,6 +282,7 @@ function isOrderWorkAmountRelevant(order, fieldKey) {
   if (fieldKey === 'molding') return names.some(name => name.includes('молдинг') || name.includes('резин'));
   if (fieldKey === 'extraWork') return names.some(name => name.includes('доп') || name.includes('нестандарт'));
   if (fieldKey === 'mount') return names.length > 0 && !order.onlySale;
+  if (fieldKey === 'total') return names.length > 0 && !order.onlySale;
   return false;
 }
 
@@ -825,7 +831,7 @@ function getOrderCardFieldValue(order, fieldKey, context = {}) {
     warehouse_code: order.warehouseCode ? { html: `<span class="order-meta-item order-meta-pill">${icon('hash')} ${escapeHtml(order.warehouseCode)}</span>` } : null,
     supplier_paid_total: supplierPaidInlineHtml ? { html: `<span class="order-meta-item order-meta-pill">${icon('wallet')} ${supplierPaidInlineHtml}</span>` } : null,
     services: renderOrderCardServices(order) ? { blockHtml: renderOrderCardServices(order) } : null,
-    notes: order.notes ? { blockHtml: `<div class="order-card-note">${escapeHtml(order.notes)}</div>` } : null,
+    notes: canCurrentUserViewOrderComment() && order.notes ? { blockHtml: `<div class="order-card-note">${escapeHtml(order.notes)}</div>` } : null,
     code: order.code ? { html: `<span class="order-meta-item order-meta-pill">${icon('hash')} ${escapeHtml(order.code)}</span>` } : null,
     extra_note: order.extraNote ? { html: `<span class="order-meta-item order-meta-pill">${icon('file-text')} ${escapeHtml(order.extraNote)}</span>` } : null,
     vin: order.vin ? { html: `<span class="order-meta-item order-meta-pill">VIN ${escapeHtml(order.vin)}</span>` } : null,
@@ -874,6 +880,7 @@ function orderHasCompletedClientDebt(order) {
 
 function renderManagerOrderCardMeta(order) {
   if (currentRole !== 'manager' || !order) return '';
+  const canShowOrderComment = canCurrentUserViewOrderComment();
   const clientTotal = getOrderClientTotal(order);
   const clientPaidAmount = getOrderClientPaidAmount(order);
   const supplierPaidAmount = getOrderSupplierPaidAmount(order);
@@ -902,9 +909,9 @@ function renderManagerOrderCardMeta(order) {
       { html: `${escapeHtml(order.warehouse || '—')}${warehouseCodeInlineHtml}${supplierPaidInlineHtml}` },
       { value: order.warehouseCode || '—' },
     ],
-    [
+    ...(canShowOrderComment ? [[
       { label: '', value: String(order.notes || '—').trim() || '—', strong: true },
-    ],
+    ]] : []),
     [
       { value: getWorkerDisplayName(order.manager) || '—' },
     ],
@@ -1005,6 +1012,7 @@ function isCurrentWorkerAssignedSpecialService(order, type, workerLike = null) {
 
 function renderOrderCardCallNotes(order) {
   if (currentRole === 'manager') return '';
+  if (!canCurrentUserViewOrderComment()) return '';
   if (!order?.notes) return '';
   return `<div class="order-card-note">${escapeHtml(order.notes)}</div>`;
 }
@@ -4269,7 +4277,7 @@ function updateOrderModalAccess(order = null) {
     const fieldKey = wrapper.getAttribute('data-order-work-price') || '';
     wrapper.style.display = isOrderWorkAmountRelevant(draftOrder, fieldKey) ? '' : 'none';
   });
-  ['f-total', 'f-tatu-responsible', 'f-toning-responsible'].forEach(id => {
+  ['f-tatu-responsible', 'f-toning-responsible'].forEach(id => {
     const wrapper = document.getElementById(id)?.closest('.form-group');
     if (wrapper) wrapper.style.display = isPrivileged ? '' : 'none';
   });
