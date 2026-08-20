@@ -55,6 +55,7 @@ function getClientStatementRows(client, period) {
         total,
         paid,
         left: Math.max(0, total - paid),
+        overpaid: Math.max(0, paid - total),
       };
     });
 }
@@ -73,8 +74,9 @@ function getClientStatementTotals(rows) {
     totals.total += Number(row?.total) || 0;
     totals.paid += Number(row?.paid) || 0;
     totals.left += Number(row?.left) || 0;
+    totals.overpaid += Number(row?.overpaid) || 0;
     return totals;
-  }, { total: 0, paid: 0, left: 0 });
+  }, { total: 0, paid: 0, left: 0, overpaid: 0 });
 }
 
 function formatClientStatementMoney(value) {
@@ -298,6 +300,12 @@ function renderClientStatementPreview() {
         <div class="client-statement-preview-label">Остаток</div>
         <div class="client-statement-preview-value">${formatClientStatementMoney(totals.left)}</div>
       </div>
+      ${totals.overpaid > 0 ? `
+        <div class="client-statement-preview-item client-statement-preview-item--overpaid">
+          <div class="client-statement-preview-label">Переплата</div>
+          <div class="client-statement-preview-value">${formatClientStatementMoney(totals.overpaid)}</div>
+        </div>
+      ` : ''}
     </div>
   `;
   if (printButton) printButton.disabled = false;
@@ -307,6 +315,7 @@ function buildClientStatementPrintHtml(client, period, rows, options = {}) {
   const totals = getClientStatementTotals(rows);
   const isFop = options?.fop === true;
   const includeNotes = options?.note === true;
+  const hasOverpaid = totals.overpaid > 0;
   const address = String(client?.address || '').trim();
   const clientDetails = [
     address ? `адреса: ${address}` : '',
@@ -327,10 +336,12 @@ function buildClientStatementPrintHtml(client, period, rows, options = {}) {
       <td class="money">${escapeHtml(formatClientStatementMoney(row.total))}</td>
       <td class="money">${escapeHtml(formatClientStatementMoney(row.paid))}</td>
       <td class="money">${escapeHtml(formatClientStatementMoney(row.left))}</td>
+      ${hasOverpaid ? `<td class="money">${escapeHtml(formatClientStatementMoney(row.overpaid))}</td>` : ''}
     </tr>
   `).join('');
   const rowsWord = pluralClientStatementRu(rows.length, ['замовлення', 'замовлення', 'замовлень']);
   const totalLeftWords = formatClientStatementMoneyWordsUa(totals.left);
+  const totalOverpaidWords = formatClientStatementMoneyWordsUa(totals.overpaid);
 
   return `<!doctype html>
   <html lang="uk">
@@ -366,7 +377,7 @@ function buildClientStatementPrintHtml(client, period, rows, options = {}) {
       .col-id { width: 82px; text-align: center; }
       .col-date { width: 82px; text-align: center; white-space: nowrap; }
       .col-car { width: auto; }
-      .col-money { width: 118px; }
+      .col-money { width: ${hasOverpaid ? '100px' : '118px'}; }
       .money { text-align: right; white-space: nowrap; }
       .totals {
         display: grid;
@@ -424,9 +435,10 @@ function buildClientStatementPrintHtml(client, period, rows, options = {}) {
           <col style="width:82px;">
           <col style="width:82px;">
           <col>
-          <col style="width:118px;">
-          <col style="width:118px;">
-          <col style="width:118px;">
+          <col style="width:${hasOverpaid ? '100px' : '118px'};">
+          <col style="width:${hasOverpaid ? '100px' : '118px'};">
+          <col style="width:${hasOverpaid ? '100px' : '118px'};">
+          ${hasOverpaid ? '<col style="width:100px;">' : ''}
         </colgroup>
         <thead>
           <tr>
@@ -437,6 +449,7 @@ function buildClientStatementPrintHtml(client, period, rows, options = {}) {
             <th class="col-money">Загальна сума до сплати</th>
             <th class="col-money">Сплачена сума</th>
             <th class="col-money">Залишок до сплати</th>
+            ${hasOverpaid ? '<th class="col-money">Переплата</th>' : ''}
           </tr>
         </thead>
         <tbody>${bodyRows}</tbody>
@@ -457,12 +470,19 @@ function buildClientStatementPrintHtml(client, period, rows, options = {}) {
             <td>Залишок:</td>
             <td>${escapeHtml(formatClientStatementMoney(totals.left))}</td>
           </tr>
+          ${hasOverpaid ? `
+            <tr>
+              <td>Переплата:</td>
+              <td>${escapeHtml(formatClientStatementMoney(totals.overpaid))}</td>
+            </tr>
+          ` : ''}
         </table>
       </section>
 
       <section class="amount-text">
         Всього ${rows.length} ${rowsWord}, на суму ${escapeHtml(formatClientStatementMoney(totals.total))}.
         <strong>Залишок до сплати: ${escapeHtml(totalLeftWords.charAt(0).toUpperCase() + totalLeftWords.slice(1))}</strong>
+        ${hasOverpaid ? `<strong>Переплата: ${escapeHtml(totalOverpaidWords.charAt(0).toUpperCase() + totalOverpaidWords.slice(1))}</strong>` : ''}
       </section>
 
       <div class="footer-line"></div>
@@ -596,6 +616,9 @@ function buildClientOrderInvoicePrintHtml(client, order, documentType = 'invoice
   ].filter(Boolean).map(escapeHtml).join(', ');
   const items = getClientOrderInvoiceItems(order, options);
   const total = items.reduce((sum, item) => sum + (Number(item.sum) || 0), 0);
+  const paid = getOrderClientPaidAmount(order);
+  const left = Math.max(0, total - paid);
+  const overpaid = Math.max(0, paid - total);
   const totalWords = formatClientStatementMoneyWordsUa(total);
   const noteBlockHtml = includeNote ? buildClientPrintNoteBlock(getClientOrderPrintNote(order)) : '';
   const itemRows = items.map((item, index) => `
@@ -854,6 +877,20 @@ ${paymentHeaderHtml}
             <td>Разом:</td>
             <td>${escapeHtml(formatClientStatementMoney(total))}</td>
           </tr>
+          <tr>
+            <td>Сплачено:</td>
+            <td>${escapeHtml(formatClientStatementMoney(paid))}</td>
+          </tr>
+          <tr>
+            <td>Залишок:</td>
+            <td>${escapeHtml(formatClientStatementMoney(left))}</td>
+          </tr>
+          ${overpaid > 0 ? `
+            <tr>
+              <td>Переплата:</td>
+              <td>${escapeHtml(formatClientStatementMoney(overpaid))}</td>
+            </tr>
+          ` : ''}
         </table>
       </section>
 
@@ -973,7 +1010,7 @@ function renderClients() {
   const sort = document.getElementById('filter-client-sort')?.value || 'debt-desc';
   const debtFilter = document.getElementById('filter-client-debt')?.value || 'all';
 
-  let list = getClients().map(client => ({ ...client, debt: getClientDebtTotal(client) }));
+  let list = getClients().map(client => ({ ...client, debt: getClientDebtTotal(client), overpaid: getClientOverpaymentTotal(client) }));
 
   if (search) list = list.filter(c =>
     (c.name  || '').toLowerCase().includes(search) ||
@@ -1014,6 +1051,7 @@ function renderClients() {
       <div class="client-debt-pill ${c.debt > 0 ? 'has-debt' : 'no-debt'}">
         <span>${c.debt > 0 ? 'С долгом' : 'Без долга'}</span>
         <strong>${c.debt.toLocaleString('ru')} ₴</strong>
+        ${c.overpaid > 0 ? `<span>Переплата</span><strong>${c.overpaid.toLocaleString('ru')} ₴</strong>` : ''}
       </div>
     </div>
   `).join('');
@@ -1024,8 +1062,17 @@ function getOrderDebtLeft(order) {
   return Math.max(0, getOrderClientTotalAmount(order) - getOrderClientPaidAmount(order));
 }
 
+function getOrderOverpayment(order) {
+  if (!order || order.isCancelled || isOrderDeleted(order) || !order.workerDone) return 0;
+  return Math.max(0, getOrderClientPaidAmount(order) - getOrderClientTotalAmount(order));
+}
+
 function getClientDebtTotal(client) {
   return (client?.orders || []).reduce((sum, order) => sum + getOrderDebtLeft(order), 0);
+}
+
+function getClientOverpaymentTotal(client) {
+  return (client?.orders || []).reduce((sum, order) => sum + getOrderOverpayment(order), 0);
 }
 
 function openClientDetail(key) {
@@ -1037,6 +1084,7 @@ function openClientDetail(key) {
 
   const totalSpent = c.orders.filter(isOrderFinanciallyActive).reduce((s, o) => s + getOrderClientTotalAmount(o), 0);
   const totalDebt = getClientDebtTotal(c);
+  const totalOverpaid = getClientOverpaymentTotal(c);
   const debtOrders = c.orders.filter(o => getOrderDebtLeft(o) > 0);
   const clientTotalsHtml = `
     <div style="text-align:right;">
@@ -1047,6 +1095,7 @@ function openClientDetail(key) {
         `
         : ''}
       <div style="font-size:12px;color:${totalDebt > 0 ? 'var(--red)' : 'var(--text3)'};font-weight:800;margin-top:4px;">Долг: ${totalDebt.toLocaleString('ru')} ₴</div>
+      ${totalOverpaid > 0 ? `<div style="font-size:12px;color:var(--accent);font-weight:800;margin-top:4px;">Переплата: ${totalOverpaid.toLocaleString('ru')} ₴</div>` : ''}
     </div>
       `;
 
@@ -1091,6 +1140,7 @@ function renderClientOrderHistoryCard(o, compact = false) {
   const total = getOrderClientTotalAmount(o);
   const paid = getOrderClientPaidAmount(o);
   const left = getOrderDebtLeft(o);
+  const overpaid = getOrderOverpayment(o);
   return `
     <div class="order-card ${getOrderCardStateClass(o)}" onclick="openOrderDetail('${escapeAttr(o.id)}')">
       <div class="order-card-top">
@@ -1099,6 +1149,7 @@ function renderClientOrderHistoryCard(o, compact = false) {
             <span class="order-id">${o.id}</span>
             ${statusBadge(getEffectivePaymentStatus(o))}
             ${left > 0 ? `<span class="status-badge status-debt">Долг ${left.toLocaleString('ru')} ₴</span>` : ''}
+            ${overpaid > 0 ? `<span class="status-badge status-overpaid">Переплата ${overpaid.toLocaleString('ru')} ₴</span>` : ''}
           </div>
           <span class="order-name">${escapeHtml(formatClientOrderCarLine(o))}</span>
         </div>
@@ -1126,6 +1177,7 @@ function renderClientOrderHistoryCard(o, compact = false) {
         <span class="order-meta-item">${icon('hard-hat')} ${getWorkerDisplayName(o.responsible) || '—'}</span>
         ${total > 0 ? `<span class="order-meta-item" style="font-weight:700;color:var(--accent);">${icon('coins')} ${paid.toLocaleString('ru')} / ${total.toLocaleString('ru')} ₴</span>` : ''}
         ${!compact && left > 0 ? `<span class="order-meta-item" style="font-weight:800;color:var(--red);">Осталось ${left.toLocaleString('ru')} ₴</span>` : ''}
+        ${!compact && overpaid > 0 ? `<span class="order-meta-item" style="font-weight:800;color:var(--accent);">Переплата ${overpaid.toLocaleString('ru')} ₴</span>` : ''}
       </div>
     </div>
   `;
