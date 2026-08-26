@@ -256,7 +256,8 @@ export default {
       if (isNew && !canCreateOrders) {
         return Response.json({ ok: false, error: 'Forbidden' }, { status: 403, headers: cors });
       }
-      if (!isNew && authedRole === 'junior') {
+      const canManageOrderPayments = workerHasPermission(liveWorker, 'order_payments_manage');
+      if (!isNew && authedRole === 'junior' && !canManageOrderPayments) {
         return Response.json({ ok: false, error: 'Forbidden' }, { status: 403, headers: cors });
       }
       if (!isNew && !orderBody.id) {
@@ -276,7 +277,7 @@ export default {
         }
       }
 
-      if (!isNew && (authedRole === 'senior' || authedRole === 'extra')) {
+      if (!isNew && (authedRole === 'senior' || authedRole === 'extra' || authedRole === 'junior')) {
         const currentWorker = await getWorkerByName(session.workerName, sb, sbHeaders);
         if (!(await isOwnOrderForSession(previousOrder, session, sb, sbHeaders))) {
           return Response.json({ ok: false, error: 'Forbidden' }, { status: 403, headers: cors });

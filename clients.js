@@ -70,13 +70,16 @@ function formatClientOrderCarLine(order, licenseLabel = 'госномер') {
 }
 
 function getClientStatementTotals(rows) {
-  return (rows || []).reduce((totals, row) => {
+  const totals = (rows || []).reduce((totals, row) => {
     totals.total += Number(row?.total) || 0;
     totals.paid += Number(row?.paid) || 0;
     totals.left += Number(row?.left) || 0;
     totals.overpaid += Number(row?.overpaid) || 0;
     return totals;
   }, { total: 0, paid: 0, left: 0, overpaid: 0 });
+  totals.netLeft = Math.max(0, totals.left - totals.overpaid);
+  totals.netOverpaid = Math.max(0, totals.overpaid - totals.left);
+  return totals;
 }
 
 function formatClientStatementMoney(value) {
@@ -298,12 +301,12 @@ function renderClientStatementPreview() {
       </div>
       <div class="client-statement-preview-item client-statement-preview-item--left">
         <div class="client-statement-preview-label">Остаток</div>
-        <div class="client-statement-preview-value">${formatClientStatementMoney(totals.left)}</div>
+        <div class="client-statement-preview-value">${formatClientStatementMoney(totals.netLeft)}</div>
       </div>
-      ${totals.overpaid > 0 ? `
+      ${totals.netOverpaid > 0 ? `
         <div class="client-statement-preview-item client-statement-preview-item--overpaid">
           <div class="client-statement-preview-label">Переплата</div>
-          <div class="client-statement-preview-value">${formatClientStatementMoney(totals.overpaid)}</div>
+          <div class="client-statement-preview-value">${formatClientStatementMoney(totals.netOverpaid)}</div>
         </div>
       ` : ''}
     </div>
@@ -340,8 +343,8 @@ function buildClientStatementPrintHtml(client, period, rows, options = {}) {
     </tr>
   `).join('');
   const rowsWord = pluralClientStatementRu(rows.length, ['замовлення', 'замовлення', 'замовлень']);
-  const totalLeftWords = formatClientStatementMoneyWordsUa(totals.left);
-  const totalOverpaidWords = formatClientStatementMoneyWordsUa(totals.overpaid);
+  const totalLeftWords = formatClientStatementMoneyWordsUa(totals.netLeft);
+  const totalOverpaidWords = formatClientStatementMoneyWordsUa(totals.netOverpaid);
 
   return `<!doctype html>
   <html lang="uk">
@@ -468,12 +471,12 @@ function buildClientStatementPrintHtml(client, period, rows, options = {}) {
           </tr>
           <tr>
             <td>Залишок:</td>
-            <td>${escapeHtml(formatClientStatementMoney(totals.left))}</td>
+            <td>${escapeHtml(formatClientStatementMoney(totals.netLeft))}</td>
           </tr>
-          ${hasOverpaid ? `
+          ${totals.netOverpaid > 0 ? `
             <tr>
               <td>Переплата:</td>
-              <td>${escapeHtml(formatClientStatementMoney(totals.overpaid))}</td>
+              <td>${escapeHtml(formatClientStatementMoney(totals.netOverpaid))}</td>
             </tr>
           ` : ''}
         </table>
@@ -482,7 +485,7 @@ function buildClientStatementPrintHtml(client, period, rows, options = {}) {
       <section class="amount-text">
         Всього ${rows.length} ${rowsWord}, на суму ${escapeHtml(formatClientStatementMoney(totals.total))}.
         <strong>Залишок до сплати: ${escapeHtml(totalLeftWords.charAt(0).toUpperCase() + totalLeftWords.slice(1))}</strong>
-        ${hasOverpaid ? `<strong>Переплата: ${escapeHtml(totalOverpaidWords.charAt(0).toUpperCase() + totalOverpaidWords.slice(1))}</strong>` : ''}
+        ${totals.netOverpaid > 0 ? `<strong>Переплата: ${escapeHtml(totalOverpaidWords.charAt(0).toUpperCase() + totalOverpaidWords.slice(1))}</strong>` : ''}
       </section>
 
       <div class="footer-line"></div>
@@ -970,7 +973,8 @@ function printClientOrderInvoice(orderId, documentType = 'invoice', options = {}
 
 function buildClientDebtCopyText(client) {
   const debtOrders = (client?.orders || []).filter(order => getOrderDebtLeft(order) > 0);
-  if (!debtOrders.length) return '';
+  const balance = getClientFinancialBalance(client);
+  if (!debtOrders.length || balance.debt <= 0) return '';
   const lines = debtOrders.map(order => {
     const services = formatOrderServiceTypeText(order?.serviceType || '') || '—';
     const total = getOrderClientTotalAmount(order);
@@ -984,8 +988,7 @@ function buildClientDebtCopyText(client) {
     ].join('\n');
   });
   const totalAmount = debtOrders.reduce((sum, order) => sum + getOrderClientTotalAmount(order), 0);
-  const totalDebt = debtOrders.reduce((sum, order) => sum + getOrderDebtLeft(order), 0);
-  return `${client.name || 'Клиент'}\n\n${lines.join('\n\n')}\n\nИтого по заказам: ${totalAmount.toLocaleString('ru')} ₴\nИтого долг: ${totalDebt.toLocaleString('ru')} ₴`;
+  return `${client.name || 'Клиент'}\n\n${lines.join('\n\n')}\n\nИтого по заказам: ${totalAmount.toLocaleString('ru')} ₴\nДолг до зачёта переплаты: ${balance.rawDebt.toLocaleString('ru')} ₴\nПереплата: ${balance.rawOverpaid.toLocaleString('ru')} ₴\nИтого долг: ${balance.debt.toLocaleString('ru')} ₴`;
 }
 
 async function copyClientDebtSummary(key) {
@@ -1010,7 +1013,7 @@ function renderClients() {
   const sort = document.getElementById('filter-client-sort')?.value || 'debt-desc';
   const debtFilter = document.getElementById('filter-client-debt')?.value || 'all';
 
-  let list = getClients().map(client => ({ ...client, debt: getClientDebtTotal(client), overpaid: getClientOverpaymentTotal(client) }));
+  let list = getClients().map(client => ({ ...client, ...getClientFinancialBalance(client) }));
 
   if (search) list = list.filter(c =>
     (c.name  || '').toLowerCase().includes(search) ||
@@ -1067,12 +1070,27 @@ function getOrderOverpayment(order) {
   return Math.max(0, getOrderClientPaidAmount(order) - getOrderClientTotalAmount(order));
 }
 
-function getClientDebtTotal(client) {
+function getClientDebtGrossTotal(client) {
   return (client?.orders || []).reduce((sum, order) => sum + getOrderDebtLeft(order), 0);
 }
 
 function getClientOverpaymentTotal(client) {
   return (client?.orders || []).reduce((sum, order) => sum + getOrderOverpayment(order), 0);
+}
+
+function getClientFinancialBalance(client) {
+  const rawDebt = getClientDebtGrossTotal(client);
+  const rawOverpaid = getClientOverpaymentTotal(client);
+  return {
+    rawDebt,
+    rawOverpaid,
+    debt: Math.max(0, rawDebt - rawOverpaid),
+    overpaid: Math.max(0, rawOverpaid - rawDebt),
+  };
+}
+
+function getClientDebtTotal(client) {
+  return getClientFinancialBalance(client).debt;
 }
 
 function openClientDetail(key) {
@@ -1083,8 +1101,9 @@ function openClientDetail(key) {
   if (!c) return;
 
   const totalSpent = c.orders.filter(isOrderFinanciallyActive).reduce((s, o) => s + getOrderClientTotalAmount(o), 0);
-  const totalDebt = getClientDebtTotal(c);
-  const totalOverpaid = getClientOverpaymentTotal(c);
+  const balance = getClientFinancialBalance(c);
+  const totalDebt = balance.debt;
+  const totalOverpaid = balance.overpaid;
   const debtOrders = c.orders.filter(o => getOrderDebtLeft(o) > 0);
   const clientTotalsHtml = `
     <div style="text-align:right;">
@@ -1110,13 +1129,13 @@ function openClientDetail(key) {
         <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;">
           ${currentRole === 'owner' || currentRole === 'manager' ? `<button class="btn-secondary" onclick="event.stopPropagation(); openClientNameEditModal('${escapeAttr(encodeURIComponent(c.phone || c.name))}')">${icon('pencil')} Клиент</button>` : ''}
           ${canPrintClientStatement() ? `<button class="btn-secondary" onclick="event.stopPropagation(); openClientStatementModal('${escapeAttr(encodeURIComponent(c.phone || c.name))}')">${icon('printer')} Счет</button>` : ''}
-          ${debtOrders.length ? `<button class="btn-secondary" onclick="event.stopPropagation(); copyClientDebtSummary('${escapeAttr(encodeURIComponent(c.phone || c.name))}')">${icon('copy')} Скопировать</button>` : ''}
+          ${totalDebt > 0 && debtOrders.length ? `<button class="btn-secondary" onclick="event.stopPropagation(); copyClientDebtSummary('${escapeAttr(encodeURIComponent(c.phone || c.name))}')">${icon('copy')} Скопировать</button>` : ''}
         ${clientTotalsHtml}
         </div>
       </div>
     </div>
 
-    ${debtOrders.length ? `
+    ${totalDebt > 0 && debtOrders.length ? `
       <div class="detail-section">
         <div class="detail-section-title">${icon('alert-triangle')} Заказы с долгом (${debtOrders.length})</div>
         <div style="display:flex;flex-direction:column;gap:10px;">

@@ -184,15 +184,35 @@ function canMarkWorkerDone() {
 }
 
 function canQuickConfirmOrderAmounts(order) {
-  const currentWorker = typeof getCurrentWorkerRecord === 'function' ? getCurrentWorkerRecord() : null;
-  const currentName = currentWorker?.name || currentWorkerName;
-  const isAssignedSpecialist = getOrderSpecialServiceAssignedWorker(order, 'tatu') === currentName
-    || getOrderSpecialServiceAssignedWorker(order, 'toning') === currentName;
   return currentUserHasPermission('order_payments_manage', currentUserCanActAsSenior())
-    && currentUserCanActAsSenior()
-    && (order?.responsible === currentName || isAssignedSpecialist)
+    && isCurrentWorkerPaymentRelatedOrder(order)
     && isOrderFinanciallyActive(order)
     && !order?.workerDone;
+}
+
+function isCurrentWorkerPaymentRelatedOrder(order) {
+  if (!order) return false;
+  const currentWorker = typeof getCurrentWorkerRecord === 'function' ? getCurrentWorkerRecord() : null;
+  const currentNames = [
+    currentWorker?.name,
+    currentWorker?.alias,
+    currentWorkerName,
+  ].map(value => String(value || '').trim().toLowerCase()).filter(Boolean);
+  const orderWorkers = [
+    order.responsible,
+    order.responsible_worker,
+    order.assistant,
+    order.assistant_worker,
+    order.extraAssistant,
+    order.extra_assistant,
+    getOrderSpecialServiceAssignedWorker(order, 'tatu'),
+    getOrderSpecialServiceAssignedWorker(order, 'toning'),
+    order.tatuResponsible,
+    order.tatu_responsible,
+    order.toningResponsible,
+    order.toning_responsible,
+  ].map(value => String(value || '').trim().toLowerCase()).filter(Boolean);
+  return currentNames.some(name => orderWorkers.includes(name));
 }
 
 function canCurrentUserOpenOrderModal(order) {
@@ -246,7 +266,7 @@ function canCurrentUserManageOrderPayments(order) {
   if (!order) return currentRole === 'owner' || currentRole === 'manager' || currentUserHasPermission('order_payments_manage', currentUserCanActAsSenior());
   if (currentRole === 'owner' || currentRole === 'manager') return true;
   return currentUserHasPermission('order_payments_manage', currentUserCanActAsSenior())
-    && order.responsible === currentWorkerName;
+    && isCurrentWorkerPaymentRelatedOrder(order);
 }
 
 function canCurrentUserRemoveOrderPayments() {
